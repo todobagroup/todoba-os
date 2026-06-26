@@ -1,0 +1,4 @@
+backend/.venv/
+backend/**pycache**/
+*.pyc
+.vscode/

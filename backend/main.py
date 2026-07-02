@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from pathlib import Path
+from brain_engine import BrainEngine
 
 app = FastAPI()
 
@@ -37,3 +38,16 @@ def brain():
         </body>
     </html>
     """
+
+
+@app.get("/memory")
+def memory():
+
+    brain = BrainEngine()
+
+    files = brain.list_memory()
+
+    return {
+        "memory_count": len(files),
+        "files": [str(f) for f in files]
+    }

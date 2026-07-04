@@ -1,16 +1,20 @@
-from pathlib import Path
+from backend.brain.memory import memory_engine
+from backend.brain.models.experience import Experience
+from backend.brain.planner import planner
+from backend.brain.task_queue import task_queue
 
 
 class BrainEngine:
+    def process(self, experience: Experience):
+        memory_engine.save(experience)
 
-    def __init__(self):
-        self.brain_path = Path("backend/brain")
+        task = planner.plan(experience)
 
-    def list_memory(self):
+        if task is not None:
+            memory_engine.save(task)
+            task_queue.add(task.task_id)
 
-        memories = []
+        return task
 
-        for file in self.brain_path.rglob("*.md"):
-            memories.append(file)
 
-        return memories
+brain_engine = BrainEngine()

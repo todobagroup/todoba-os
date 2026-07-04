@@ -1,25 +1,27 @@
-from backend.brain.models.experience import Experience
-
-
 class MemoryEngine:
     def __init__(self):
-        self.memories: list[Experience] = []
+        self._objects = {}
 
-    def remember(self, experience: Experience) -> Experience:
-        self.memories.append(experience)
-        return experience
+    def save(self, obj):
+        object_id = getattr(obj, "task_id", None)
 
-    def list_memories(self) -> list[Experience]:
-        return self.memories
+        if object_id is None:
+            object_id = getattr(obj, "experience_id", None)
 
-    def recall(self, keyword: str) -> list[Experience]:
-        results = []
+        if object_id is None:
+            raise ValueError("Object has no unique id.")
 
-        for memory in self.memories:
-            if keyword.lower() in memory.content.lower():
-                results.append(memory)
+        self._objects[object_id] = obj
+        return obj
 
-        return results
+    def get(self, object_id):
+        return self._objects.get(object_id)
+
+    def list(self):
+        return list(self._objects.values())
+
+    def delete(self, object_id):
+        self._objects.pop(object_id, None)
 
 
 memory_engine = MemoryEngine()

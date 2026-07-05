@@ -2,3 +2,7 @@ backend/.venv/
 backend/**pycache**/
 *.pyc
 .vscode/
+
+.env
+todoba.session
+todoba.session-journal

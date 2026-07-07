@@ -27,7 +27,7 @@ class ExecutionPlan:
     sl: float
     tp: float
 
-    lot: float
+    lot: Optional[float]
 
     magic_number: int
 

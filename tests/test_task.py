@@ -7,14 +7,12 @@ sys.path.insert(0, str(ROOT_DIR))
 from datetime import datetime
 
 from backend.task.task import Task
-from backend.task.task_queue import TaskQueue
+from backend.task.task_status import TaskStatus
 
 
 def main():
 
-    print("=== TASK QUEUE TEST ===")
-
-    queue = TaskQueue()
+    print("=== TASK TEST ===")
 
     task = Task(
         task_type="trade",
@@ -22,15 +20,18 @@ def main():
         created_at=datetime.now(),
     )
 
-    queue.push(task)
+    print(task.status)
 
-    print(queue.size())
+    task.status = TaskStatus.QUEUED
+    print(task.status)
 
-    result = queue.pop()
+    task.status = TaskStatus.RUNNING
+    print(task.status)
 
-    print(result.task_type)
+    task.status = TaskStatus.COMPLETED
+    print(task.status)
 
-    print(queue.size() == 0)
+    print(task.status == TaskStatus.COMPLETED)
 
 
 if __name__ == "__main__":

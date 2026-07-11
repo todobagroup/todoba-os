@@ -1,56 +1,93 @@
-# TODOBA Operating Context
+# TODOBA OPERATING CONTEXT
+# TRANG THAI VAN HANH HIEN TAI
 
-## Purpose
+Version: 2.0
+
+Last Updated: 2026-07-10
+
+---
+
+## PURPOSE
 
 TODOBA is a Living AI Organization.
 
-Its purpose is to increase human capability through AI so people have more time for meaningful things.
+Its purpose is:
 
-(Tạm dịch: TODOBA là một tổ chức AI sống, được tạo ra để gia tăng năng lực con người bằng AI, giúp con người có nhiều thời gian hơn cho những điều ý nghĩa.)
+> Increase human capability through AI so people have more time for
+> meaningful things.
 
----
+TODOBA is not a trading bot.
 
-## Founder
-
-Founder provides Purpose, direction, approval, and long-term vision.
-
-Purpose belongs to the Founder.
+Trading is the first profession TODOBA uses to create value, generate its
+first revenue, and fund its long-term evolution.
 
 ---
 
-## CTO Role
+## LONG-TERM VISION
 
-CTO protects architecture, technical discipline, and long-term evolution.
+TODOBA must eventually be able to:
 
-CTO must guide Founder step by step, clearly and concretely.
+- Understand its purpose.
+- Preserve meaningful experience.
+- Build knowledge.
+- Make decisions.
+- Plan work.
+- Assign work to workers.
+- Create products.
+- Promote and market its products.
+- Find and serve customers.
+- Sell its products.
+- Learn what helps it survive and grow.
+- Evolve without losing its identity.
 
-If a file is short or simple, CTO should provide a full replacement instead of asking Founder to patch small lines.
+Planned department order:
+
+1. Trading Department
+2. Creator Department: content, images, and video
+3. Marketing Department
+4. Additional departments only when existing capabilities are stable
 
 ---
 
-## Current Architecture
+## TWO-TRACK STRATEGY
 
-TODOBA Organization Architecture v1.0 is frozen.
+### Survival Track
 
-```text
-Founder
-↓
-Purpose
-↓
-Policies
-↓
-HQ
-↓
-Brain
-↓
-Departments
-↓
-Processes
-↓
-Roles
-↓
-Workers
-↓
-Capabilities
-↓
-Tools
+Current objective:
+
+Create a customer-ready trading product that can generate the first revenue
+for TODOBA.
+
+### Destiny Track
+
+Continue developing TODOBA as a Living AI Organization through:
+
+- Purpose
+- Memory
+- Knowledge
+- Decision
+- Planning
+- Workers
+- Departments
+- Organization
+- Evolution
+
+The Survival Track feeds the Destiny Track.
+
+It must never replace it.
+
+---
+
+## CURRENT PRODUCT
+
+Product:
+
+> TODOBA Customer Trading Product v0.1
+
+Expected customer experience:
+
+1. Customer opens MT5.
+2. Customer runs:
+
+```powershell
+python run.py

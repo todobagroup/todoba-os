@@ -11,6 +11,7 @@ from backend.trading.broker.broker_symbol_resolver import resolve_broker_symbol
 from backend.trading.execution.execution_validator import ExecutionValidator
 from backend.trading.broker.mt5_order_builder import MT5OrderBuilder
 from backend.trading.broker.mt5_sender import MT5Sender
+from backend.trading.lifecycle.trade_record_builder import TradeRecordBuilder
 
 
 class LiveExecutionPipeline:
@@ -86,11 +87,20 @@ class LiveExecutionPipeline:
             comment=plan.comment,
         )
 
-        result = MT5Sender().send(request)
+        order_result = MT5Sender().send(request)
 
-        if not result.success:
+        if not order_result.success:
             raise RuntimeError(
-                f"MT5 order failed: retcode={result.retcode}, comment={result.comment}"
+                f"MT5 order failed: retcode={order_result.retcode}, "
+                f"comment={order_result.comment}"
             )
 
-        return result
+        trade_record = TradeRecordBuilder().from_order_result(
+            trade_id="TRD-000001",
+            symbol=plan.symbol,
+            action=order_type,
+            volume=lot,
+            order_result=order_result,
+        )
+
+        return trade_record

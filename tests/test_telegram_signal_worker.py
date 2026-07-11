@@ -1,52 +1,92 @@
-import sys
-from pathlib import Path
+"""
+Tests for TODOBA TelegramSignalWorker.
+"""
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT_DIR))
+from datetime import datetime, timezone
 
+import pytest
 
-from datetime import datetime
-
-from backend.workers.telegram.telegram_signal_worker import TelegramSignalWorker
-from backend.trading.signal.signal_gateway import SignalGateway
-from backend.trading.signal.signal_queue import SignalQueue
-from backend.trading.signal.incoming_signal import IncomingSignal
-
-
-def main():
-
-    print("=== TELEGRAM SIGNAL WORKER TEST ===")
-
-
-    queue = SignalQueue()
-
-    gateway = SignalGateway(queue)
+from backend.trading.signal.incoming_signal import (
+    IncomingSignal,
+)
+from backend.trading.signal.signal_gateway import (
+    SignalGateway,
+)
+from backend.trading.signal.signal_queue import (
+    SignalQueue,
+)
+from backend.workers.telegram.telegram_signal_worker import (
+    TelegramSignalWorker,
+)
 
 
-    worker = TelegramSignalWorker(gateway)
-
-
-    print(worker.start())
-
-
-    signal = IncomingSignal(
+def create_incoming_signal() -> IncomingSignal:
+    return IncomingSignal(
         source="telegram",
-        message="BUY GOLD SL 3330 TP 3345",
-        received_at=datetime.now(),
+        message=(
+            "BUY GOLD NOW\n"
+            "SL 3330\n"
+            "TP 3345"
+        ),
+        received_at=datetime.now(
+            timezone.utc
+        ),
+        sender="demo_channel",
+        chat_id=-100123,
+        message_id=500,
     )
 
 
-    print(worker.execute(signal))
+def test_worker_sends_signal_to_gateway():
+    queue = SignalQueue()
+    gateway = SignalGateway(queue)
+
+    worker = TelegramSignalWorker(
+        gateway
+    )
+
+    assert worker.start() is True
+
+    signal = create_incoming_signal()
+
+    assert worker.execute(signal) is True
+    assert queue.size() == 1
+    assert queue.pop() == signal
+
+    assert worker.stop() is True
 
 
-    print(queue.size())
+def test_worker_rejects_execution_when_stopped():
+    queue = SignalQueue()
+    gateway = SignalGateway(queue)
+
+    worker = TelegramSignalWorker(
+        gateway
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Worker is not running",
+    ):
+        worker.execute(
+            create_incoming_signal()
+        )
 
 
-    print(queue.pop().source == "telegram")
+def test_worker_rejects_invalid_task_type():
+    queue = SignalQueue()
+    gateway = SignalGateway(queue)
 
+    worker = TelegramSignalWorker(
+        gateway
+    )
 
-    print(worker.stop())
+    worker.start()
 
-
-if __name__ == "__main__":
-    main()
+    with pytest.raises(
+        TypeError,
+        match="requires IncomingSignal",
+    ):
+        worker.execute(
+            "not-an-incoming-signal"
+        )

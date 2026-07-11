@@ -1,30 +1,58 @@
-import sys
-from pathlib import Path
+"""
+Tests for TODOBA TelegramReceiver.
+"""
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT_DIR))
+import pytest
+
+from backend.workers.telegram.telegram_receiver import (
+    TelegramReceiver,
+)
 
 
-from backend.workers.telegram.telegram_receiver import TelegramReceiver
-
-
-def main():
-
-    print("=== TELEGRAM RECEIVER TEST ===")
-
+def test_receiver_creates_incoming_signal():
     receiver = TelegramReceiver()
 
     signal = receiver.receive(
         message="BUY GOLD NOW\nSL 3330\nTP 3345",
         sender="demo_channel",
+        sender_id=101,
+        chat_id=-100123,
+        message_id=500,
     )
 
-    print(signal)
+    assert signal.source == "telegram"
+    assert signal.sender == "demo_channel"
+    assert signal.sender_id == 101
+    assert signal.chat_id == -100123
+    assert signal.message_id == 500
 
-    print(signal.source == "telegram")
-    print(signal.sender == "demo_channel")
-    print(signal.message.startswith("BUY GOLD"))
+    assert signal.message.startswith(
+        "BUY GOLD"
+    )
+
+    assert signal.source_key() == (
+        -100123,
+        500,
+    )
 
 
-if __name__ == "__main__":
-    main()
+def test_receiver_trims_message():
+    receiver = TelegramReceiver()
+
+    signal = receiver.receive(
+        message="  BUY GOLD NOW\nSL 3330\nTP 3345  "
+    )
+
+    assert signal.message == (
+        "BUY GOLD NOW\nSL 3330\nTP 3345"
+    )
+
+
+def test_receiver_rejects_empty_message():
+    receiver = TelegramReceiver()
+
+    with pytest.raises(
+        ValueError,
+        match="Telegram message is required",
+    ):
+        receiver.receive("   ")

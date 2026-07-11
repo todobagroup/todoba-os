@@ -87,7 +87,8 @@ def main():
     result = dispatcher.dispatch_next()
 
     print(result)
-    print("Success:", result.success)
+    print("Trade ID:", result.trade_id)
+    print("Status:", result.status)
     print("Order:", result.order)
     print("Deal:", result.deal)
     print("Task status:", task.status)

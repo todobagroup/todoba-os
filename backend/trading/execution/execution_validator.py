@@ -7,6 +7,23 @@ Validates an order before sending to MT5.
 
 class ExecutionValidator:
 
+    MARKET_ORDERS = (
+        "BUY",
+        "SELL",
+    )
+
+    PENDING_ORDERS = (
+        "BUY LIMIT",
+        "SELL LIMIT",
+        "BUY STOP",
+        "SELL STOP",
+    )
+
+    SUPPORTED_ORDER_TYPES = (
+        *MARKET_ORDERS,
+        *PENDING_ORDERS,
+    )
+
     def validate(
         self,
         *,
@@ -19,37 +36,78 @@ class ExecutionValidator:
     ):
 
         if not symbol:
-            raise ValueError("Symbol is required.")
+            raise ValueError(
+                "Symbol is required."
+            )
 
         if volume <= 0:
-            raise ValueError("Volume must be greater than zero.")
+            raise ValueError(
+                "Volume must be greater than zero."
+            )
 
-        if order_type not in ("BUY", "SELL"):
-            raise ValueError("Unsupported order type.")
+        order_type = (
+            order_type
+            .strip()
+            .upper()
+        )
+
+        if (
+            order_type
+            not in self.SUPPORTED_ORDER_TYPES
+        ):
+            raise ValueError(
+                "Unsupported order type."
+            )
 
         if price <= 0:
-            raise ValueError("Invalid price.")
+            raise ValueError(
+                "Invalid price."
+            )
 
         if sl <= 0:
-            raise ValueError("Invalid stop loss.")
+            raise ValueError(
+                "Invalid stop loss."
+            )
 
         if tp <= 0:
-            raise ValueError("Invalid take profit.")
+            raise ValueError(
+                "Invalid take profit."
+            )
 
-        if order_type == "BUY":
+        buy_orders = (
+            "BUY",
+            "BUY LIMIT",
+            "BUY STOP",
+        )
+
+        sell_orders = (
+            "SELL",
+            "SELL LIMIT",
+            "SELL STOP",
+        )
+
+        if order_type in buy_orders:
 
             if sl >= price:
-                raise ValueError("BUY: SL must be below entry.")
+                raise ValueError(
+                    "BUY: SL must be below entry."
+                )
 
             if tp <= price:
-                raise ValueError("BUY: TP must be above entry.")
+                raise ValueError(
+                    "BUY: TP must be above entry."
+                )
 
-        if order_type == "SELL":
+        elif order_type in sell_orders:
 
             if sl <= price:
-                raise ValueError("SELL: SL must be above entry.")
+                raise ValueError(
+                    "SELL: SL must be above entry."
+                )
 
             if tp >= price:
-                raise ValueError("SELL: TP must be below entry.")
+                raise ValueError(
+                    "SELL: TP must be below entry."
+                )
 
         return True

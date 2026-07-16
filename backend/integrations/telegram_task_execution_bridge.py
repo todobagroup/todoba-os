@@ -1,30 +1,10 @@
 """
 TODOBA Telegram Task Execution Bridge
 
-Connects Telegram-produced organizational Tasks to the
-Trading Department Runtime.
+Converts approved Telegram signals into organizational
+Tasks and dispatches them through the Trading Department.
 
-Architecture:
-
-TelegramTaskProducer
-        ↓
-Organizational Task
-        ↓
-TradingRuntime
-        ↓
-TaskQueue
-        ↓
-TaskDispatcher
-        ↓
-WorkerRegistry
-        ↓
-TradingWorker
-        ↓
-Execution Pipeline
-
-The bridge owns Telegram translation and structured results.
-
-The TradingRuntime owns organizational trade execution.
+The bridge does not own trading infrastructure.
 """
 
 from dataclasses import dataclass
@@ -35,6 +15,9 @@ from backend.integrations.telegram_task_producer import (
     TelegramTaskProductionResult,
 )
 from backend.task.task import Task
+from backend.trading.department.trading_department import (
+    TradingDepartment,
+)
 from backend.trading.runtime.trading_runtime import (
     TradingRuntime,
 )
@@ -46,7 +29,7 @@ from backend.trading.signal.incoming_signal import (
 @dataclass(frozen=True)
 class TelegramTaskExecutionResult:
     """
-    Structured outcome of Telegram organizational execution.
+    Structured Telegram task execution result.
     """
 
     status: str
@@ -58,25 +41,24 @@ class TelegramTaskExecutionResult:
 
 class TelegramTaskExecutionBridge:
     """
-    Produce Telegram trading Tasks and dispatch them through
-    the TradingRuntime.
+    Dispatch Telegram-produced Tasks through Trading.
 
-    Telegram does not execute trades directly.
+    TradingDepartment is the preferred owner.
 
-    The bridge does not own:
-
-    - TaskQueue
-    - WorkerRegistry
-    - TradingWorker
-    - TaskDispatcher
-    - Execution Pipeline
+    Direct TradingRuntime injection remains temporarily
+    supported for migration compatibility.
     """
 
     def __init__(
         self,
         *,
         producer: TelegramTaskProducer,
-        runtime: TradingRuntime,
+        department: Optional[
+            TradingDepartment
+        ] = None,
+        runtime: Optional[
+            TradingRuntime
+        ] = None,
     ):
         if not isinstance(
             producer,
@@ -87,9 +69,40 @@ class TelegramTaskExecutionBridge:
                 "TelegramTaskProducer."
             )
 
-        if not isinstance(
-            runtime,
-            TradingRuntime,
+        if (
+            department is not None
+            and runtime is not None
+        ):
+            raise ValueError(
+                "Provide department or runtime, not both."
+            )
+
+        if (
+            department is None
+            and runtime is None
+        ):
+            raise ValueError(
+                "TelegramTaskExecutionBridge requires "
+                "TradingDepartment or TradingRuntime."
+            )
+
+        if (
+            department is not None
+            and not isinstance(
+                department,
+                TradingDepartment,
+            )
+        ):
+            raise TypeError(
+                "department must be TradingDepartment."
+            )
+
+        if (
+            runtime is not None
+            and not isinstance(
+                runtime,
+                TradingRuntime,
+            )
         ):
             raise TypeError(
                 "TelegramTaskExecutionBridge requires "
@@ -97,42 +110,41 @@ class TelegramTaskExecutionBridge:
             )
 
         self.producer = producer
-        self.runtime = runtime
+        self.department = department
 
-        # Temporary compatibility aliases.
-        #
-        # Existing code and tests may still inspect these
-        # attributes during the migration. The Bridge does not
-        # create or own them; TradingRuntime remains the owner.
-        self.queue = runtime.queue
-        self.registry = runtime.registry
-        self.worker = runtime.worker
-        self.dispatcher = runtime.dispatcher
+        self.runtime = (
+            department.runtime
+            if department is not None
+            else runtime
+        )
+
+        self.queue = self.runtime.queue
+        self.registry = self.runtime.registry
+        self.worker = self.runtime.worker
+        self.dispatcher = self.runtime.dispatcher
 
     @property
     def running(self) -> bool:
         """
-        Report the state of the TradingRuntime.
+        Report Trading execution state.
         """
 
         return self.runtime.running
 
     def start(self) -> bool:
         """
-        Start the TradingRuntime.
+        Start Runtime for migration compatibility.
 
-        This compatibility method will be removed from the
-        Bridge after runtime ownership migration is complete.
+        Production boot belongs to TradingDepartment.
         """
 
         return self.runtime.start()
 
     def stop(self) -> bool:
         """
-        Stop the TradingRuntime.
+        Stop Runtime for migration compatibility.
 
-        This compatibility method will be removed from the
-        Bridge after runtime ownership migration is complete.
+        Production shutdown belongs to TradingDepartment.
         """
 
         return self.runtime.stop()
@@ -141,13 +153,13 @@ class TelegramTaskExecutionBridge:
         self,
         incoming_signal: IncomingSignal,
         *,
-        has_open_position: bool,
+        open_position_count: int,
         spread_ok: bool,
         market_open: bool,
         risk_ok: bool,
     ) -> TelegramTaskExecutionResult:
         """
-        Produce and dispatch one organizational trading Task.
+        Produce and dispatch one organizational Task.
         """
 
         if not self.runtime.running:
@@ -157,7 +169,9 @@ class TelegramTaskExecutionBridge:
 
         production = self.producer.produce(
             incoming_signal,
-            has_open_position=has_open_position,
+            open_position_count=(
+                open_position_count
+            ),
             spread_ok=spread_ok,
             market_open=market_open,
             risk_ok=risk_ok,
@@ -173,15 +187,19 @@ class TelegramTaskExecutionBridge:
         task = production.task
 
         try:
-            execution_result = self.runtime.dispatch(
-                task
+            execution_result = (
+                self.runtime.dispatch(
+                    task
+                )
             )
 
             return TelegramTaskExecutionResult(
                 status="executed",
                 production=production,
                 task=task,
-                execution_result=execution_result,
+                execution_result=(
+                    execution_result
+                ),
             )
 
         except Exception as error:

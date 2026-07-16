@@ -50,11 +50,14 @@ class DemoExecutionPipeline:
         }
 
 
-def create_profile() -> TradingProfile:
+def create_profile(
+    *,
+    max_open_trades: int = 3,
+) -> TradingProfile:
     return TradingProfile(
         profile_name="telegram_bridge_test",
         risk_percent=1.0,
-        max_open_trades=1,
+        max_open_trades=max_open_trades,
         allowed_symbols=("XAUUSD",),
         lot_policy_name="FIXED_001",
     )
@@ -78,15 +81,24 @@ def create_signal() -> IncomingSignal:
     )
 
 
-def create_bridge():
-    execution_pipeline = DemoExecutionPipeline()
+def create_bridge(
+    *,
+    max_open_trades: int = 3,
+):
+    execution_pipeline = (
+        DemoExecutionPipeline()
+    )
 
     runtime = TradingRuntime(
         execution_pipeline=execution_pipeline
     )
 
     producer = TelegramTaskProducer(
-        create_profile()
+        create_profile(
+            max_open_trades=(
+                max_open_trades
+            )
+        )
     )
 
     bridge = TelegramTaskExecutionBridge(
@@ -110,7 +122,7 @@ def test_approved_signal_runs_through_runtime():
 
     result = bridge.execute(
         create_signal(),
-        has_open_position=False,
+        open_position_count=0,
         spread_ok=True,
         market_open=True,
         risk_ok=True,
@@ -118,27 +130,22 @@ def test_approved_signal_runs_through_runtime():
 
     assert result.status == "executed"
     assert result.task is not None
-
     assert (
         result.task.status
         == TaskStatus.COMPLETED
     )
-
     assert (
         result.task.worker
         == "TradingWorker"
     )
-
     assert (
         execution_pipeline.execute_count
         == 1
     )
-
     assert (
         result.execution_result["status"]
         == "DEMO_SUCCESS"
     )
-
     assert (
         result.execution_result["symbol"]
         == "XAUUSD"
@@ -147,16 +154,45 @@ def test_approved_signal_runs_through_runtime():
     assert runtime.stop() is True
 
 
-def test_decision_rejection_is_not_dispatched():
+def test_existing_positions_below_limit_are_dispatched():
     bridge, runtime, execution_pipeline = (
-        create_bridge()
+        create_bridge(
+            max_open_trades=3
+        )
     )
 
     runtime.start()
 
     result = bridge.execute(
         create_signal(),
-        has_open_position=True,
+        open_position_count=2,
+        spread_ok=True,
+        market_open=True,
+        risk_ok=True,
+    )
+
+    assert result.status == "executed"
+    assert result.task is not None
+    assert (
+        execution_pipeline.execute_count
+        == 1
+    )
+
+    runtime.stop()
+
+
+def test_position_limit_rejection_is_not_dispatched():
+    bridge, runtime, execution_pipeline = (
+        create_bridge(
+            max_open_trades=3
+        )
+    )
+
+    runtime.start()
+
+    result = bridge.execute(
+        create_signal(),
+        open_position_count=3,
         spread_ok=True,
         market_open=True,
         risk_ok=True,
@@ -166,9 +202,7 @@ def test_decision_rejection_is_not_dispatched():
         result.status
         == "decision_rejected"
     )
-
     assert result.task is None
-
     assert (
         execution_pipeline.execute_count
         == 0
@@ -186,7 +220,7 @@ def test_bridge_requires_runtime_start():
     ):
         bridge.execute(
             create_signal(),
-            has_open_position=False,
+            open_position_count=0,
             spread_ok=True,
             market_open=True,
             risk_ok=True,
@@ -219,7 +253,7 @@ def test_execution_failure_is_recorded():
 
     result = bridge.execute(
         create_signal(),
-        has_open_position=False,
+        open_position_count=0,
         spread_ok=True,
         market_open=True,
         risk_ok=True,
@@ -229,14 +263,11 @@ def test_execution_failure_is_recorded():
         result.status
         == "execution_failed"
     )
-
     assert result.task is not None
-
     assert (
         result.task.status
         == TaskStatus.FAILED
     )
-
     assert (
         "Demo execution failed."
         in result.errors

@@ -86,15 +86,18 @@ class TelegramTaskProducer:
             TradingProfile,
         ):
             raise TypeError(
-                "TelegramTaskProducer requires TradingProfile."
+                "TelegramTaskProducer requires "
+                "TradingProfile."
             )
 
         self.profile = profile
+
         self.decision_gateway = (
             decision_gateway
             if decision_gateway is not None
             else DecisionGateway()
         )
+
         self.signal_intent_adapter = (
             SignalIntentAdapter()
         )
@@ -103,16 +106,16 @@ class TelegramTaskProducer:
         self,
         incoming_signal: IncomingSignal,
         *,
-        has_open_position: bool,
+        open_position_count: int,
         spread_ok: bool,
         market_open: bool,
         risk_ok: bool,
     ) -> TelegramTaskProductionResult:
         """
-        Produce one approved trading Task.
+        Produce one approved organizational trading Task.
 
-        Rejected or malformed messages return structured
-        results and do not create a Task.
+        Existing trades are allowed while their count remains
+        below the profile's maximum open-trade limit.
         """
 
         if not isinstance(
@@ -120,7 +123,21 @@ class TelegramTaskProducer:
             IncomingSignal,
         ):
             raise TypeError(
-                "TelegramTaskProducer requires IncomingSignal."
+                "TelegramTaskProducer requires "
+                "IncomingSignal."
+            )
+
+        if not isinstance(
+            open_position_count,
+            int,
+        ):
+            raise TypeError(
+                "open_position_count must be int."
+            )
+
+        if open_position_count < 0:
+            raise ValueError(
+                "open_position_count cannot be negative."
             )
 
         try:
@@ -153,8 +170,11 @@ class TelegramTaskProducer:
                 self.decision_gateway
                 .create_task_if_approved(
                     intent=intent,
-                    has_open_position=(
-                        has_open_position
+                    open_position_count=(
+                        open_position_count
+                    ),
+                    max_open_trades=(
+                        self.profile.max_open_trades
                     ),
                     spread_ok=spread_ok,
                     market_open=market_open,

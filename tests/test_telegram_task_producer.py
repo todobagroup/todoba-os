@@ -20,11 +20,14 @@ from backend.trading.signal.incoming_signal import (
 )
 
 
-def create_profile() -> TradingProfile:
+def create_profile(
+    *,
+    max_open_trades: int = 3,
+) -> TradingProfile:
     return TradingProfile(
         profile_name="telegram_task_test",
         risk_percent=1.0,
-        max_open_trades=1,
+        max_open_trades=max_open_trades,
         allowed_symbols=("XAUUSD",),
         lot_policy_name="FIXED_001",
     )
@@ -51,15 +54,13 @@ def test_approved_signal_creates_trade_task():
         create_profile()
     )
 
-    incoming_signal = create_incoming_signal(
-        "BUY GOLD NOW\n"
-        "SL 4095\n"
-        "TP 4125"
-    )
-
     result = producer.produce(
-        incoming_signal,
-        has_open_position=False,
+        create_incoming_signal(
+            "BUY GOLD NOW\n"
+            "SL 4095\n"
+            "TP 4125"
+        ),
+        open_position_count=0,
         spread_ok=True,
         market_open=True,
         risk_ok=True,
@@ -69,27 +70,51 @@ def test_approved_signal_creates_trade_task():
     assert result.task is not None
     assert result.task.task_type == "trade"
     assert result.task.status == TaskStatus.CREATED
-
     assert result.intent is not None
     assert result.intent.action == "BUY"
     assert result.intent.asset == "XAUUSD"
     assert result.task.payload == result.intent
 
 
-def test_decision_rejection_creates_no_task():
+def test_existing_positions_below_limit_are_allowed():
     producer = TelegramTaskProducer(
-        create_profile()
-    )
-
-    incoming_signal = create_incoming_signal(
-        "BUY GOLD NOW\n"
-        "SL 4095\n"
-        "TP 4125"
+        create_profile(
+            max_open_trades=3
+        )
     )
 
     result = producer.produce(
-        incoming_signal,
-        has_open_position=True,
+        create_incoming_signal(
+            "SELL GOLD NOW\n"
+            "SL 4125\n"
+            "TP 4095"
+        ),
+        open_position_count=2,
+        spread_ok=True,
+        market_open=True,
+        risk_ok=True,
+    )
+
+    assert result.status == "task_created"
+    assert result.task is not None
+    assert result.decision is not None
+    assert result.decision.approved is True
+
+
+def test_position_limit_rejection_creates_no_task():
+    producer = TelegramTaskProducer(
+        create_profile(
+            max_open_trades=3
+        )
+    )
+
+    result = producer.produce(
+        create_incoming_signal(
+            "BUY GOLD NOW\n"
+            "SL 4095\n"
+            "TP 4125"
+        ),
+        open_position_count=3,
         spread_ok=True,
         market_open=True,
         risk_ok=True,
@@ -98,13 +123,18 @@ def test_decision_rejection_creates_no_task():
     assert result.status == "decision_rejected"
     assert result.task is None
     assert result.decision is not None
+    assert result.decision.approved is False
+    assert (
+        "Maximum open trade limit reached"
+        in result.decision.reason
+    )
 
 
 def test_profile_rejection_creates_no_task():
     profile = TradingProfile(
         profile_name="no_symbols",
         risk_percent=1.0,
-        max_open_trades=1,
+        max_open_trades=3,
         allowed_symbols=(),
         lot_policy_name="FIXED_001",
     )
@@ -113,15 +143,13 @@ def test_profile_rejection_creates_no_task():
         profile
     )
 
-    incoming_signal = create_incoming_signal(
-        "BUY GOLD NOW\n"
-        "SL 4095\n"
-        "TP 4125"
-    )
-
     result = producer.produce(
-        incoming_signal,
-        has_open_position=False,
+        create_incoming_signal(
+            "BUY GOLD NOW\n"
+            "SL 4095\n"
+            "TP 4125"
+        ),
+        open_position_count=0,
         spread_ok=True,
         market_open=True,
         risk_ok=True,
@@ -137,13 +165,11 @@ def test_invalid_message_creates_no_task():
         create_profile()
     )
 
-    incoming_signal = create_incoming_signal(
-        "HELLO TODOBA"
-    )
-
     result = producer.produce(
-        incoming_signal,
-        has_open_position=False,
+        create_incoming_signal(
+            "HELLO TODOBA"
+        ),
+        open_position_count=0,
         spread_ok=True,
         market_open=True,
         risk_ok=True,

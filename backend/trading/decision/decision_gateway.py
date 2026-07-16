@@ -4,14 +4,20 @@ TODOBA Decision Gateway
 Stops rejected intents before Task creation.
 """
 
-from backend.trading.decision.decision_engine import TradingDecisionEngine
-from backend.trading.intent.intent_task_adapter import IntentTaskAdapter
+from backend.trading.decision.decision_engine import (
+    TradingDecisionEngine,
+)
+from backend.trading.intent.intent_task_adapter import (
+    IntentTaskAdapter,
+)
 
 
 class DecisionGateway:
+    """
+    Approves trading intents before Task creation.
+    """
 
     def __init__(self):
-
         self.engine = TradingDecisionEngine()
         self.adapter = IntentTaskAdapter()
 
@@ -19,14 +25,15 @@ class DecisionGateway:
         self,
         *,
         intent,
-        has_open_position,
-        spread_ok,
-        market_open,
-        risk_ok,
+        open_position_count: int,
+        max_open_trades: int,
+        spread_ok: bool,
+        market_open: bool,
+        risk_ok: bool,
     ):
-
         decision = self.engine.decide(
-            has_open_position=has_open_position,
+            open_position_count=open_position_count,
+            max_open_trades=max_open_trades,
             spread_ok=spread_ok,
             market_open=market_open,
             risk_ok=risk_ok,
@@ -35,6 +42,8 @@ class DecisionGateway:
         if not decision.approved:
             return None, decision
 
-        task = self.adapter.to_task(intent)
+        task = self.adapter.to_task(
+            intent
+        )
 
         return task, decision

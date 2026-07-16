@@ -1,33 +1,25 @@
 """
 TODOBA Trading Runtime
 
-Owns the organizational execution infrastructure of the
-Trading Department.
-
-Architecture:
-
-Organizational Task
-        ↓
-TaskQueue
-        ↓
-TaskDispatcher
-        ↓
-WorkerRegistry
-        ↓
-TradingWorker
-        ↓
-Execution Pipeline
-
-Integrations such as Telegram must not create these
-components themselves.
+Owns organizational task execution for the Trading
+Department.
 """
 
-from typing import Any
+from typing import Any, Optional
 
 from backend.task.task import Task
 from backend.task.task_dispatcher import TaskDispatcher
 from backend.task.task_queue import TaskQueue
 from backend.task.task_status import TaskStatus
+from backend.trading.lifecycle.open_trade_persistence import (
+    OpenTradePersistence,
+)
+from backend.trading.lifecycle.trade_record import (
+    TradeRecord,
+)
+from backend.trading.lifecycle.trade_timeline_service import (
+    TradeTimelineService,
+)
 from backend.workers.trading.trading_worker import (
     TradingWorker,
 )
@@ -39,33 +31,56 @@ from backend.workers.worker_registry import (
 class TradingRuntime:
     """
     Execute organizational trading tasks.
-
-    The runtime owns:
-
-    - TaskQueue
-    - WorkerRegistry
-    - TradingWorker
-    - TaskDispatcher
-
-    It does not:
-
-    - parse Telegram messages;
-    - make trading decisions;
-    - connect to Telegram;
-    - create MT5 execution pipelines;
-    - monitor completed positions.
     """
 
     def __init__(
         self,
         *,
         execution_pipeline,
+        open_trade_persistence: Optional[
+            OpenTradePersistence
+        ] = None,
+        timeline_service: Optional[
+            TradeTimelineService
+        ] = None,
     ):
         if execution_pipeline is None:
             raise ValueError(
                 "TradingRuntime requires "
                 "an execution pipeline."
             )
+
+        if (
+            open_trade_persistence is not None
+            and not isinstance(
+                open_trade_persistence,
+                OpenTradePersistence,
+            )
+        ):
+            raise TypeError(
+                "open_trade_persistence must be "
+                "OpenTradePersistence."
+            )
+
+        if (
+            timeline_service is not None
+            and not isinstance(
+                timeline_service,
+                TradeTimelineService,
+            )
+        ):
+            raise TypeError(
+                "timeline_service must be "
+                "TradeTimelineService."
+            )
+
+        self.open_trade_persistence = (
+            open_trade_persistence
+        )
+
+        self.timeline_service = (
+            timeline_service
+        )
 
         self.queue = TaskQueue()
         self.registry = WorkerRegistry()
@@ -87,10 +102,6 @@ class TradingRuntime:
         self.running = False
 
     def start(self) -> bool:
-        """
-        Start the Trading Department execution runtime.
-        """
-
         if self.running:
             return True
 
@@ -100,10 +111,6 @@ class TradingRuntime:
         return True
 
     def stop(self) -> bool:
-        """
-        Stop the Trading Department execution runtime.
-        """
-
         if not self.running:
             return True
 
@@ -116,10 +123,6 @@ class TradingRuntime:
         self,
         task: Task,
     ) -> Any:
-        """
-        Queue and execute one organizational trading task.
-        """
-
         if not self.running:
             raise RuntimeError(
                 "TradingRuntime is not running."
@@ -141,8 +144,31 @@ class TradingRuntime:
 
         task.status = TaskStatus.QUEUED
 
-        self.queue.push(
-            task
+        self.queue.push(task)
+
+        execution_result = (
+            self.dispatcher.dispatch_next()
         )
 
-        return self.dispatcher.dispatch_next()
+        if isinstance(
+            execution_result,
+            TradeRecord,
+        ):
+
+            if (
+                self.open_trade_persistence
+                is not None
+            ):
+                self.open_trade_persistence.persist(
+                    execution_result
+                )
+
+            if (
+                self.timeline_service
+                is not None
+            ):
+                self.timeline_service.start_trade(
+                    execution_result.trade_id
+                )
+
+        return execution_result

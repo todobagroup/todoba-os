@@ -2,19 +2,7 @@
 TODOBA Trade Lifecycle Monitor
 
 Observes registered MT5 positions and completes the
-organizational trading lifecycle when a position closes.
-
-Architecture:
-
-OpenTradeRegistry
-        ↓
-MT5 positions_get
-        ↓
-MT5TradeHistoryReader
-        ↓
-TradeReflectionPipeline
-        ↓
-Brain Memory
+organizational trading lifecycle after a position closes.
 """
 
 from dataclasses import dataclass
@@ -25,9 +13,11 @@ import MetaTrader5 as mt5
 from backend.trading.lifecycle.mt5_trade_history_reader import (
     MT5TradeHistoryReader,
 )
+from backend.trading.lifecycle.open_trade_persistence import (
+    OpenTradePersistence,
+)
 from backend.trading.lifecycle.open_trade_registry import (
     OpenTradeRegistry,
-    TrackedTrade,
 )
 from backend.trading.lifecycle.trade_reflection_pipeline import (
     TradeReflectionPipeline,
@@ -38,10 +28,6 @@ from backend.trading.lifecycle.trade_status import TradeStatus
 
 @dataclass(frozen=True)
 class TradeLifecycleMonitorResult:
-    """
-    Result of checking one registered trade.
-    """
-
     status: str
     trade_id: str
     position_id: int
@@ -53,11 +39,7 @@ class TradeLifecycleMonitorResult:
 
 class TradeLifecycleMonitor:
     """
-    Monitor open trades and trigger reflection after closure.
-
-    This monitor performs one observation cycle at a time.
-    Scheduling and repetition belong to a future runtime
-    service or worker.
+    Monitor open trades and complete their lifecycle.
     """
 
     def __init__(
@@ -66,6 +48,9 @@ class TradeLifecycleMonitor:
         registry: OpenTradeRegistry,
         history_reader: MT5TradeHistoryReader,
         reflection_pipeline: TradeReflectionPipeline,
+        persistence: Optional[
+            OpenTradePersistence
+        ] = None,
         mt5_module=mt5,
     ):
         if not isinstance(
@@ -95,37 +80,30 @@ class TradeLifecycleMonitor:
                 "TradeReflectionPipeline."
             )
 
+        if (
+            persistence is not None
+            and not isinstance(
+                persistence,
+                OpenTradePersistence,
+            )
+        ):
+            raise TypeError(
+                "persistence must be "
+                "OpenTradePersistence."
+            )
+
         self.registry = registry
         self.history_reader = history_reader
         self.reflection_pipeline = (
             reflection_pipeline
         )
+        self.persistence = persistence
         self.mt5 = mt5_module
 
     def check_trade(
         self,
         trade_id: str,
     ) -> TradeLifecycleMonitorResult:
-        """
-        Check one registered trade.
-
-        Possible statuses:
-
-        open
-            Position still exists in MT5.
-
-        awaiting_history
-            Position disappeared, but closing deal is not yet
-            available in MT5 history.
-
-        reflected
-            Position closed, reflection completed, and memory
-            was preserved.
-
-        monitor_failed
-            MT5 observation or reflection failed.
-        """
-
         tracked_trade = self.registry.get(
             trade_id
         )
@@ -185,9 +163,14 @@ class TradeLifecycleMonitor:
                 )
             )
 
-            self.registry.remove(
-                trade_id
-            )
+            if self.persistence is not None:
+                self.persistence.remove(
+                    trade_id
+                )
+            else:
+                self.registry.remove(
+                    trade_id
+                )
 
             return TradeLifecycleMonitorResult(
                 status="reflected",
@@ -211,10 +194,6 @@ class TradeLifecycleMonitor:
     def check_all(
         self,
     ) -> list[TradeLifecycleMonitorResult]:
-        """
-        Run one monitoring cycle for every registered trade.
-        """
-
         trade_ids = [
             tracked.trade_record.trade_id
             for tracked in self.registry.list()

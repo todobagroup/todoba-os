@@ -3,17 +3,21 @@ TODOBA Signal Intent Adapter
 
 Converts an approved trading Signal into TradingIntent.
 
-The adapter separates signal interpretation from
-organizational decision and task creation.
+The adapter preserves the complete order type from
+Signal through organizational execution.
 """
 
-from backend.trading.intent.trading_intent import TradingIntent
-from backend.trading.models.signal import Signal
+from backend.trading.intent.trading_intent import (
+    TradingIntent,
+)
+from backend.trading.models.signal import (
+    Signal,
+)
 
 
 class SignalIntentAdapter:
     """
-    Convert the trading domain Signal into TradingIntent.
+    Convert a trading Signal into TradingIntent.
 
     This adapter does not:
     - approve the intent;
@@ -25,23 +29,16 @@ class SignalIntentAdapter:
         self,
         signal: Signal,
     ) -> TradingIntent:
-        if not isinstance(signal, Signal):
+        if not isinstance(
+            signal,
+            Signal,
+        ):
             raise TypeError(
                 "SignalIntentAdapter requires Signal."
             )
 
-        action = signal.order_type.replace(
-            " NOW",
-            "",
-        ).strip().upper()
-
-        if action not in ("BUY", "SELL"):
-            raise ValueError(
-                f"Unsupported trading action: {action}"
-            )
-
         return TradingIntent(
-            action=action,
+            order_type=signal.order_type,
             asset=signal.symbol,
             entry=signal.entry,
             sl=signal.sl,

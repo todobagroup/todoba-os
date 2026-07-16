@@ -41,7 +41,7 @@ class DemoExecutionPipeline:
 
 def create_trade_task() -> Task:
     intent = TradingIntent(
-        action="BUY",
+        order_type="BUY NOW",
         asset="XAUUSD",
         sl=4095.0,
         tp=4125.0,

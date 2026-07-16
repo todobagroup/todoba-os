@@ -6,3 +6,4 @@ backend/**pycache**/
 .env
 todoba.session
 todoba.session-journal
+data/

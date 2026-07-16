@@ -8,10 +8,10 @@ DRY_RUN
 
 LIVE_DEMO
     Produce an organizational Task and dispatch it through
-    TradingRuntime to MT5 Demo.
+    the Trading Department to MT5 Demo.
 
 Telegram never calls MT5Sender directly.
-Telegram does not own Trading execution infrastructure.
+Telegram does not own Trading infrastructure.
 """
 
 import asyncio
@@ -21,7 +21,9 @@ from dataclasses import asdict, is_dataclass
 import MetaTrader5 as mt5
 from telethon import events
 
+from backend.brain.memory import memory_engine
 from backend.config import (
+    BASE_DIR,
     MT5_BROKER_GOLD_SYMBOL,
     MT5_MAX_SPREAD_POINTS,
     TELEGRAM_EXECUTION_MODE,
@@ -40,17 +42,31 @@ from backend.integrations.telegram_trading_pipeline import (
 )
 from backend.trading.broker.mt5_client import MT5Client
 from backend.trading.broker.mt5_safety import MT5Safety
+from backend.trading.department.runtime_health_factory import (
+    RuntimeHealthFactory,
+)
+from backend.trading.department.trading_department import (
+    TradingDepartment,
+)
 from backend.trading.execution.live_execution_pipeline import (
     LiveExecutionPipeline,
 )
 from backend.trading.profile.trading_profile import (
     TradingProfile,
 )
-from backend.trading.runtime.trading_runtime import (
-    TradingRuntime,
+from backend.trading.runtime.runtime_health_console import (
+    print_runtime_health,
 )
 from backend.workers.telegram.telegram_receiver import (
     TelegramReceiver,
+)
+
+
+OPEN_TRADES_STORAGE_PATH = (
+    BASE_DIR
+    / "data"
+    / "trading"
+    / "open_trades.json"
 )
 
 
@@ -59,7 +75,7 @@ telegram_receiver = TelegramReceiver()
 trading_profile = TradingProfile(
     profile_name="telegram_demo_gold",
     risk_percent=1.0,
-    max_open_trades=1,
+    max_open_trades=10,
     allowed_symbols=("XAUUSD",),
     lot_policy_name="FIXED_001",
 )
@@ -79,17 +95,19 @@ live_execution_pipeline = LiveExecutionPipeline(
     },
 )
 
-trading_runtime = TradingRuntime(
-    execution_pipeline=(
-        live_execution_pipeline
-    )
+trading_department = TradingDepartment(
+    execution_pipeline=live_execution_pipeline,
+    open_trades_storage_path=(
+        OPEN_TRADES_STORAGE_PATH
+    ),
+    memory=memory_engine,
+    mt5_module=mt5,
+    lifecycle_interval_seconds=5.0,
 )
 
-task_execution_bridge = (
-    TelegramTaskExecutionBridge(
-        producer=telegram_task_producer,
-        runtime=trading_runtime,
-    )
+task_execution_bridge = TelegramTaskExecutionBridge(
+    producer=telegram_task_producer,
+    department=trading_department,
 )
 
 mt5_client = MT5Client()
@@ -145,9 +163,6 @@ def print_result(
 def read_demo_decision_context() -> dict:
     """
     Read the minimum MT5 context required by DecisionGateway.
-
-    This is an initial Demo capability, not the final
-    market-knowledge or risk-management engine.
     """
 
     mt5.symbol_select(
@@ -191,7 +206,10 @@ def read_demo_decision_context() -> dict:
     )
 
     if positions is None:
-        positions = ()
+        raise RuntimeError(
+            "Cannot read open MT5 positions: "
+            f"{mt5.last_error()}"
+        )
 
     market_open = (
         tick.bid > 0
@@ -201,19 +219,18 @@ def read_demo_decision_context() -> dict:
     )
 
     return {
-        "has_open_position": (
-            len(positions) > 0
+        "open_position_count": len(
+            positions
+        ),
+        "max_open_trades": (
+            trading_profile.max_open_trades
         ),
         "spread_ok": (
             spread_points
             <= MT5_MAX_SPREAD_POINTS
         ),
         "market_open": market_open,
-
-        # Demo capability only.
-        # Final account-aware Risk Engine remains future work.
         "risk_ok": True,
-
         "spread_points": spread_points,
         "bid": tick.bid,
         "ask": tick.ask,
@@ -261,10 +278,7 @@ async def new_message(event) -> None:
                 incoming_signal
             )
 
-            if (
-                result.get("status")
-                == "planned"
-            ):
+            if result.get("status") == "planned":
                 processed_message_keys.add(
                     source_key
                 )
@@ -280,8 +294,8 @@ async def new_message(event) -> None:
 
         result = task_execution_bridge.execute(
             incoming_signal,
-            has_open_position=(
-                context["has_open_position"]
+            open_position_count=(
+                context["open_position_count"]
             ),
             spread_ok=context["spread_ok"],
             market_open=context["market_open"],
@@ -330,61 +344,89 @@ async def main() -> None:
         f"{TELEGRAM_EXECUTION_MODE}"
     )
 
-    if TELEGRAM_EXECUTION_MODE == "LIVE_DEMO":
-        print(
-            f"MT5 Broker Gold Symbol: "
-            f"{MT5_BROKER_GOLD_SYMBOL}"
-        )
-
-        if not mt5_client.connect():
-            raise RuntimeError(
-                "TODOBA could not connect to MT5."
-            )
-
-        MT5Safety().validate()
-
-        trading_runtime.start()
-
-        account = mt5_client.get_account_info()
-
-        if account is None:
-            raise RuntimeError(
-                "TODOBA could not read MT5 account."
-            )
-
-        print("MT5 Connection: READY")
-        print(
-            f"MT5 Account: "
-            f"{account.login}"
-        )
-        print(
-            f"MT5 Server: "
-            f"{account.server}"
-        )
-        print("Trading Runtime: READY")
-
-        print(
-            "WARNING: LIVE_DEMO sends real orders "
-            "to the currently connected MT5 account."
-        )
-
-    else:
-        print("Live MT5 Orders: DISABLED")
-
-    await client.start()
-
-    print("Telegram Listener Running...")
+    department_started = False
 
     try:
+        if TELEGRAM_EXECUTION_MODE == "LIVE_DEMO":
+            print(
+                f"MT5 Broker Gold Symbol: "
+                f"{MT5_BROKER_GOLD_SYMBOL}"
+            )
+
+            if not mt5_client.connect():
+                raise RuntimeError(
+                    "TODOBA could not connect to MT5."
+                )
+
+            MT5Safety().validate()
+
+            account = mt5_client.get_account_info()
+
+            if account is None:
+                raise RuntimeError(
+                    "TODOBA could not read MT5 account."
+                )
+
+            restored_trade_count = (
+                await trading_department.start()
+            )
+
+            department_started = True
+
+            health_report = RuntimeHealthFactory().build(
+                department=trading_department,
+                restored_trade_count=(
+                    restored_trade_count
+                ),
+                mt5_ready=mt5_client.is_connected(),
+            )
+
+            print("MT5 Connection: READY")
+            print(
+                f"MT5 Account: "
+                f"{account.login}"
+            )
+            print(
+                f"MT5 Server: "
+                f"{account.server}"
+            )
+            print(
+                f"Maximum Open Trades: "
+                f"{trading_profile.max_open_trades}"
+            )
+
+            print_runtime_health(
+                health_report
+            )
+
+            if not health_report.healthy:
+                raise RuntimeError(
+                    "TODOBA system health check failed."
+                )
+
+            print(
+                "WARNING: LIVE_DEMO sends real orders "
+                "to the currently connected MT5 account."
+            )
+
+        else:
+            print("Live MT5 Orders: DISABLED")
+
+        await client.start()
+
+        print("Telegram Listener Running...")
+
         await client.run_until_disconnected()
 
     finally:
-        if TELEGRAM_EXECUTION_MODE == "LIVE_DEMO":
-            trading_runtime.stop()
-            mt5_client.disconnect()
-
         if client.is_connected():
             await client.disconnect()
+
+        if department_started:
+            await trading_department.stop()
+
+        if TELEGRAM_EXECUTION_MODE == "LIVE_DEMO":
+            mt5_client.disconnect()
 
         print("Telegram Listener Stopped.")
 

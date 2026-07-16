@@ -1,24 +1,47 @@
 """
 TODOBA Live Execution Pipeline
 
-Executes ExecutionPlan on MT5 demo/live environment.
+Executes an ExecutionPlan using the
+TODOBA Stable Lot Policy.
 """
 
 import MetaTrader5 as mt5
 
-from backend.trading.execution.lot_calculator import calculate
-from backend.trading.broker.broker_symbol_resolver import resolve_broker_symbol
-from backend.trading.execution.execution_validator import ExecutionValidator
-from backend.trading.broker.mt5_order_builder import MT5OrderBuilder
-from backend.trading.broker.mt5_sender import MT5Sender
-from backend.trading.lifecycle.trade_record_builder import TradeRecordBuilder
+from backend.trading.broker.broker_symbol_resolver import (
+    resolve_broker_symbol,
+)
+from backend.trading.broker.mt5_order_builder import (
+    MT5OrderBuilder,
+)
+from backend.trading.broker.mt5_sender import (
+    MT5Sender,
+)
+from backend.trading.execution.execution_validator import (
+    ExecutionValidator,
+)
+from backend.trading.lifecycle.trade_id_generator import (
+    trade_id_generator,
+)
+from backend.trading.lifecycle.trade_record_builder import (
+    TradeRecordBuilder,
+)
+from backend.trading.risk.position_sizing_engine import (
+    PositionSizingEngine,
+)
 
 
 class LiveExecutionPipeline:
 
-    def __init__(self, profile, symbol_map):
+    def __init__(
+        self,
+        profile,
+        symbol_map,
+        *,
+        mt5_module=mt5,
+    ):
         self.profile = profile
         self.symbol_map = symbol_map
+        self.mt5 = mt5_module
 
     def execute(self, plan):
 
@@ -27,25 +50,54 @@ class LiveExecutionPipeline:
             self.symbol_map,
         )
 
-        mt5.symbol_select(broker_symbol, True)
+        self.mt5.symbol_select(
+            broker_symbol,
+            True,
+        )
 
-        symbol_info = mt5.symbol_info(broker_symbol)
-        tick = mt5.symbol_info_tick(broker_symbol)
+        symbol_info = self.mt5.symbol_info(
+            broker_symbol
+        )
+
+        tick = self.mt5.symbol_info_tick(
+            broker_symbol
+        )
+
+        account_info = self.mt5.account_info()
 
         if symbol_info is None:
-            raise RuntimeError(f"Cannot read symbol info for: {broker_symbol}")
+            raise RuntimeError(
+                f"Cannot read symbol info for: "
+                f"{broker_symbol}"
+            )
 
         if tick is None:
-            raise RuntimeError(f"Cannot read tick for: {broker_symbol}")
+            raise RuntimeError(
+                f"Cannot read tick for: "
+                f"{broker_symbol}"
+            )
 
-        order_type = plan.order_type.replace(" NOW", "")
+        if account_info is None:
+            raise RuntimeError(
+                "Cannot read MT5 account information."
+            )
+
+        order_type = plan.order_type.replace(
+            " NOW",
+            "",
+        )
 
         if order_type == "BUY":
             price = tick.ask
+
         elif order_type == "SELL":
             price = tick.bid
+
         else:
-            raise ValueError(f"Unsupported order type: {order_type}")
+            raise ValueError(
+                f"Unsupported order type: "
+                f"{order_type}"
+            )
 
         digits = symbol_info.digits
         point = symbol_info.point
@@ -56,17 +108,57 @@ class LiveExecutionPipeline:
         )
 
         if order_type == "BUY":
-            sl = min(plan.sl, price - min_stop_distance)
-            tp = max(plan.tp, price + min_stop_distance)
+            sl = min(
+                plan.sl,
+                price - min_stop_distance,
+            )
+
+            tp = max(
+                plan.tp,
+                price + min_stop_distance,
+            )
+
         else:
-            sl = max(plan.sl, price + min_stop_distance)
-            tp = min(plan.tp, price - min_stop_distance)
+            sl = max(
+                plan.sl,
+                price + min_stop_distance,
+            )
 
-        price = round(price, digits)
-        sl = round(sl, digits)
-        tp = round(tp, digits)
+            tp = min(
+                plan.tp,
+                price - min_stop_distance,
+            )
 
-        lot = calculate(self.profile.lot_policy_name)
+        price = round(
+            price,
+            digits,
+        )
+
+        sl = round(
+            sl,
+            digits,
+        )
+
+        tp = round(
+            tp,
+            digits,
+        )
+
+        sizing_engine = PositionSizingEngine()
+
+        sizing_result = sizing_engine.evaluate(
+            account_equity=float(
+                account_info.equity
+            ),
+        )
+
+        if not sizing_result.approved:
+            raise RuntimeError(
+                "Trade rejected by Stable Lot Policy: "
+                f"{sizing_result.reason}"
+            )
+
+        lot = sizing_result.volume
 
         ExecutionValidator().validate(
             symbol=broker_symbol,
@@ -87,20 +179,21 @@ class LiveExecutionPipeline:
             comment=plan.comment,
         )
 
-        order_result = MT5Sender().send(request)
+        order_result = MT5Sender().send(
+            request
+        )
 
         if not order_result.success:
             raise RuntimeError(
-                f"MT5 order failed: retcode={order_result.retcode}, "
+                f"MT5 order failed: "
+                f"retcode={order_result.retcode}, "
                 f"comment={order_result.comment}"
             )
 
-        trade_record = TradeRecordBuilder().from_order_result(
-            trade_id="TRD-000001",
+        return TradeRecordBuilder().from_order_result(
+            trade_id=trade_id_generator.next_id(),
             symbol=plan.symbol,
             action=order_type,
             volume=lot,
             order_result=order_result,
         )
-
-        return trade_record

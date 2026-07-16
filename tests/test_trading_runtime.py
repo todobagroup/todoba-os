@@ -5,14 +5,27 @@ These tests do not connect to Telegram.
 These tests do not connect to MT5.
 """
 
+import sys
 from datetime import datetime
+from pathlib import Path
 
 import pytest
+
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT_DIR))
+
 
 from backend.task.task import Task
 from backend.task.task_status import TaskStatus
 from backend.trading.intent.trading_intent import (
     TradingIntent,
+)
+from backend.trading.lifecycle.trade_record import (
+    TradeRecord,
+)
+from backend.trading.lifecycle.trade_status import (
+    TradeStatus,
 )
 from backend.trading.runtime.trading_runtime import (
     TradingRuntime,
@@ -39,6 +52,30 @@ class DemoExecutionPipeline:
         }
 
 
+class DemoOpenTradePersistence:
+
+    def __init__(self):
+        self.persisted_trade = None
+
+    def persist(
+        self,
+        trade_record,
+    ):
+        self.persisted_trade = trade_record
+
+
+class DemoTimelineService:
+
+    def __init__(self):
+        self.started_trade_id = None
+
+    def start_trade(
+        self,
+        trade_id,
+    ):
+        self.started_trade_id = trade_id
+
+
 def create_trade_task() -> Task:
     intent = TradingIntent(
         order_type="BUY NOW",
@@ -51,6 +88,18 @@ def create_trade_task() -> Task:
         task_type="trade",
         payload=intent,
         created_at=datetime.now(),
+    )
+
+
+def create_trade_record() -> TradeRecord:
+    return TradeRecord(
+        trade_id="trade-001",
+        symbol="XAUUSD",
+        action="BUY",
+        volume=0.05,
+        status=TradeStatus.OPEN,
+        order=1001,
+        deal=2001,
     )
 
 
@@ -176,4 +225,44 @@ def test_runtime_requires_execution_pipeline():
     ):
         TradingRuntime(
             execution_pipeline=None
+        )
+
+
+def test_runtime_registers_open_trade():
+    runtime = TradingRuntime(
+        execution_pipeline=(
+            DemoExecutionPipeline()
+        )
+    )
+
+    persistence = DemoOpenTradePersistence()
+    timeline = DemoTimelineService()
+
+    runtime.open_trade_persistence = persistence
+    runtime.timeline_service = timeline
+
+    trade_record = create_trade_record()
+
+    result = runtime.register_open_trade(
+        trade_record
+    )
+
+    assert result is trade_record
+    assert persistence.persisted_trade is trade_record
+    assert timeline.started_trade_id == trade_record.trade_id
+
+
+def test_register_open_trade_requires_trade_record():
+    runtime = TradingRuntime(
+        execution_pipeline=(
+            DemoExecutionPipeline()
+        )
+    )
+
+    with pytest.raises(
+        TypeError,
+        match="requires TradeRecord",
+    ):
+        runtime.register_open_trade(
+            "not-a-trade-record"
         )

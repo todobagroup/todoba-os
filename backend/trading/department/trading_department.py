@@ -46,6 +46,15 @@ from backend.trading.lifecycle.trade_timeline_registry import (
 from backend.trading.lifecycle.trade_timeline_service import (
     TradeTimelineService,
 )
+from backend.trading.pending.pending_activation_bridge import (
+    PendingActivationBridge,
+)
+from backend.trading.pending.pending_activation_runtime import (
+    PendingActivationRuntime,
+)
+from backend.trading.pending.pending_broker_evidence_reader import (
+    PendingBrokerEvidenceReader,
+)
 from backend.trading.pending.pending_order_monitor import (
     PendingOrderMonitor,
 )
@@ -158,6 +167,16 @@ class TradingDepartment:
             )
         )
 
+        self.pending_evidence_reader = (
+            PendingBrokerEvidenceReader(
+                mt5_module
+            )
+        )
+
+        self.pending_activation_bridge = (
+            PendingActivationBridge()
+        )
+
         self.pending_restored_count = 0
 
         self.memory_bridge = TradeMemoryBridge(
@@ -201,6 +220,19 @@ class TradingDepartment:
             execution_pipeline=execution_pipeline,
             open_trade_persistence=self.persistence,
             timeline_service=self.timeline_service,
+        )
+
+        self.pending_activation_runtime = (
+            PendingActivationRuntime(
+                repository=self.pending_repository,
+                evidence_reader=(
+                    self.pending_evidence_reader
+                ),
+                activation_bridge=(
+                    self.pending_activation_bridge
+                ),
+                trading_runtime=self.runtime,
+            )
         )
 
         self.running = False

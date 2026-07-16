@@ -30,7 +30,8 @@ from backend.workers.worker_registry import (
 
 class TradingRuntime:
     """
-    Execute organizational trading tasks.
+    Execute organizational trading tasks and register
+    newly opened trades.
     """
 
     def __init__(
@@ -119,6 +120,44 @@ class TradingRuntime:
 
         return True
 
+    def register_open_trade(
+        self,
+        trade_record: TradeRecord,
+    ) -> TradeRecord:
+        """
+        Register one newly opened organizational trade.
+
+        The trade may originate from immediate execution
+        or pending-order activation.
+        """
+
+        if not isinstance(
+            trade_record,
+            TradeRecord,
+        ):
+            raise TypeError(
+                "register_open_trade requires "
+                "TradeRecord."
+            )
+
+        if (
+            self.open_trade_persistence
+            is not None
+        ):
+            self.open_trade_persistence.persist(
+                trade_record
+            )
+
+        if (
+            self.timeline_service
+            is not None
+        ):
+            self.timeline_service.start_trade(
+                trade_record.trade_id
+            )
+
+        return trade_record
+
     def dispatch(
         self,
         task: Task,
@@ -154,21 +193,8 @@ class TradingRuntime:
             execution_result,
             TradeRecord,
         ):
-
-            if (
-                self.open_trade_persistence
-                is not None
-            ):
-                self.open_trade_persistence.persist(
-                    execution_result
-                )
-
-            if (
-                self.timeline_service
-                is not None
-            ):
-                self.timeline_service.start_trade(
-                    execution_result.trade_id
-                )
+            self.register_open_trade(
+                execution_result
+            )
 
         return execution_result

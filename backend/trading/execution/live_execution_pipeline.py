@@ -206,7 +206,9 @@ class LiveExecutionPipeline:
             tp=tp,
         )
 
-        request = MT5OrderBuilder().build(
+        request = MT5OrderBuilder(
+            mt5_module=self.mt5,
+        ).build(
             symbol=broker_symbol,
             volume=lot,
             order_type=order_type,
@@ -216,7 +218,9 @@ class LiveExecutionPipeline:
             comment=plan.comment,
         )
 
-        order_result = MT5Sender().send(
+        order_result = MT5Sender(
+            mt5_module=self.mt5,
+        ).send(
             request
         )
 

@@ -10,6 +10,13 @@ import MetaTrader5 as mt5
 
 class MT5OrderBuilder:
 
+    def __init__(
+        self,
+        *,
+        mt5_module=mt5,
+    ):
+        self.mt5 = mt5_module
+
     def build(
         self,
         *,
@@ -23,17 +30,26 @@ class MT5OrderBuilder:
     ):
 
         order_types = {
-            "BUY": mt5.ORDER_TYPE_BUY,
-            "SELL": mt5.ORDER_TYPE_SELL,
-            "BUY LIMIT": mt5.ORDER_TYPE_BUY_LIMIT,
-            "SELL LIMIT": mt5.ORDER_TYPE_SELL_LIMIT,
-            "BUY STOP": mt5.ORDER_TYPE_BUY_STOP,
-            "SELL STOP": mt5.ORDER_TYPE_SELL_STOP,
+            "BUY": self.mt5.ORDER_TYPE_BUY,
+            "SELL": self.mt5.ORDER_TYPE_SELL,
+            "BUY LIMIT": (
+                self.mt5.ORDER_TYPE_BUY_LIMIT
+            ),
+            "SELL LIMIT": (
+                self.mt5.ORDER_TYPE_SELL_LIMIT
+            ),
+            "BUY STOP": (
+                self.mt5.ORDER_TYPE_BUY_STOP
+            ),
+            "SELL STOP": (
+                self.mt5.ORDER_TYPE_SELL_STOP
+            ),
         }
 
         if order_type not in order_types:
             raise ValueError(
-                f"Unsupported order type: {order_type}"
+                f"Unsupported order type: "
+                f"{order_type}"
             )
 
         pending_order_types = {
@@ -49,9 +65,9 @@ class MT5OrderBuilder:
 
         return {
             "action": (
-                mt5.TRADE_ACTION_PENDING
+                self.mt5.TRADE_ACTION_PENDING
                 if is_pending
-                else mt5.TRADE_ACTION_DEAL
+                else self.mt5.TRADE_ACTION_DEAL
             ),
             "symbol": symbol,
             "volume": volume,
@@ -62,10 +78,10 @@ class MT5OrderBuilder:
             "deviation": 20,
             "magic": 10001,
             "comment": comment,
-            "type_time": mt5.ORDER_TIME_GTC,
+            "type_time": self.mt5.ORDER_TIME_GTC,
             "type_filling": (
-                mt5.ORDER_FILLING_RETURN
+                self.mt5.ORDER_FILLING_RETURN
                 if is_pending
-                else mt5.ORDER_FILLING_IOC
+                else self.mt5.ORDER_FILLING_IOC
             ),
         }

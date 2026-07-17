@@ -51,6 +51,7 @@ class FakeMT5:
             symbol,
             enabled,
         )
+
         return True
 
     def symbol_info(
@@ -83,35 +84,34 @@ class FakeMT5:
     ):
         self.sent_request = request
 
+        if (
+            request["action"]
+            == self.TRADE_ACTION_PENDING
+        ):
+            retcode = self.TRADE_RETCODE_PLACED
+            order = 70001
+            deal = 0
+
+        else:
+            retcode = self.TRADE_RETCODE_DONE
+            order = 70002
+            deal = 80001
+
         return SimpleNamespace(
-            retcode=self.TRADE_RETCODE_PLACED,
-            order=70001,
-            deal=0,
+            retcode=retcode,
+            order=order,
+            deal=deal,
             volume=request["volume"],
             price=request["price"],
             comment="Request accepted",
         )
 
 
-def create_pending_plan():
+def create_pipeline(
+    fake_mt5,
+):
 
-    return ExecutionPlan(
-        symbol="XAUUSD",
-        order_type="BUY LIMIT",
-        entry=3290.0,
-        sl=3280.0,
-        tp=3310.0,
-        lot=None,
-        magic_number=10001,
-        comment="TODOBA:test_pending",
-    )
-
-
-def test_pipeline_uses_injected_mt5_module():
-
-    fake_mt5 = FakeMT5()
-
-    pipeline = LiveExecutionPipeline(
+    return LiveExecutionPipeline(
         profile=object(),
         symbol_map={
             "XAUUSD": "XAUUSD.a",
@@ -119,14 +119,110 @@ def test_pipeline_uses_injected_mt5_module():
         mt5_module=fake_mt5,
     )
 
-    result = pipeline.execute(
-        create_pending_plan()
+
+@pytest.mark.parametrize(
+    (
+        "order_type",
+        "entry",
+        "sl",
+        "tp",
+        "expected_action",
+        "expected_mt5_type",
+        "expected_price",
+        "expected_result_type",
+    ),
+    [
+        (
+            "BUY NOW",
+            None,
+            3290.0,
+            3310.0,
+            FakeMT5.TRADE_ACTION_DEAL,
+            FakeMT5.ORDER_TYPE_BUY,
+            3300.00,
+            "TradeRecord",
+        ),
+        (
+            "SELL NOW",
+            None,
+            3310.0,
+            3290.0,
+            FakeMT5.TRADE_ACTION_DEAL,
+            FakeMT5.ORDER_TYPE_SELL,
+            3299.80,
+            "TradeRecord",
+        ),
+        (
+            "BUY LIMIT",
+            3290.0,
+            3280.0,
+            3310.0,
+            FakeMT5.TRADE_ACTION_PENDING,
+            FakeMT5.ORDER_TYPE_BUY_LIMIT,
+            3290.0,
+            "PendingOrderRecord",
+        ),
+        (
+            "SELL LIMIT",
+            3310.0,
+            3320.0,
+            3290.0,
+            FakeMT5.TRADE_ACTION_PENDING,
+            FakeMT5.ORDER_TYPE_SELL_LIMIT,
+            3310.0,
+            "PendingOrderRecord",
+        ),
+        (
+            "BUY STOP",
+            3310.0,
+            3290.0,
+            3330.0,
+            FakeMT5.TRADE_ACTION_PENDING,
+            FakeMT5.ORDER_TYPE_BUY_STOP,
+            3310.0,
+            "PendingOrderRecord",
+        ),
+        (
+            "SELL STOP",
+            3290.0,
+            3310.0,
+            3270.0,
+            FakeMT5.TRADE_ACTION_PENDING,
+            FakeMT5.ORDER_TYPE_SELL_STOP,
+            3290.0,
+            "PendingOrderRecord",
+        ),
+    ],
+)
+def test_pipeline_executes_supported_order_types(
+    order_type,
+    entry,
+    sl,
+    tp,
+    expected_action,
+    expected_mt5_type,
+    expected_price,
+    expected_result_type,
+):
+
+    fake_mt5 = FakeMT5()
+
+    pipeline = create_pipeline(
+        fake_mt5
     )
 
-    assert isinstance(
-        result,
-        PendingOrderRecord,
+    plan = ExecutionPlan(
+        symbol="XAUUSD",
+        order_type=order_type,
+        entry=entry,
+        sl=sl,
+        tp=tp,
+        lot=None,
+        magic_number=10001,
+        comment=f"TODOBA:test_{order_type}",
     )
+
+    result = pipeline.execute(plan)
 
     assert fake_mt5.selected_symbol == (
         "XAUUSD.a",
@@ -142,32 +238,53 @@ def test_pipeline_uses_injected_mt5_module():
 
     assert (
         fake_mt5.sent_request["action"]
-        == fake_mt5.TRADE_ACTION_PENDING
+        == expected_action
     )
 
     assert (
         fake_mt5.sent_request["type"]
-        == fake_mt5.ORDER_TYPE_BUY_LIMIT
+        == expected_mt5_type
     )
 
-    assert result.order == 70001
+    assert (
+        fake_mt5.sent_request["price"]
+        == expected_price
+    )
+
+    assert (
+        result.__class__.__name__
+        == expected_result_type
+    )
+
+    if isinstance(
+        result,
+        PendingOrderRecord,
+    ):
+        assert result.order == 70001
 
 
-def test_pending_order_requires_entry_price():
+@pytest.mark.parametrize(
+    "order_type",
+    [
+        "BUY LIMIT",
+        "SELL LIMIT",
+        "BUY STOP",
+        "SELL STOP",
+    ],
+)
+def test_pending_orders_require_entry_price(
+    order_type,
+):
 
     fake_mt5 = FakeMT5()
 
-    pipeline = LiveExecutionPipeline(
-        profile=object(),
-        symbol_map={
-            "XAUUSD": "XAUUSD.a",
-        },
-        mt5_module=fake_mt5,
+    pipeline = create_pipeline(
+        fake_mt5
     )
 
     plan = ExecutionPlan(
         symbol="XAUUSD",
-        order_type="BUY LIMIT",
+        order_type=order_type,
         entry=None,
         sl=3280.0,
         tp=3310.0,

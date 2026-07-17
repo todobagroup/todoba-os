@@ -27,6 +27,15 @@ from backend.trading.lifecycle.trade_record import (
 from backend.trading.lifecycle.trade_status import (
     TradeStatus,
 )
+from backend.trading.pending.pending_order_record import (
+    PendingOrderRecord,
+)
+from backend.trading.pending.pending_order_repository import (
+    PendingOrderRepository,
+)
+from backend.trading.pending.pending_order_status import (
+    PendingOrderStatus,
+)
 from backend.trading.runtime.trading_runtime import (
     TradingRuntime,
 )
@@ -37,13 +46,20 @@ class DemoExecutionPipeline:
     Safe execution substitute for TradingRuntime tests.
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        result=None,
+    ):
         self.execute_count = 0
         self.last_plan = None
+        self.result = result
 
     def execute(self, plan):
         self.execute_count += 1
         self.last_plan = plan
+
+        if self.result is not None:
+            return self.result
 
         return {
             "status": "DEMO_SUCCESS",
@@ -76,12 +92,15 @@ class DemoTimelineService:
         self.started_trade_id = trade_id
 
 
-def create_trade_task() -> Task:
+def create_trade_task(
+    order_type: str = "BUY NOW",
+) -> Task:
     intent = TradingIntent(
-        order_type="BUY NOW",
+        order_type=order_type,
         asset="XAUUSD",
         sl=4095.0,
         tp=4125.0,
+        entry=4100.0,
     )
 
     return Task(
@@ -100,6 +119,20 @@ def create_trade_record() -> TradeRecord:
         status=TradeStatus.OPEN,
         order=1001,
         deal=2001,
+    )
+
+
+def create_pending_order_record() -> PendingOrderRecord:
+    return PendingOrderRecord(
+        pending_order_id="pending-001",
+        symbol="XAUUSD",
+        order_type="BUY LIMIT",
+        volume=0.05,
+        entry=4100.0,
+        sl=4095.0,
+        tp=4125.0,
+        status=PendingOrderStatus.PLACED,
+        order=3001,
     )
 
 
@@ -266,3 +299,107 @@ def test_register_open_trade_requires_trade_record():
         runtime.register_open_trade(
             "not-a-trade-record"
         )
+
+
+def test_runtime_registers_pending_order():
+    repository = PendingOrderRepository()
+
+    runtime = TradingRuntime(
+        execution_pipeline=(
+            DemoExecutionPipeline()
+        ),
+        pending_order_repository=repository,
+    )
+
+    pending_record = (
+        create_pending_order_record()
+    )
+
+    result = runtime.register_pending_order(
+        pending_record
+    )
+
+    assert result is pending_record
+
+    assert repository.get(
+        pending_record.pending_order_id
+    ) is pending_record
+
+
+def test_register_pending_order_requires_pending_record():
+    runtime = TradingRuntime(
+        execution_pipeline=(
+            DemoExecutionPipeline()
+        )
+    )
+
+    with pytest.raises(
+        TypeError,
+        match="requires PendingOrderRecord",
+    ):
+        runtime.register_pending_order(
+            "not-a-pending-record"
+        )
+
+
+def test_runtime_dispatch_registers_trade_record():
+    trade_record = create_trade_record()
+
+    pipeline = DemoExecutionPipeline(
+        result=trade_record
+    )
+
+    persistence = DemoOpenTradePersistence()
+    timeline = DemoTimelineService()
+
+    runtime = TradingRuntime(
+        execution_pipeline=pipeline
+    )
+
+    runtime.open_trade_persistence = persistence
+    runtime.timeline_service = timeline
+
+    runtime.start()
+
+    result = runtime.dispatch(
+        create_trade_task()
+    )
+
+    assert result is trade_record
+    assert persistence.persisted_trade is trade_record
+    assert timeline.started_trade_id == trade_record.trade_id
+
+    runtime.stop()
+
+
+def test_runtime_dispatch_registers_pending_order():
+    pending_record = (
+        create_pending_order_record()
+    )
+
+    repository = PendingOrderRepository()
+
+    pipeline = DemoExecutionPipeline(
+        result=pending_record
+    )
+
+    runtime = TradingRuntime(
+        execution_pipeline=pipeline,
+        pending_order_repository=repository,
+    )
+
+    runtime.start()
+
+    result = runtime.dispatch(
+        create_trade_task(
+            order_type="BUY LIMIT"
+        )
+    )
+
+    assert result is pending_record
+
+    assert repository.get(
+        pending_record.pending_order_id
+    ) is pending_record
+
+    runtime.stop()

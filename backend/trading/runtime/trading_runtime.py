@@ -20,6 +20,12 @@ from backend.trading.lifecycle.trade_record import (
 from backend.trading.lifecycle.trade_timeline_service import (
     TradeTimelineService,
 )
+from backend.trading.pending.pending_order_record import (
+    PendingOrderRecord,
+)
+from backend.trading.pending.pending_order_repository import (
+    PendingOrderRepository,
+)
 from backend.workers.trading.trading_worker import (
     TradingWorker,
 )
@@ -31,7 +37,7 @@ from backend.workers.worker_registry import (
 class TradingRuntime:
     """
     Execute organizational trading tasks and register
-    newly opened trades.
+    market or pending execution results.
     """
 
     def __init__(
@@ -43,6 +49,9 @@ class TradingRuntime:
         ] = None,
         timeline_service: Optional[
             TradeTimelineService
+        ] = None,
+        pending_order_repository: Optional[
+            PendingOrderRepository
         ] = None,
     ):
         if execution_pipeline is None:
@@ -75,12 +84,28 @@ class TradingRuntime:
                 "TradeTimelineService."
             )
 
+        if (
+            pending_order_repository is not None
+            and not isinstance(
+                pending_order_repository,
+                PendingOrderRepository,
+            )
+        ):
+            raise TypeError(
+                "pending_order_repository must be "
+                "PendingOrderRepository."
+            )
+
         self.open_trade_persistence = (
             open_trade_persistence
         )
 
         self.timeline_service = (
             timeline_service
+        )
+
+        self.pending_order_repository = (
+            pending_order_repository
         )
 
         self.queue = TaskQueue()
@@ -158,6 +183,34 @@ class TradingRuntime:
 
         return trade_record
 
+    def register_pending_order(
+        self,
+        pending_order_record: PendingOrderRecord,
+    ) -> PendingOrderRecord:
+        """
+        Register one newly placed organizational
+        pending order.
+        """
+
+        if not isinstance(
+            pending_order_record,
+            PendingOrderRecord,
+        ):
+            raise TypeError(
+                "register_pending_order requires "
+                "PendingOrderRecord."
+            )
+
+        if (
+            self.pending_order_repository
+            is not None
+        ):
+            self.pending_order_repository.save(
+                pending_order_record
+            )
+
+        return pending_order_record
+
     def dispatch(
         self,
         task: Task,
@@ -194,6 +247,14 @@ class TradingRuntime:
             TradeRecord,
         ):
             self.register_open_trade(
+                execution_result
+            )
+
+        elif isinstance(
+            execution_result,
+            PendingOrderRecord,
+        ):
+            self.register_pending_order(
                 execution_result
             )
 

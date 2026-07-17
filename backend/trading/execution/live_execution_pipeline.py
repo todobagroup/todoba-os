@@ -3,6 +3,10 @@ TODOBA Live Execution Pipeline
 
 Executes an ExecutionPlan using the
 TODOBA Stable Lot Policy.
+
+Returns:
+- TradeRecord for market execution;
+- PendingOrderRecord for pending execution.
 """
 
 import MetaTrader5 as mt5
@@ -24,6 +28,9 @@ from backend.trading.lifecycle.trade_id_generator import (
 )
 from backend.trading.lifecycle.trade_record_builder import (
     TradeRecordBuilder,
+)
+from backend.trading.pending.pending_order_record_builder import (
+    PendingOrderRecordBuilder,
 )
 from backend.trading.risk.position_sizing_engine import (
     PositionSizingEngine,
@@ -87,6 +94,27 @@ class LiveExecutionPipeline:
             "",
         )
 
+        market_order_types = {
+            "BUY",
+            "SELL",
+        }
+
+        pending_order_types = {
+            "BUY LIMIT",
+            "SELL LIMIT",
+            "BUY STOP",
+            "SELL STOP",
+        }
+
+        if order_type not in (
+            market_order_types
+            | pending_order_types
+        ):
+            raise ValueError(
+                f"Unsupported order type: "
+                f"{order_type}"
+            )
+
         if order_type == "BUY":
             price = tick.ask
 
@@ -94,10 +122,13 @@ class LiveExecutionPipeline:
             price = tick.bid
 
         else:
-            raise ValueError(
-                f"Unsupported order type: "
-                f"{order_type}"
-            )
+            if plan.entry is None:
+                raise ValueError(
+                    "Pending order requires "
+                    "an entry price."
+                )
+
+            price = plan.entry
 
         digits = symbol_info.digits
         point = symbol_info.point
@@ -107,7 +138,13 @@ class LiveExecutionPipeline:
             10 * point,
         )
 
-        if order_type == "BUY":
+        is_buy_order = order_type in {
+            "BUY",
+            "BUY LIMIT",
+            "BUY STOP",
+        }
+
+        if is_buy_order:
             sl = min(
                 plan.sl,
                 price - min_stop_distance,
@@ -144,12 +181,12 @@ class LiveExecutionPipeline:
             digits,
         )
 
-        sizing_engine = PositionSizingEngine()
-
-        sizing_result = sizing_engine.evaluate(
-            account_equity=float(
-                account_info.equity
-            ),
+        sizing_result = (
+            PositionSizingEngine().evaluate(
+                account_equity=float(
+                    account_info.equity
+                ),
+            )
         )
 
         if not sizing_result.approved:
@@ -190,8 +227,24 @@ class LiveExecutionPipeline:
                 f"comment={order_result.comment}"
             )
 
+        organizational_id = (
+            trade_id_generator.next_id()
+        )
+
+        if order_type in pending_order_types:
+            return PendingOrderRecordBuilder().build(
+                pending_order_id=organizational_id,
+                symbol=plan.symbol,
+                order_type=order_type,
+                volume=lot,
+                entry=price,
+                sl=sl,
+                tp=tp,
+                order_result=order_result,
+            )
+
         return TradeRecordBuilder().from_order_result(
-            trade_id=trade_id_generator.next_id(),
+            trade_id=organizational_id,
             symbol=plan.symbol,
             action=order_type,
             volume=lot,

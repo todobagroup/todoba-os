@@ -53,6 +53,10 @@ class PendingActivationRuntime:
         """
         Process every pending order once.
 
+        Successfully activated pending orders are
+        registered as open trades and removed from the
+        pending repository.
+
         Returns the number of activated trades.
         """
 
@@ -82,6 +86,10 @@ class PendingActivationRuntime:
 
             record.status = (
                 PendingOrderStatus.TRIGGERED
+            )
+
+            self.repository.remove(
+                record.pending_order_id
             )
 
             activated += 1

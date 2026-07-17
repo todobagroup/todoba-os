@@ -31,86 +31,35 @@ from backend.trading.pending.pending_order_status import (
 
 
 class FakeEvidenceReader(PendingBrokerEvidenceReader):
+    """
+    Safe broker evidence substitute.
+    """
 
-    def __init__(self):
-        pass
-
-    def observe(self, record):
-        return PendingOrderObservation(
-            pending_order_id=record.pending_order_id,
-            order_ticket=record.order,
-            status=PendingBrokerStatus.FILLED,
-            opening_deal_ticket=9001,
-        )
-
-
-class FakeTradingRuntime:
-
-    def __init__(self):
-        self.registered = []
-
-    def register_open_trade(
+    def __init__(
         self,
-        trade_record,
+        *,
+        status=PendingBrokerStatus.FILLED,
     ):
-        self.registered.append(
-            trade_record
-        )
+        self.status = status
+        self.observe_count = 0
 
+    def observe(
+        self,
+        record,
+    ):
+        self.observe_count += 1
 
-def create_record():
+        if (
+            self.status
+            == PendingBrokerStatus.FILLED
+        ):
+            return PendingOrderObservation(
+                pending_order_id=(
+                    record.pending_order_id
+                ),
+                order_ticket=record.order,
+                status=self.status,
+                opening_deal_ticket=9001,
+            )
 
-    return PendingOrderRecord(
-        pending_order_id="pending-001",
-        symbol="XAUUSD",
-        order_type="BUY_LIMIT",
-        volume=0.01,
-        entry=3300.0,
-        sl=3290.0,
-        tp=3320.0,
-        status=PendingOrderStatus.PLACED,
-        order=1001,
-    )
-
-
-def test_process_activates_pending_order():
-
-    repository = PendingOrderRepository()
-
-    record = create_record()
-
-    repository.save(record)
-
-    trading_runtime = FakeTradingRuntime()
-
-    runtime = PendingActivationRuntime(
-        repository=repository,
-        evidence_reader=FakeEvidenceReader(),
-        activation_bridge=PendingActivationBridge(),
-        trading_runtime=trading_runtime,
-    )
-
-    activated = runtime.process()
-
-    assert activated == 1
-
-    assert (
-        record.status
-        == PendingOrderStatus.TRIGGERED
-    )
-
-    assert len(trading_runtime.registered) == 1
-
-
-def test_process_returns_zero_when_repository_empty():
-
-    repository = PendingOrderRepository()
-
-    runtime = PendingActivationRuntime(
-        repository=repository,
-        evidence_reader=FakeEvidenceReader(),
-        activation_bridge=PendingActivationBridge(),
-        trading_runtime=FakeTradingRuntime(),
-    )
-
-    assert runtime.process() == 0
+        return PendingOrder

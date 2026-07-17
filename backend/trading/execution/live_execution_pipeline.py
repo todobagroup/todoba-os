@@ -115,6 +115,14 @@ class LiveExecutionPipeline:
                 f"{order_type}"
             )
 
+        digits = symbol_info.digits
+        point = symbol_info.point
+
+        min_stop_distance = max(
+            symbol_info.trade_stops_level * point,
+            10 * point,
+        )
+
         if order_type == "BUY":
             price = tick.ask
 
@@ -130,13 +138,45 @@ class LiveExecutionPipeline:
 
             price = plan.entry
 
-        digits = symbol_info.digits
-        point = symbol_info.point
+            if (
+                order_type == "BUY LIMIT"
+                and price
+                > tick.ask - min_stop_distance
+            ):
+                raise ValueError(
+                    "BUY LIMIT entry must be below "
+                    "the current ask price."
+                )
 
-        min_stop_distance = max(
-            symbol_info.trade_stops_level * point,
-            10 * point,
-        )
+            if (
+                order_type == "SELL LIMIT"
+                and price
+                < tick.bid + min_stop_distance
+            ):
+                raise ValueError(
+                    "SELL LIMIT entry must be above "
+                    "the current bid price."
+                )
+
+            if (
+                order_type == "BUY STOP"
+                and price
+                < tick.ask + min_stop_distance
+            ):
+                raise ValueError(
+                    "BUY STOP entry must be above "
+                    "the current ask price."
+                )
+
+            if (
+                order_type == "SELL STOP"
+                and price
+                > tick.bid - min_stop_distance
+            ):
+                raise ValueError(
+                    "SELL STOP entry must be below "
+                    "the current bid price."
+                )
 
         is_buy_order = order_type in {
             "BUY",

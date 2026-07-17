@@ -300,3 +300,76 @@ def test_pending_orders_require_entry_price(
         pipeline.execute(plan)
 
     assert fake_mt5.sent_request is None
+
+
+@pytest.mark.parametrize(
+    (
+        "order_type",
+        "entry",
+        "sl",
+        "tp",
+        "error_message",
+    ),
+    [
+        (
+            "BUY LIMIT",
+            3300.00,
+            3290.0,
+            3310.0,
+            "BUY LIMIT entry must be below",
+        ),
+        (
+            "SELL LIMIT",
+            3299.80,
+            3310.0,
+            3290.0,
+            "SELL LIMIT entry must be above",
+        ),
+        (
+            "BUY STOP",
+            3300.00,
+            3290.0,
+            3310.0,
+            "BUY STOP entry must be above",
+        ),
+        (
+            "SELL STOP",
+            3299.80,
+            3310.0,
+            3290.0,
+            "SELL STOP entry must be below",
+        ),
+    ],
+)
+def test_pending_orders_reject_entry_on_wrong_market_side(
+    order_type,
+    entry,
+    sl,
+    tp,
+    error_message,
+):
+
+    fake_mt5 = FakeMT5()
+
+    pipeline = create_pipeline(
+        fake_mt5
+    )
+
+    plan = ExecutionPlan(
+        symbol="XAUUSD",
+        order_type=order_type,
+        entry=entry,
+        sl=sl,
+        tp=tp,
+        lot=None,
+        magic_number=10001,
+        comment="TODOBA:test_invalid_pending_entry",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=error_message,
+    ):
+        pipeline.execute(plan)
+
+    assert fake_mt5.sent_request is None

@@ -14,13 +14,14 @@ from backend.workers.trading.trading_worker import TradingWorker
 
 from backend.trading.intent.trading_intent import TradingIntent
 from backend.trading.profile.trading_profile import TradingProfile
-from backend.trading.execution.live_execution_pipeline import LiveExecutionPipeline
+from backend.trading.execution.live_execution_pipeline import (
+    LiveExecutionPipeline,
+)
 from backend.trading.broker.mt5_client import MT5Client
 from backend.trading.broker.mt5_safety import MT5Safety
 
 
-def main():
-
+def main() -> None:
     print("=== LIVE GOLD TASK ENGINE DEMO ===")
 
     client = MT5Client()
@@ -29,73 +30,109 @@ def main():
         print("Connect failed.")
         return
 
-    MT5Safety().validate()
+    try:
+        MT5Safety().validate()
 
-    broker_symbol = "GOLD.i#"
-    mt5.symbol_select(broker_symbol, True)
+        broker_symbol = "GOLD.i#"
 
-    tick = mt5.symbol_info_tick(broker_symbol)
+        if not mt5.symbol_select(broker_symbol, True):
+            print(
+                "Cannot select symbol:",
+                broker_symbol,
+            )
+            return
 
-    if tick is None:
-        print("Cannot read tick.")
+        tick = mt5.symbol_info_tick(
+            broker_symbol,
+        )
+
+        if tick is None:
+            print("Cannot read tick.")
+            return
+
+        price = tick.ask
+
+        profile = TradingProfile(
+            profile_name="Founder Demo Gold",
+            risk_percent=1.0,
+            max_open_trades=1,
+            allowed_symbols=("GOLD",),
+            lot_policy_name="FIXED_001",
+        )
+
+        symbol_map = {
+            "GOLD": broker_symbol,
+        }
+
+        intent = TradingIntent(
+            order_type="BUY NOW",
+            asset="GOLD",
+            sl=price - 5,
+            tp=price + 5,
+        )
+
+        task = TaskFactory.create(
+            task_type="trade",
+            payload=intent,
+        )
+
+        queue = TaskQueue()
+        queue.push(task)
+
+        registry = WorkerRegistry()
+
+        live_pipeline = LiveExecutionPipeline(
+            profile=profile,
+            symbol_map=symbol_map,
+        )
+
+        worker = TradingWorker(
+            live_pipeline,
+        )
+        worker.start()
+
+        registry.register(
+            "trade",
+            worker,
+        )
+
+        dispatcher = TaskDispatcher(
+            queue,
+            registry,
+        )
+
+        result = dispatcher.dispatch_next()
+
+        print(result)
+        print(
+            "Trade ID:",
+            result.trade_id,
+        )
+        print(
+            "Status:",
+            result.status,
+        )
+        print(
+            "Order:",
+            result.order,
+        )
+        print(
+            "Deal:",
+            result.deal,
+        )
+        print(
+            "Task status:",
+            task.status,
+        )
+        print(
+            "Task worker:",
+            task.worker,
+        )
+
+        worker.stop()
+
+    finally:
         client.disconnect()
-        return
-
-    price = tick.ask
-
-    profile = TradingProfile(
-        profile_name="Founder Demo Gold",
-        risk_percent=1.0,
-        max_open_trades=1,
-        allowed_symbols=("GOLD",),
-        lot_policy_name="FIXED_001",
-    )
-
-    symbol_map = {
-        "GOLD": "GOLD.i#",
-    }
-
-    intent = TradingIntent(
-        action="BUY",
-        asset="GOLD",
-        sl=price - 5,
-        tp=price + 5,
-    )
-
-    task = TaskFactory.create(
-        task_type="trade",
-        payload=intent,
-    )
-
-    queue = TaskQueue()
-    queue.push(task)
-
-    registry = WorkerRegistry()
-
-    live_pipeline = LiveExecutionPipeline(
-        profile=profile,
-        symbol_map=symbol_map,
-    )
-
-    worker = TradingWorker(live_pipeline)
-    worker.start()
-
-    registry.register("trade", worker)
-
-    dispatcher = TaskDispatcher(queue, registry)
-
-    result = dispatcher.dispatch_next()
-
-    print(result)
-    print("Trade ID:", result.trade_id)
-    print("Status:", result.status)
-    print("Order:", result.order)
-    print("Deal:", result.deal)
-    print("Task status:", task.status)
-    print("Task worker:", task.worker)
-
-    worker.stop()
-    client.disconnect()
 
 
 if __name__ == "__main__":

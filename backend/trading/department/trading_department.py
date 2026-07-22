@@ -52,6 +52,9 @@ from backend.trading.pending.pending_activation_bridge import (
 from backend.trading.pending.pending_activation_runtime import (
     PendingActivationRuntime,
 )
+from backend.trading.pending.pending_activation_scheduler import (
+    PendingActivationScheduler,
+)
 from backend.trading.pending.pending_broker_evidence_reader import (
     PendingBrokerEvidenceReader,
 )
@@ -160,9 +163,7 @@ class TradingDepartment:
 
         self.pending_monitor = (
             PendingOrderMonitor(
-                repository=(
-                    self.pending_repository
-                ),
+                repository=self.pending_repository,
                 mt5_module=mt5_module,
             )
         )
@@ -220,6 +221,12 @@ class TradingDepartment:
             execution_pipeline=execution_pipeline,
             open_trade_persistence=self.persistence,
             timeline_service=self.timeline_service,
+            pending_order_repository=(
+                self.pending_repository
+            ),
+            pending_order_persistence=(
+                self.pending_persistence
+            ),
         )
 
         self.pending_activation_runtime = (
@@ -232,6 +239,17 @@ class TradingDepartment:
                     self.pending_activation_bridge
                 ),
                 trading_runtime=self.runtime,
+            )
+        )
+
+        self.pending_activation_scheduler = (
+            PendingActivationScheduler(
+                runtime=(
+                    self.pending_activation_runtime
+                ),
+                interval_seconds=(
+                    lifecycle_interval_seconds
+                ),
             )
         )
 
@@ -259,6 +277,10 @@ class TradingDepartment:
 
         await self.lifecycle_scheduler.start()
 
+        await (
+            self.pending_activation_scheduler.start()
+        )
+
         self.running = True
 
         return restored_trade_count
@@ -271,11 +293,15 @@ class TradingDepartment:
         if not self.running:
             return True
 
-        self.pending_persistence.save(
-            self.pending_repository
+        await (
+            self.pending_activation_scheduler.stop()
         )
 
         await self.lifecycle_scheduler.stop()
+
+        self.pending_persistence.save(
+            self.pending_repository
+        )
 
         self.runtime.stop()
 

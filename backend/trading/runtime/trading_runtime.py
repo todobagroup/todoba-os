@@ -20,6 +20,9 @@ from backend.trading.lifecycle.trade_record import (
 from backend.trading.lifecycle.trade_timeline_service import (
     TradeTimelineService,
 )
+from backend.trading.pending.pending_order_persistence import (
+    PendingOrderPersistence,
+)
 from backend.trading.pending.pending_order_record import (
     PendingOrderRecord,
 )
@@ -52,6 +55,9 @@ class TradingRuntime:
         ] = None,
         pending_order_repository: Optional[
             PendingOrderRepository
+        ] = None,
+        pending_order_persistence: Optional[
+            PendingOrderPersistence
         ] = None,
     ):
         if execution_pipeline is None:
@@ -96,6 +102,27 @@ class TradingRuntime:
                 "PendingOrderRepository."
             )
 
+        if (
+            pending_order_persistence is not None
+            and not isinstance(
+                pending_order_persistence,
+                PendingOrderPersistence,
+            )
+        ):
+            raise TypeError(
+                "pending_order_persistence must be "
+                "PendingOrderPersistence."
+            )
+
+        if (
+            pending_order_persistence is not None
+            and pending_order_repository is None
+        ):
+            raise ValueError(
+                "pending_order_persistence requires "
+                "pending_order_repository."
+            )
+
         self.open_trade_persistence = (
             open_trade_persistence
         )
@@ -106,6 +133,10 @@ class TradingRuntime:
 
         self.pending_order_repository = (
             pending_order_repository
+        )
+
+        self.pending_order_persistence = (
+            pending_order_persistence
         )
 
         self.queue = TaskQueue()
@@ -188,8 +219,8 @@ class TradingRuntime:
         pending_order_record: PendingOrderRecord,
     ) -> PendingOrderRecord:
         """
-        Register one newly placed organizational
-        pending order.
+        Register and immediately persist one newly placed
+        organizational pending order.
         """
 
         if not isinstance(
@@ -208,6 +239,14 @@ class TradingRuntime:
             self.pending_order_repository.save(
                 pending_order_record
             )
+
+            if (
+                self.pending_order_persistence
+                is not None
+            ):
+                self.pending_order_persistence.save(
+                    self.pending_order_repository
+                )
 
         return pending_order_record
 

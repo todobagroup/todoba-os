@@ -9,6 +9,7 @@ def resolve_symbol(symbol: str) -> str:
     normalized = symbol.strip().upper().replace("/", "")
 
     mapping = {
+        "XAU": "XAUUSD",
         "XAUUSD": "XAUUSD",
         "GOLD": "XAUUSD",
         "GOLDUSD": "XAUUSD",

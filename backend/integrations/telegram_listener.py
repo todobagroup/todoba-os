@@ -11,7 +11,7 @@ LIVE_DEMO
     the Trading Department to MT5 Demo.
 
 Telegram never calls MT5Sender directly.
-Telegram does not own Trading infrastructure.
+Telegram does not construct Trading infrastructure.
 """
 
 import asyncio
@@ -21,9 +21,7 @@ from dataclasses import asdict, is_dataclass
 import MetaTrader5 as mt5
 from telethon import events
 
-from backend.brain.memory import memory_engine
 from backend.config import (
-    BASE_DIR,
     MT5_BROKER_GOLD_SYMBOL,
     MT5_MAX_SPREAD_POINTS,
     TELEGRAM_EXECUTION_MODE,
@@ -31,28 +29,14 @@ from backend.config import (
     validate_telegram_config,
 )
 from backend.integrations.telegram_client import client
-from backend.integrations.telegram_task_execution_bridge import (
-    TelegramTaskExecutionBridge,
-)
-from backend.integrations.telegram_task_producer import (
-    TelegramTaskProducer,
-)
 from backend.integrations.telegram_trading_pipeline import (
     TelegramTradingPipeline,
 )
+from backend.runtime.runtime_bootstrap import RuntimeBootstrap
 from backend.trading.broker.mt5_client import MT5Client
 from backend.trading.broker.mt5_safety import MT5Safety
 from backend.trading.department.runtime_health_factory import (
     RuntimeHealthFactory,
-)
-from backend.trading.department.trading_department import (
-    TradingDepartment,
-)
-from backend.trading.execution.live_execution_pipeline import (
-    LiveExecutionPipeline,
-)
-from backend.trading.profile.trading_profile import (
-    TradingProfile,
 )
 from backend.trading.runtime.runtime_health_console import (
     print_runtime_health,
@@ -62,52 +46,18 @@ from backend.workers.telegram.telegram_receiver import (
 )
 
 
-OPEN_TRADES_STORAGE_PATH = (
-    BASE_DIR
-    / "data"
-    / "trading"
-    / "open_trades.json"
-)
-
-
 telegram_receiver = TelegramReceiver()
 
-trading_profile = TradingProfile(
-    profile_name="telegram_demo_gold",
-    risk_percent=1.0,
-    max_open_trades=10,
-    allowed_symbols=("XAUUSD",),
-    lot_policy_name="FIXED_001",
+runtime_bootstrap = RuntimeBootstrap()
+
+trading_profile = runtime_bootstrap.profile
+trading_department = runtime_bootstrap.department
+task_execution_bridge = (
+    runtime_bootstrap.task_execution_bridge
 )
 
 dry_run_pipeline = TelegramTradingPipeline(
     trading_profile
-)
-
-telegram_task_producer = TelegramTaskProducer(
-    trading_profile
-)
-
-live_execution_pipeline = LiveExecutionPipeline(
-    profile=trading_profile,
-    symbol_map={
-        "XAUUSD": MT5_BROKER_GOLD_SYMBOL,
-    },
-)
-
-trading_department = TradingDepartment(
-    execution_pipeline=live_execution_pipeline,
-    open_trades_storage_path=(
-        OPEN_TRADES_STORAGE_PATH
-    ),
-    memory=memory_engine,
-    mt5_module=mt5,
-    lifecycle_interval_seconds=5.0,
-)
-
-task_execution_bridge = TelegramTaskExecutionBridge(
-    producer=telegram_task_producer,
-    department=trading_department,
 )
 
 mt5_client = MT5Client()

@@ -11,7 +11,7 @@ LIVE_DEMO
     the Trading Department to MT5 Demo.
 
 Telegram never calls MT5Sender directly.
-Telegram does not construct Trading infrastructure.
+Telegram does not construct or manage Trading lifecycle.
 """
 
 import asyncio
@@ -33,14 +33,6 @@ from backend.integrations.telegram_trading_pipeline import (
     TelegramTradingPipeline,
 )
 from backend.runtime.runtime_bootstrap import RuntimeBootstrap
-from backend.trading.broker.mt5_client import MT5Client
-from backend.trading.broker.mt5_safety import MT5Safety
-from backend.trading.department.runtime_health_factory import (
-    RuntimeHealthFactory,
-)
-from backend.trading.runtime.runtime_health_console import (
-    print_runtime_health,
-)
 from backend.workers.telegram.telegram_receiver import (
     TelegramReceiver,
 )
@@ -49,9 +41,9 @@ from backend.workers.telegram.telegram_receiver import (
 telegram_receiver = TelegramReceiver()
 
 runtime_bootstrap = RuntimeBootstrap()
+runtime = runtime_bootstrap.create_runtime()
 
 trading_profile = runtime_bootstrap.profile
-trading_department = runtime_bootstrap.department
 task_execution_bridge = (
     runtime_bootstrap.task_execution_bridge
 )
@@ -59,8 +51,6 @@ task_execution_bridge = (
 dry_run_pipeline = TelegramTradingPipeline(
     trading_profile
 )
-
-mt5_client = MT5Client()
 
 processed_message_keys: set[
     tuple[int, int]
@@ -294,7 +284,7 @@ async def main() -> None:
         f"{TELEGRAM_EXECUTION_MODE}"
     )
 
-    department_started = False
+    runtime_started = False
 
     try:
         if TELEGRAM_EXECUTION_MODE == "LIVE_DEMO":
@@ -303,56 +293,8 @@ async def main() -> None:
                 f"{MT5_BROKER_GOLD_SYMBOL}"
             )
 
-            if not mt5_client.connect():
-                raise RuntimeError(
-                    "TODOBA could not connect to MT5."
-                )
-
-            MT5Safety().validate()
-
-            account = mt5_client.get_account_info()
-
-            if account is None:
-                raise RuntimeError(
-                    "TODOBA could not read MT5 account."
-                )
-
-            restored_trade_count = (
-                await trading_department.start()
-            )
-
-            department_started = True
-
-            health_report = RuntimeHealthFactory().build(
-                department=trading_department,
-                restored_trade_count=(
-                    restored_trade_count
-                ),
-                mt5_ready=mt5_client.is_connected(),
-            )
-
-            print("MT5 Connection: READY")
-            print(
-                f"MT5 Account: "
-                f"{account.login}"
-            )
-            print(
-                f"MT5 Server: "
-                f"{account.server}"
-            )
-            print(
-                f"Maximum Open Trades: "
-                f"{trading_profile.max_open_trades}"
-            )
-
-            print_runtime_health(
-                health_report
-            )
-
-            if not health_report.healthy:
-                raise RuntimeError(
-                    "TODOBA system health check failed."
-                )
+            await runtime.start()
+            runtime_started = True
 
             print(
                 "WARNING: LIVE_DEMO sends real orders "
@@ -372,11 +314,8 @@ async def main() -> None:
         if client.is_connected():
             await client.disconnect()
 
-        if department_started:
-            await trading_department.stop()
-
-        if TELEGRAM_EXECUTION_MODE == "LIVE_DEMO":
-            mt5_client.disconnect()
+        if runtime_started:
+            await runtime.stop()
 
         print("Telegram Listener Stopped.")
 

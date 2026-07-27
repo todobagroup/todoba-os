@@ -28,7 +28,9 @@ from backend.config import (
     TELEGRAM_SIGNAL_GROUP_ID,
     validate_telegram_config,
 )
-from backend.integrations.telegram_client import client
+from backend.integrations.telegram_client import (
+    create_telegram_client,
+)
 from backend.integrations.telegram_trading_pipeline import (
     TelegramTradingPipeline,
 )
@@ -40,10 +42,13 @@ from backend.workers.telegram.telegram_receiver import (
 
 telegram_receiver = TelegramReceiver()
 
+client = None
+
 runtime_bootstrap = RuntimeBootstrap()
 runtime = runtime_bootstrap.create_runtime()
 
 trading_profile = runtime_bootstrap.profile
+
 task_execution_bridge = (
     runtime_bootstrap.task_execution_bridge
 )
@@ -101,10 +106,6 @@ def print_result(
 
 
 def read_demo_decision_context() -> dict:
-    """
-    Read the minimum MT5 context required by DecisionGateway.
-    """
-
     mt5.symbol_select(
         MT5_BROKER_GOLD_SYMBOL,
         True,
@@ -120,22 +121,15 @@ def read_demo_decision_context() -> dict:
 
     if symbol_info is None:
         raise RuntimeError(
-            "Cannot read MT5 symbol information for "
-            f"{MT5_BROKER_GOLD_SYMBOL}."
+            "Cannot read MT5 symbol information."
         )
 
     if tick is None:
         raise RuntimeError(
-            "Cannot read MT5 tick for "
-            f"{MT5_BROKER_GOLD_SYMBOL}."
+            "Cannot read MT5 tick."
         )
 
     point = symbol_info.point
-
-    if point <= 0:
-        raise RuntimeError(
-            "MT5 symbol point must be greater than zero."
-        )
 
     spread_points = (
         tick.ask - tick.bid
@@ -147,16 +141,8 @@ def read_demo_decision_context() -> dict:
 
     if positions is None:
         raise RuntimeError(
-            "Cannot read open MT5 positions: "
-            f"{mt5.last_error()}"
+            "Cannot read MT5 positions."
         )
-
-    market_open = (
-        tick.bid > 0
-        and tick.ask > 0
-        and symbol_info.trade_mode
-        != mt5.SYMBOL_TRADE_MODE_DISABLED
-    )
 
     return {
         "open_position_count": len(
@@ -169,7 +155,10 @@ def read_demo_decision_context() -> dict:
             spread_points
             <= MT5_MAX_SPREAD_POINTS
         ),
-        "market_open": market_open,
+        "market_open": (
+            tick.bid > 0
+            and tick.ask > 0
+        ),
         "risk_ok": True,
         "spread_points": spread_points,
         "bid": tick.bid,
@@ -177,101 +166,85 @@ def read_demo_decision_context() -> dict:
     }
 
 
-@client.on(
-    events.NewMessage(
-        chats=TELEGRAM_SIGNAL_GROUP_ID
-    )
-)
-async def new_message(event) -> None:
-    source_key = (
-        event.chat_id,
-        event.id,
-    )
-
-    if source_key in processed_message_keys:
-        print_result(
-            "TODOBA DUPLICATE MESSAGE",
-            {
-                "status": "duplicate",
-                "mode": TELEGRAM_EXECUTION_MODE,
-                "chat_id": event.chat_id,
-                "message_id": event.id,
-            },
+async def register_handlers() -> None:
+    @client.on(
+        events.NewMessage(
+            chats=TELEGRAM_SIGNAL_GROUP_ID
         )
-        return
-
-    try:
-        incoming_signal = telegram_receiver.receive(
-            message=event.raw_text,
-            sender=(
-                str(event.sender_id)
-                if event.sender_id is not None
-                else None
-            ),
-            sender_id=event.sender_id,
-            chat_id=event.chat_id,
-            message_id=event.id,
+    )
+    async def new_message(event) -> None:
+        source_key = (
+            event.chat_id,
+            event.id,
         )
 
-        if TELEGRAM_EXECUTION_MODE == "DRY_RUN":
-            result = dry_run_pipeline.process(
-                incoming_signal
-            )
-
-            if result.get("status") == "planned":
-                processed_message_keys.add(
-                    source_key
-                )
-
-            print_result(
-                "TODOBA TELEGRAM DRY RUN",
-                result,
-            )
-
+        if source_key in processed_message_keys:
             return
 
-        context = read_demo_decision_context()
-
-        result = task_execution_bridge.execute(
-            incoming_signal,
-            open_position_count=(
-                context["open_position_count"]
-            ),
-            spread_ok=context["spread_ok"],
-            market_open=context["market_open"],
-            risk_ok=context["risk_ok"],
-        )
-
-        if result.status == "executed":
-            processed_message_keys.add(
-                source_key
+        try:
+            incoming_signal = (
+                telegram_receiver.receive(
+                    message=event.raw_text,
+                    sender=(
+                        str(event.sender_id)
+                        if event.sender_id is not None
+                        else None
+                    ),
+                    sender_id=event.sender_id,
+                    chat_id=event.chat_id,
+                    message_id=event.id,
+                )
             )
 
-        print_result(
-            "TODOBA TELEGRAM LIVE DEMO",
-            {
-                "mode": "LIVE_DEMO",
-                "chat_id": event.chat_id,
-                "message_id": event.id,
-                "market_context": context,
-                "result": result,
-            },
-        )
+            if TELEGRAM_EXECUTION_MODE == "DRY_RUN":
+                result = (
+                    dry_run_pipeline.process(
+                        incoming_signal
+                    )
+                )
 
-    except Exception as error:
-        print_result(
-            "TODOBA TELEGRAM ERROR",
-            {
-                "status": "error",
-                "mode": TELEGRAM_EXECUTION_MODE,
-                "chat_id": event.chat_id,
-                "message_id": event.id,
-                "errors": [str(error)],
-            },
-        )
+                print_result(
+                    "TODOBA TELEGRAM DRY RUN",
+                    result,
+                )
+
+                return
+
+            context = read_demo_decision_context()
+
+            result = (
+                task_execution_bridge.execute(
+                    incoming_signal,
+                    open_position_count=(
+                        context["open_position_count"]
+                    ),
+                    spread_ok=context["spread_ok"],
+                    market_open=context["market_open"],
+                    risk_ok=context["risk_ok"],
+                )
+            )
+
+            print_result(
+                "TODOBA TELEGRAM LIVE DEMO",
+                {
+                    "mode": "LIVE_DEMO",
+                    "market_context": context,
+                    "result": result,
+                },
+            )
+
+        except Exception as error:
+            print_result(
+                "TODOBA TELEGRAM ERROR",
+                {
+                    "error": str(error),
+                },
+            )
 
 
 async def main() -> None:
+    global client
+
     validate_telegram_config()
 
     print("Starting TODOBA Telegram Listener...")
@@ -288,11 +261,6 @@ async def main() -> None:
 
     try:
         if TELEGRAM_EXECUTION_MODE == "LIVE_DEMO":
-            print(
-                f"MT5 Broker Gold Symbol: "
-                f"{MT5_BROKER_GOLD_SYMBOL}"
-            )
-
             await runtime.start()
             runtime_started = True
 
@@ -304,6 +272,10 @@ async def main() -> None:
         else:
             print("Live MT5 Orders: DISABLED")
 
+        client = create_telegram_client()
+
+        await register_handlers()
+
         await client.start()
 
         print("Telegram Listener Running...")
@@ -311,8 +283,9 @@ async def main() -> None:
         await client.run_until_disconnected()
 
     finally:
-        if client.is_connected():
-            await client.disconnect()
+        if client is not None:
+            if client.is_connected():
+                await client.disconnect()
 
         if runtime_started:
             await runtime.stop()

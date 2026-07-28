@@ -7,9 +7,23 @@ from pydantic import BaseModel
 from backend.brain_engine import brain_engine
 from backend.brain.memory import memory_engine
 from backend.brain.models.experience import Experience
+from backend.trading.execution.execution_mission_api import (
+    create_execution_mission_router,
+)
+from backend.trading.execution.execution_mission_store import (
+    ExecutionMissionStore,
+)
 
 
 app = FastAPI()
+
+execution_mission_store = ExecutionMissionStore()
+
+app.include_router(
+    create_execution_mission_router(
+        execution_mission_store
+    )
+)
 
 
 class ExperienceRequest(BaseModel):
@@ -42,7 +56,7 @@ def brain():
             <title>TODOBA Brain</title>
         </head>
         <body style="font-family:Arial;padding:40px;">
-            <h1>🧠 TODOBA Brain</h1>
+            <h1>TODOBA Brain</h1>
             <pre>{content}</pre>
         </body>
     </html>

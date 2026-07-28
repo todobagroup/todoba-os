@@ -10,6 +10,9 @@ from backend.brain.models.experience import Experience
 from backend.trading.execution.execution_mission_api import (
     create_execution_mission_router,
 )
+from backend.trading.execution.execution_mission_injection_api import (
+    create_execution_mission_injection_router,
+)
 from backend.trading.execution.execution_mission_store import (
     ExecutionMissionStore,
 )
@@ -21,6 +24,12 @@ execution_mission_store = ExecutionMissionStore()
 
 app.include_router(
     create_execution_mission_router(
+        execution_mission_store
+    )
+)
+
+app.include_router(
+    create_execution_mission_injection_router(
         execution_mission_store
     )
 )

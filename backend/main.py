@@ -7,30 +7,56 @@ from pydantic import BaseModel
 from backend.brain_engine import brain_engine
 from backend.brain.memory import memory_engine
 from backend.brain.models.experience import Experience
+
 from backend.trading.execution.execution_mission_api import (
     create_execution_mission_router,
 )
+
 from backend.trading.execution.execution_mission_injection_api import (
     create_execution_mission_injection_router,
 )
-from backend.trading.execution.execution_mission_store import (
-    ExecutionMissionStore,
+
+from backend.trading.execution.execution_mission_persistence import (
+    ExecutionMissionPersistence,
+)
+
+from backend.trading.execution.execution_mission_repository import (
+    ExecutionMissionRepository,
+)
+
+
+MISSION_STORAGE_PATH = (
+    Path("data")
+    / "trading"
+    / "execution_missions.json"
 )
 
 
 app = FastAPI()
 
-execution_mission_store = ExecutionMissionStore()
 
-app.include_router(
-    create_execution_mission_router(
-        execution_mission_store
+execution_mission_repository = (
+    ExecutionMissionRepository()
+)
+
+execution_mission_persistence = (
+    ExecutionMissionPersistence(
+        MISSION_STORAGE_PATH
     )
 )
 
+
+app.include_router(
+    create_execution_mission_router(
+        execution_mission_repository
+    )
+)
+
+
 app.include_router(
     create_execution_mission_injection_router(
-        execution_mission_store
+        execution_mission_repository,
+        execution_mission_persistence,
     )
 )
 
@@ -55,7 +81,9 @@ def brain():
     file = Path("backend/brain/identity.md")
 
     if file.exists():
-        content = file.read_text(encoding="utf-8")
+        content = file.read_text(
+            encoding="utf-8"
+        )
     else:
         content = "Brain not found."
 
@@ -78,21 +106,33 @@ def memory():
 
     return {
         "memory_count": len(objects),
-        "objects": [str(obj) for obj in objects],
+        "objects": [
+            str(obj)
+            for obj in objects
+        ],
     }
 
 
 @app.post("/brain/experience")
-def receive_experience(request: ExperienceRequest):
+def receive_experience(
+    request: ExperienceRequest,
+):
+
     experience = Experience(
         source=request.source,
         content=request.content,
     )
 
-    task = brain_engine.process(experience)
+    task = brain_engine.process(
+        experience
+    )
 
     return {
         "status": "received",
         "task_created": task is not None,
-        "task_id": task.task_id if task is not None else None,
+        "task_id": (
+            task.task_id
+            if task is not None
+            else None
+        ),
     }

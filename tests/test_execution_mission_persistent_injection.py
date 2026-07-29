@@ -1,5 +1,5 @@
-from pathlib import Path
 import sys
+from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
@@ -20,7 +20,7 @@ from backend.trading.execution.execution_mission_persistence import (
 )
 
 
-def test_inject_mission_pushes_into_persistent_repository(
+def test_persistent_mission_injection_saves_repository(
     tmp_path,
 ):
 
@@ -44,19 +44,19 @@ def test_inject_mission_pushes_into_persistent_repository(
     response = client.post(
         "/missions/inject",
         json={
-            "mission_id": "proof-001",
+            "mission_id": "persistent-001",
             "agent_id": "trusted-agent-001",
             "account_fingerprint": "demo-account",
             "symbol": "XAUUSD",
-            "order_type": "BUY",
+            "order_type": "BUY LIMIT",
             "volume": 0.01,
-            "entry": None,
+            "entry": 4100.0,
             "sl": 4000.0,
             "tp": 4200.0,
             "magic_number": 10001,
-            "comment": "TODOBA Proof 001",
-            "created_at": "2026-07-28T00:00:00Z",
-            "expires_at": "2026-07-29T00:00:00Z",
+            "comment": "TODOBA Persistent Proof",
+            "created_at": "2026-07-29T00:00:00Z",
+            "expires_at": "2026-07-30T00:00:00Z",
             "sequence": 1,
         },
     )
@@ -65,19 +65,24 @@ def test_inject_mission_pushes_into_persistent_repository(
 
     assert response.json() == {
         "status": "persisted",
-        "mission_id": "proof-001",
+        "mission_id": "persistent-001",
         "repository_size": 1,
     }
 
-    assert repository.size() == 1
+    restored_repository = (
+        ExecutionMissionRepository()
+    )
 
-    mission = repository.get(
-        "proof-001"
+    restored_count = persistence.restore(
+        restored_repository
+    )
+
+    assert restored_count == 1
+
+    mission = restored_repository.get(
+        "persistent-001"
     )
 
     assert mission is not None
-    assert mission.mission_id == "proof-001"
-    assert mission.agent_id == "trusted-agent-001"
     assert mission.symbol == "XAUUSD"
-    assert mission.order_type == "BUY"
-    assert mission.volume == 0.01
+    assert mission.order_type == "BUY LIMIT"

@@ -1,12 +1,10 @@
 """
 TODOBA Execution Mission Injection API
 
-Provides a proof-only boundary for injecting
-ExecutionMission objects into the active mission store.
+Provides a boundary for injecting
+ExecutionMission objects.
 
-This component exists for Proof 001 validation only.
-Production mission creation belongs to a separate
-capability.
+Supports persistent mission creation.
 """
 
 from fastapi import APIRouter
@@ -15,8 +13,13 @@ from pydantic import BaseModel
 from backend.trading.execution.execution_mission import (
     ExecutionMission,
 )
-from backend.trading.execution.execution_mission_store import (
-    ExecutionMissionStore,
+
+from backend.trading.execution.execution_mission_persistence import (
+    ExecutionMissionPersistence,
+)
+
+from backend.trading.execution.execution_mission_repository import (
+    ExecutionMissionRepository,
 )
 
 
@@ -44,15 +47,26 @@ class ExecutionMissionRequest(BaseModel):
 
 
 def create_execution_mission_injection_router(
-    store: ExecutionMissionStore,
+    repository: ExecutionMissionRepository,
+    persistence: ExecutionMissionPersistence,
 ) -> APIRouter:
+
     if not isinstance(
-        store,
-        ExecutionMissionStore,
+        repository,
+        ExecutionMissionRepository,
     ):
         raise TypeError(
             "create_execution_mission_injection_router "
-            "requires ExecutionMissionStore."
+            "requires ExecutionMissionRepository."
+        )
+
+    if not isinstance(
+        persistence,
+        ExecutionMissionPersistence,
+    ):
+        raise TypeError(
+            "create_execution_mission_injection_router "
+            "requires ExecutionMissionPersistence."
         )
 
     router = APIRouter()
@@ -63,6 +77,7 @@ def create_execution_mission_injection_router(
     def inject_mission(
         request: ExecutionMissionRequest,
     ):
+
         mission = ExecutionMission(
             mission_id=request.mission_id,
             agent_id=request.agent_id,
@@ -82,14 +97,18 @@ def create_execution_mission_injection_router(
             sequence=request.sequence,
         )
 
-        store.push(
+        repository.save(
             mission
         )
 
+        persistence.save(
+            repository
+        )
+
         return {
-            "status": "queued",
+            "status": "persisted",
             "mission_id": mission.mission_id,
-            "queue_size": store.size(),
+            "repository_size": repository.size(),
         }
 
     return router

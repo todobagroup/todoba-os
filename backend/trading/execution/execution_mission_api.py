@@ -44,13 +44,16 @@ def create_execution_mission_router(
                 "mission": None,
             }
 
+        payload = (
+            ExecutionMissionSerializer.serialize(
+                mission
+            )
+        )
+
         return {
             "status": "available",
-            "mission": (
-                ExecutionMissionSerializer.serialize(
-                    mission
-                )
-            ),
+            "mission": payload,
+            **payload,
         }
 
     return router

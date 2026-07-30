@@ -6,6 +6,7 @@ Coordinates execution mission creation flow.
 This component owns:
 - repository storage
 - persistence
+- lifecycle registration
 - delivery to Trusted Agent queue
 
 It does not:
@@ -29,6 +30,14 @@ from backend.trading.execution.execution_mission_delivery_bridge import (
     ExecutionMissionDeliveryBridge,
 )
 
+from backend.trading.execution.execution_mission_record import (
+    ExecutionMissionRecord,
+)
+
+from backend.trading.execution.execution_mission_registry import (
+    ExecutionMissionRegistry,
+)
+
 
 class ExecutionMissionService:
     """
@@ -40,6 +49,7 @@ class ExecutionMissionService:
         repository: ExecutionMissionRepository,
         persistence: ExecutionMissionPersistence,
         delivery_bridge: ExecutionMissionDeliveryBridge,
+        registry: ExecutionMissionRegistry,
     ) -> None:
 
         if not isinstance(
@@ -69,9 +79,19 @@ class ExecutionMissionService:
                 "ExecutionMissionDeliveryBridge."
             )
 
+        if not isinstance(
+            registry,
+            ExecutionMissionRegistry,
+        ):
+            raise TypeError(
+                "ExecutionMissionService requires "
+                "ExecutionMissionRegistry."
+            )
+
         self.repository = repository
         self.persistence = persistence
         self.delivery_bridge = delivery_bridge
+        self.registry = registry
 
     def create_mission(
         self,
@@ -92,6 +112,14 @@ class ExecutionMissionService:
 
         self.persistence.save(
             self.repository
+        )
+
+        record = ExecutionMissionRecord(
+            mission=mission
+        )
+
+        self.registry.register(
+            record
         )
 
         self.delivery_bridge.deliver(

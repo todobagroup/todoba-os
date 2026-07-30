@@ -31,6 +31,10 @@ from backend.trading.execution.execution_mission_store import (
     ExecutionMissionStore,
 )
 
+from backend.trading.execution.execution_mission_registry import (
+    ExecutionMissionRegistry,
+)
+
 
 def test_inject_mission_uses_execution_service(
     tmp_path,
@@ -48,10 +52,13 @@ def test_inject_mission_uses_execution_service(
         store
     )
 
+    registry = ExecutionMissionRegistry()
+
     service = ExecutionMissionService(
         repository,
         persistence,
         bridge,
+        registry,
     )
 
     app = FastAPI()
@@ -92,5 +99,7 @@ def test_inject_mission_uses_execution_service(
     }
 
     assert repository.size() == 1
+
+    assert registry.size() == 1
 
     assert store.size() == 1

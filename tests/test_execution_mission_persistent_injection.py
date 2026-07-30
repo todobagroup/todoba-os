@@ -31,6 +31,10 @@ from backend.trading.execution.execution_mission_store import (
     ExecutionMissionStore,
 )
 
+from backend.trading.execution.execution_mission_registry import (
+    ExecutionMissionRegistry,
+)
+
 
 def test_persistent_mission_injection_saves_repository(
     tmp_path,
@@ -48,10 +52,13 @@ def test_persistent_mission_injection_saves_repository(
         store
     )
 
+    registry = ExecutionMissionRegistry()
+
     service = ExecutionMissionService(
         repository,
         persistence,
         bridge,
+        registry,
     )
 
     app = FastAPI()
@@ -91,6 +98,10 @@ def test_persistent_mission_injection_saves_repository(
         "mission_id": "persistent-001",
     }
 
+    assert repository.size() == 1
+
+    assert registry.size() == 1
+
     restored_repository = (
         ExecutionMissionRepository()
     )
@@ -106,9 +117,5 @@ def test_persistent_mission_injection_saves_repository(
     )
 
     assert mission is not None
-
     assert mission.symbol == "XAUUSD"
-
     assert mission.order_type == "BUY LIMIT"
-
-    assert store.size() == 1

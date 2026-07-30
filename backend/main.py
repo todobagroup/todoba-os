@@ -32,6 +32,10 @@ from backend.trading.execution.execution_mission_delivery_bridge import (
     ExecutionMissionDeliveryBridge,
 )
 
+from backend.trading.execution.execution_mission_registry import (
+    ExecutionMissionRegistry,
+)
+
 from backend.trading.execution.execution_mission_service import (
     ExecutionMissionService,
 )
@@ -67,11 +71,16 @@ execution_mission_delivery_bridge = (
     )
 )
 
+execution_mission_registry = (
+    ExecutionMissionRegistry()
+)
+
 execution_mission_service = (
     ExecutionMissionService(
         execution_mission_repository,
         execution_mission_persistence,
         execution_mission_delivery_bridge,
+        execution_mission_registry,
     )
 )
 

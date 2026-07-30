@@ -28,6 +28,10 @@ from backend.trading.execution.execution_mission_store import (
     ExecutionMissionStore,
 )
 
+from backend.trading.execution.execution_mission_registry import (
+    ExecutionMissionRegistry,
+)
+
 
 def build_mission() -> ExecutionMission:
 
@@ -65,10 +69,13 @@ def test_execution_mission_service_creates_and_delivers_mission(
         store
     )
 
+    registry = ExecutionMissionRegistry()
+
     service = ExecutionMissionService(
         repository,
         persistence,
         bridge,
+        registry,
     )
 
     mission = build_mission()
@@ -80,6 +87,8 @@ def test_execution_mission_service_creates_and_delivers_mission(
     assert result == mission
 
     assert repository.size() == 1
+
+    assert registry.size() == 1
 
     assert store.size() == 1
 

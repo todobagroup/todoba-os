@@ -11,12 +11,24 @@ from backend.trading.execution.execution_mission_injection_api import (
     create_execution_mission_injection_router,
 )
 
+from backend.trading.execution.execution_mission_service import (
+    ExecutionMissionService,
+)
+
 from backend.trading.execution.execution_mission_repository import (
     ExecutionMissionRepository,
 )
 
 from backend.trading.execution.execution_mission_persistence import (
     ExecutionMissionPersistence,
+)
+
+from backend.trading.execution.execution_mission_delivery_bridge import (
+    ExecutionMissionDeliveryBridge,
+)
+
+from backend.trading.execution.execution_mission_store import (
+    ExecutionMissionStore,
 )
 
 
@@ -30,12 +42,23 @@ def test_persistent_mission_injection_saves_repository(
         tmp_path / "execution_missions.json"
     )
 
+    store = ExecutionMissionStore()
+
+    bridge = ExecutionMissionDeliveryBridge(
+        store
+    )
+
+    service = ExecutionMissionService(
+        repository,
+        persistence,
+        bridge,
+    )
+
     app = FastAPI()
 
     app.include_router(
         create_execution_mission_injection_router(
-            repository,
-            persistence,
+            service
         )
     )
 
@@ -66,7 +89,6 @@ def test_persistent_mission_injection_saves_repository(
     assert response.json() == {
         "status": "persisted",
         "mission_id": "persistent-001",
-        "repository_size": 1,
     }
 
     restored_repository = (
@@ -84,5 +106,9 @@ def test_persistent_mission_injection_saves_repository(
     )
 
     assert mission is not None
+
     assert mission.symbol == "XAUUSD"
+
     assert mission.order_type == "BUY LIMIT"
+
+    assert store.size() == 1

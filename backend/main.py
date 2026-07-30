@@ -24,6 +24,18 @@ from backend.trading.execution.execution_mission_repository import (
     ExecutionMissionRepository,
 )
 
+from backend.trading.execution.execution_mission_store import (
+    ExecutionMissionStore,
+)
+
+from backend.trading.execution.execution_mission_delivery_bridge import (
+    ExecutionMissionDeliveryBridge,
+)
+
+from backend.trading.execution.execution_mission_service import (
+    ExecutionMissionService,
+)
+
 
 MISSION_STORAGE_PATH = (
     Path("data")
@@ -45,18 +57,35 @@ execution_mission_persistence = (
     )
 )
 
+execution_mission_store = (
+    ExecutionMissionStore()
+)
+
+execution_mission_delivery_bridge = (
+    ExecutionMissionDeliveryBridge(
+        execution_mission_store
+    )
+)
+
+execution_mission_service = (
+    ExecutionMissionService(
+        execution_mission_repository,
+        execution_mission_persistence,
+        execution_mission_delivery_bridge,
+    )
+)
+
 
 app.include_router(
     create_execution_mission_router(
-        execution_mission_repository
+        execution_mission_store
     )
 )
 
 
 app.include_router(
     create_execution_mission_injection_router(
-        execution_mission_repository,
-        execution_mission_persistence,
+        execution_mission_service
     )
 )
 

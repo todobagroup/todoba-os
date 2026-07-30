@@ -1,10 +1,11 @@
 """
 TODOBA Execution Mission Injection API
 
-Provides a boundary for injecting
+Provides HTTP boundary for injecting
 ExecutionMission objects.
 
-Supports persistent mission creation.
+Business orchestration belongs to
+ExecutionMissionService.
 """
 
 from fastapi import APIRouter
@@ -14,16 +15,13 @@ from backend.trading.execution.execution_mission import (
     ExecutionMission,
 )
 
-from backend.trading.execution.execution_mission_persistence import (
-    ExecutionMissionPersistence,
-)
-
-from backend.trading.execution.execution_mission_repository import (
-    ExecutionMissionRepository,
+from backend.trading.execution.execution_mission_service import (
+    ExecutionMissionService,
 )
 
 
 class ExecutionMissionRequest(BaseModel):
+
     mission_id: str
     agent_id: str
     account_fingerprint: str
@@ -47,26 +45,16 @@ class ExecutionMissionRequest(BaseModel):
 
 
 def create_execution_mission_injection_router(
-    repository: ExecutionMissionRepository,
-    persistence: ExecutionMissionPersistence,
+    service: ExecutionMissionService,
 ) -> APIRouter:
 
     if not isinstance(
-        repository,
-        ExecutionMissionRepository,
+        service,
+        ExecutionMissionService,
     ):
         raise TypeError(
             "create_execution_mission_injection_router "
-            "requires ExecutionMissionRepository."
-        )
-
-    if not isinstance(
-        persistence,
-        ExecutionMissionPersistence,
-    ):
-        raise TypeError(
-            "create_execution_mission_injection_router "
-            "requires ExecutionMissionPersistence."
+            "requires ExecutionMissionService."
         )
 
     router = APIRouter()
@@ -97,18 +85,13 @@ def create_execution_mission_injection_router(
             sequence=request.sequence,
         )
 
-        repository.save(
+        service.create_mission(
             mission
-        )
-
-        persistence.save(
-            repository
         )
 
         return {
             "status": "persisted",
             "mission_id": mission.mission_id,
-            "repository_size": repository.size(),
         }
 
     return router

@@ -5,11 +5,76 @@
 #include <TODOBAExecution/ExecutionPermissionGuard.mqh>
 
 #define TODOBA_AGENT_NAME "TODOBA Trusted Agent"
-#define TODOBA_AGENT_VERSION "0.5.0"
+#define TODOBA_AGENT_VERSION "0.6.0"
 
 input int PollIntervalSeconds = 5;
 input string CloudBaseUrl = "http://127.0.0.1:8000";
 input string AgentId = "trusted-agent-001";
+
+
+void SendAcknowledgement(
+   TODOBAExecutionMission &mission
+)
+{
+   string url =
+      CloudBaseUrl + "/missions/acknowledge";
+
+
+   string payload =
+      "{"
+      "\"mission_id\":\"" + mission.mission_id + "\","
+      "\"agent_id\":\"" + mission.agent_id + "\","
+      "\"sequence\":" + IntegerToString(
+         mission.sequence
+      ) + ","
+      "\"status\":\"acknowledged\","
+      "\"acknowledged_at\":\"2026-07-29T00:00:00\""
+      "}";
+
+
+   char request_body[];
+
+   StringToCharArray(
+      payload,
+      request_body
+   );
+
+
+   char response_body[];
+
+   string response_headers;
+
+
+   int status_code = WebRequest(
+      "POST",
+      url,
+      "Content-Type: application/json\r\n",
+      3000,
+      request_body,
+      response_body,
+      response_headers
+   );
+
+
+   if(status_code == -1)
+   {
+      Print(
+         "TODOBA Trusted Agent: acknowledgement failed. error=",
+         GetLastError()
+      );
+
+      return;
+   }
+
+
+   Print(
+      "TODOBA Trusted Agent: acknowledgement sent. mission=",
+      mission.mission_id,
+      " status=",
+      status_code
+   );
+}
+
 
 
 void PollCloud()
@@ -21,7 +86,6 @@ void PollCloud()
 
    string response_headers;
 
-   ResetLastError();
 
    int status_code = WebRequest(
       "GET",
@@ -32,6 +96,7 @@ void PollCloud()
       response_body,
       response_headers
    );
+
 
    if(status_code == -1)
    {
@@ -51,11 +116,6 @@ void PollCloud()
 
    if(status_code != 200)
    {
-      Print(
-         "TODOBA Trusted Agent: cloud HTTP status=",
-         status_code
-      );
-
       return;
    }
 
@@ -101,8 +161,7 @@ void PollCloud()
    )
    {
       Print(
-         "TODOBA Trusted Agent: mission rejected. id=",
-         mission.mission_id
+         "TODOBA Trusted Agent: mission rejected."
       );
 
       return;
@@ -116,30 +175,24 @@ void PollCloud()
    )
    {
       Print(
-         "TODOBA Trusted Agent: mission rejected by permission guard. sequence=",
-         mission.sequence
+         "TODOBA Trusted Agent: permission rejected."
       );
 
       return;
    }
 
 
+   SendAcknowledgement(
+      mission
+   );
+
+
    Print(
       "TODOBA Trusted Agent: mission accepted. id=",
-      mission.mission_id,
-      " symbol=",
-      mission.symbol,
-      " type=",
-      mission.order_type,
-      " volume=",
-      DoubleToString(
-         mission.volume,
-         2
-      ),
-      " sequence=",
-      mission.sequence
+      mission.mission_id
    );
 }
+
 
 
 int OnInit()
@@ -171,16 +224,12 @@ int OnInit()
 }
 
 
+
 void OnDeinit(const int reason)
 {
    EventKillTimer();
-
-   Print(
-      TODOBA_AGENT_NAME,
-      " stopped. reason=",
-      reason
-   );
 }
+
 
 
 void OnTimer()

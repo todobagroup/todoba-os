@@ -16,6 +16,30 @@ from backend.trading.execution.execution_mission_injection_api import (
     create_execution_mission_injection_router,
 )
 
+from backend.trading.execution.execution_mission_execution_started_api import (
+    create_execution_mission_execution_started_router,
+)
+
+from backend.trading.execution.execution_mission_execution_started_store import (
+    ExecutionMissionExecutionStartedStore,
+)
+
+from backend.trading.execution.execution_mission_completed_api import (
+    create_execution_mission_completed_router,
+)
+
+from backend.trading.execution.execution_mission_completed_store import (
+    ExecutionMissionCompletedStore,
+)
+
+from backend.trading.execution.execution_mission_failed_api import (
+    create_execution_mission_failed_router,
+)
+
+from backend.trading.execution.execution_mission_failed_store import (
+    ExecutionMissionFailedStore,
+)
+
 from backend.trading.execution.execution_mission_persistence import (
     ExecutionMissionPersistence,
 )
@@ -85,6 +109,19 @@ execution_mission_service = (
 )
 
 
+execution_mission_execution_started_store = (
+    ExecutionMissionExecutionStartedStore()
+)
+
+execution_mission_completed_store = (
+    ExecutionMissionCompletedStore()
+)
+
+execution_mission_failed_store = (
+    ExecutionMissionFailedStore()
+)
+
+
 app.include_router(
     create_execution_mission_router(
         execution_mission_store
@@ -95,6 +132,27 @@ app.include_router(
 app.include_router(
     create_execution_mission_injection_router(
         execution_mission_service
+    )
+)
+
+
+app.include_router(
+    create_execution_mission_execution_started_router(
+        execution_mission_execution_started_store
+    )
+)
+
+
+app.include_router(
+    create_execution_mission_completed_router(
+        execution_mission_completed_store
+    )
+)
+
+
+app.include_router(
+    create_execution_mission_failed_router(
+        execution_mission_failed_store
     )
 )
 

@@ -1,6 +1,7 @@
 from pathlib import Path
 import sys
 
+
 ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
 
@@ -9,12 +10,28 @@ from backend.trading.execution.execution_mission import (
     ExecutionMission,
 )
 
-from backend.trading.execution.execution_mission_record import (
-    ExecutionMissionRecord,
+from backend.trading.execution.execution_mission_repository import (
+    ExecutionMissionRepository,
+)
+
+from backend.trading.execution.execution_mission_persistence import (
+    ExecutionMissionPersistence,
+)
+
+from backend.trading.execution.execution_mission_store import (
+    ExecutionMissionStore,
+)
+
+from backend.trading.execution.execution_mission_delivery_bridge import (
+    ExecutionMissionDeliveryBridge,
 )
 
 from backend.trading.execution.execution_mission_registry import (
     ExecutionMissionRegistry,
+)
+
+from backend.trading.execution.execution_mission_service import (
+    ExecutionMissionService,
 )
 
 from backend.trading.execution.execution_mission_lifecycle_service import (
@@ -26,7 +43,9 @@ from backend.trading.execution.execution_mission_status import (
 )
 
 
-def test_execution_mission_full_lifecycle_flow():
+def test_execution_mission_full_lifecycle_flow(
+    tmp_path,
+):
 
     mission = ExecutionMission(
         mission_id="full-flow-001",
@@ -45,21 +64,68 @@ def test_execution_mission_full_lifecycle_flow():
         sequence=1,
     )
 
-    record = ExecutionMissionRecord(
-        mission=mission
+
+    repository = (
+        ExecutionMissionRepository()
     )
 
-    registry = ExecutionMissionRegistry()
-
-    registry.register(
-        record
+    persistence = (
+        ExecutionMissionPersistence(
+            tmp_path / "missions.json"
+        )
     )
+
+    store = (
+        ExecutionMissionStore()
+    )
+
+    delivery_bridge = (
+        ExecutionMissionDeliveryBridge(
+            store
+        )
+    )
+
+    registry = (
+        ExecutionMissionRegistry()
+    )
+
+
+    service = (
+        ExecutionMissionService(
+            repository,
+            persistence,
+            delivery_bridge,
+            registry,
+        )
+    )
+
 
     lifecycle_service = (
         ExecutionMissionLifecycleService(
             registry
         )
     )
+
+
+    created = (
+        service.create_mission(
+            mission
+        )
+    )
+
+
+    assert created == mission
+
+    assert repository.size() == 1
+
+    assert registry.size() == 1
+
+    assert store.size() == 1
+
+
+    delivered = store.pop()
+
+    assert delivered == mission
 
 
     acknowledged = (

@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -7,6 +8,14 @@ from pydantic import BaseModel
 from backend.brain_engine import brain_engine
 from backend.brain.memory import memory_engine
 from backend.brain.models.experience import Experience
+
+from backend.runtime.runtime_bootstrap import (
+    RuntimeBootstrap,
+)
+
+from backend.runtime.todoba_runtime import (
+    TODOBARuntime,
+)
 
 from backend.trading.execution.execution_mission_api import (
     create_execution_mission_router,
@@ -72,7 +81,26 @@ MISSION_STORAGE_PATH = (
 )
 
 
-app = FastAPI()
+runtime_bootstrap = RuntimeBootstrap()
+
+todoba_runtime: TODOBARuntime = (
+    runtime_bootstrap.create_runtime()
+)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+
+    await todoba_runtime.start()
+
+    yield
+
+    await todoba_runtime.stop()
+
+
+app = FastAPI(
+    lifespan=lifespan,
+)
 
 
 execution_mission_repository = (
@@ -174,13 +202,19 @@ def home():
 
 @app.get("/brain", response_class=HTMLResponse)
 def brain():
-    file = Path("backend/brain/identity.md")
+
+    file = Path(
+        "backend/brain/identity.md"
+    )
 
     if file.exists():
+
         content = file.read_text(
             encoding="utf-8"
         )
+
     else:
+
         content = "Brain not found."
 
     return f"""
@@ -198,6 +232,7 @@ def brain():
 
 @app.get("/memory")
 def memory():
+
     objects = memory_engine.list()
 
     return {

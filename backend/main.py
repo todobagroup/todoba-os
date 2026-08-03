@@ -72,7 +72,9 @@ from backend.trading.execution.execution_mission_registry import (
 from backend.trading.execution.execution_mission_service import (
     ExecutionMissionService,
 )
-
+from backend.trading.execution.execution_mission_recovery import (
+    ExecutionMissionRecovery,
+)
 
 MISSION_STORAGE_PATH = (
     Path("data")
@@ -91,12 +93,13 @@ todoba_runtime: TODOBARuntime = (
 @asynccontextmanager
 async def lifespan(app: FastAPI):
 
+    execution_mission_recovery.restore()
+
     await todoba_runtime.start()
 
     yield
 
     await todoba_runtime.stop()
-
 
 app = FastAPI(
     lifespan=lifespan,
@@ -136,7 +139,13 @@ execution_mission_service = (
     )
 )
 
-
+execution_mission_recovery = (
+    ExecutionMissionRecovery(
+        repository=execution_mission_repository,
+        persistence=execution_mission_persistence,
+        delivery_bridge=execution_mission_delivery_bridge,
+    )
+)
 execution_mission_execution_started_store = (
     ExecutionMissionExecutionStartedStore()
 )

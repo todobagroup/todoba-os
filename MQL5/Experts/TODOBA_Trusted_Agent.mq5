@@ -1,23 +1,38 @@
+// TODOBA Trusted Agent
+// Result contract upgrade
+
 #property strict
+
 
 #include <TODOBAExecution/ExecutionMissionParser.mqh>
 #include <TODOBAExecution/ExecutionMissionValidator.mqh>
 #include <TODOBAExecution/ExecutionPermissionGuard.mqh>
+#include <TODOBAExecution/ExecutionMissionState.mqh>
+#include <TODOBAExecution/ExecutionEngine.mqh>
+#include <TODOBAExecution/ExecutionResult.mqh>
+
 
 #define TODOBA_AGENT_NAME "TODOBA Trusted Agent"
-#define TODOBA_AGENT_VERSION "0.6.0"
+#define TODOBA_AGENT_VERSION "1.1.0"
+
 
 input int PollIntervalSeconds = 5;
 input string CloudBaseUrl = "http://127.0.0.1:8000";
 input string AgentId = "trusted-agent-001";
 
 
-void SendAcknowledgement(
+TODOBAExecutionMissionState current_mission_state;
+
+TODOBAExecutionEngine execution_engine;
+
+
+
+void SendCompleted(
    TODOBAExecutionMission &mission
 )
 {
    string url =
-      CloudBaseUrl + "/missions/acknowledge";
+      CloudBaseUrl + "/missions/completed";
 
 
    string payload =
@@ -27,8 +42,7 @@ void SendAcknowledgement(
       "\"sequence\":" + IntegerToString(
          mission.sequence
       ) + ","
-      "\"status\":\"acknowledged\","
-      "\"acknowledged_at\":\"2026-07-29T00:00:00\""
+      "\"completed_at\":\"2026-08-02T00:05:00\""
       "}";
 
 
@@ -45,7 +59,7 @@ void SendAcknowledgement(
    string response_headers;
 
 
-   int status_code = WebRequest(
+   WebRequest(
       "POST",
       url,
       "Content-Type: application/json\r\n",
@@ -56,32 +70,69 @@ void SendAcknowledgement(
    );
 
 
-   if(status_code == -1)
-   {
-      Print(
-         "TODOBA Trusted Agent: acknowledgement failed. error=",
-         GetLastError()
-      );
-
-      return;
-   }
+   current_mission_state.Complete();
+}
 
 
-   Print(
-      "TODOBA Trusted Agent: acknowledgement sent. mission=",
-      mission.mission_id,
-      " status=",
-      status_code
+
+void SendFailed(
+   TODOBAExecutionMission &mission,
+   string reason
+)
+{
+   string url =
+      CloudBaseUrl + "/missions/failed";
+
+
+   string payload =
+      "{"
+      "\"mission_id\":\"" + mission.mission_id + "\","
+      "\"agent_id\":\"" + mission.agent_id + "\","
+      "\"sequence\":" + IntegerToString(
+         mission.sequence
+      ) + ","
+      "\"failed_at\":\"2026-08-02T00:05:00\","
+      "\"failure_reason\":\"" + reason + "\""
+      "}";
+
+
+   char request_body[];
+
+   StringToCharArray(
+      payload,
+      request_body
    );
+
+
+   char response_body[];
+
+   string response_headers;
+
+
+   WebRequest(
+      "POST",
+      url,
+      "Content-Type: application/json\r\n",
+      3000,
+      request_body,
+      response_body,
+      response_headers
+   );
+
+
+   current_mission_state.Fail();
 }
 
 
 
 void PollCloud()
 {
-   string url = CloudBaseUrl + "/missions/next";
+   string url =
+      CloudBaseUrl + "/missions/next";
+
 
    char request_body[];
+
    char response_body[];
 
    string response_headers;
@@ -98,41 +149,14 @@ void PollCloud()
    );
 
 
-   if(status_code == -1)
-   {
-      Print(
-         "TODOBA Trusted Agent: cloud request failed. error=",
-         GetLastError()
-      );
-
-      return;
-   }
-
-
-   string response = CharArrayToString(
-      response_body
-   );
-
-
    if(status_code != 200)
-   {
       return;
-   }
 
 
-   if(
-      StringFind(
-         response,
-         "\"status\":\"empty\""
-      ) >= 0
-   )
-   {
-      Print(
-         "TODOBA Trusted Agent: no mission."
+   string response =
+      CharArrayToString(
+         response_body
       );
-
-      return;
-   }
 
 
    TODOBAExecutionMission mission;
@@ -144,13 +168,7 @@ void PollCloud()
          mission
       )
    )
-   {
-      Print(
-         "TODOBA Trusted Agent: mission parse rejected."
-      );
-
       return;
-   }
 
 
    if(
@@ -159,13 +177,7 @@ void PollCloud()
          AgentId
       )
    )
-   {
-      Print(
-         "TODOBA Trusted Agent: mission rejected."
-      );
-
       return;
-   }
 
 
    if(
@@ -173,22 +185,73 @@ void PollCloud()
          mission.sequence
       )
    )
-   {
-      Print(
-         "TODOBA Trusted Agent: permission rejected."
-      );
-
       return;
-   }
 
 
-   SendAcknowledgement(
-      mission
+   current_mission_state.Initialize(
+      mission.mission_id,
+      mission.agent_id,
+      mission.sequence
    );
 
 
+  current_mission_state.Start();
+
+
+Print(
+   "TODOBA RECEIVED SYMBOL=[",
+   mission.symbol,
+   "]"
+);
+
+
+TODOBAExecutionResult execution_result =
+      execution_engine.Execute(
+         mission.symbol,
+         mission.order_type,
+         mission.volume,
+         mission.entry,
+         mission.sl,
+         mission.tp,
+         mission.magic_number,
+         mission.comment
+      );
+         Print(
+      "TODOBA Execution Result: success=",
+      execution_result.success,
+      " retcode=",
+      execution_result.retcode,
+      " order=",
+      execution_result.order_ticket,
+      " deal=",
+      execution_result.deal_ticket,
+      " price=",
+      execution_result.price,
+      " comment=",
+      execution_result.comment
+   );
+
+
+   if(
+      execution_result.success
+   )
+   {
+      SendCompleted(
+         mission
+      );
+   }
+   else
+   {
+      SendFailed(
+         mission,
+         execution_result.comment
+      );
+   }
+
+
    Print(
-      "TODOBA Trusted Agent: mission accepted. id=",
+      TODOBA_AGENT_NAME,
+      " finished mission=",
       mission.mission_id
    );
 }
@@ -198,13 +261,15 @@ void PollCloud()
 int OnInit()
 {
    if(PollIntervalSeconds < 1)
-      return(INIT_PARAMETERS_INCORRECT);
+      return INIT_PARAMETERS_INCORRECT;
+
 
    if(StringLen(CloudBaseUrl) == 0)
-      return(INIT_PARAMETERS_INCORRECT);
+      return INIT_PARAMETERS_INCORRECT;
+
 
    if(StringLen(AgentId) == 0)
-      return(INIT_PARAMETERS_INCORRECT);
+      return INIT_PARAMETERS_INCORRECT;
 
 
    EventSetTimer(
@@ -220,12 +285,14 @@ int OnInit()
    );
 
 
-   return(INIT_SUCCEEDED);
+   return INIT_SUCCEEDED;
 }
 
 
 
-void OnDeinit(const int reason)
+void OnDeinit(
+   const int reason
+)
 {
    EventKillTimer();
 }

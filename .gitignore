@@ -7,3 +7,5 @@ backend/**pycache**/
 todoba.session
 todoba.session-journal
 data/
+# MetaTrader build artifacts
+*.ex5

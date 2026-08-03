@@ -1,6 +1,12 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
+from backend.trading.execution.broker_execution_evidence_api import (
+    create_broker_execution_evidence_router,
+)
 
+from backend.trading.execution.broker_execution_evidence_store import (
+    BrokerExecutionEvidenceStore,
+)
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
@@ -153,7 +159,9 @@ execution_mission_execution_started_store = (
 execution_mission_completed_store = (
     ExecutionMissionCompletedStore()
 )
-
+broker_execution_evidence_store = (
+    BrokerExecutionEvidenceStore()
+)
 execution_mission_failed_store = (
     ExecutionMissionFailedStore()
 )
@@ -186,6 +194,12 @@ app.include_router(
     )
 )
 
+
+app.include_router(
+    create_broker_execution_evidence_router(
+        broker_execution_evidence_store
+    )
+)
 
 app.include_router(
     create_execution_mission_failed_router(

@@ -123,7 +123,61 @@ void SendFailed(
    current_mission_state.Fail();
 }
 
+void SendBrokerEvidence(
+   TODOBAExecutionMission &mission,
+   TODOBAExecutionResult &result
+)
+{
+   string url =
+      CloudBaseUrl + "/broker/evidence";
 
+
+   string payload =
+      "{"
+      "\"mission_id\":\"" + mission.mission_id + "\","
+      "\"agent_id\":\"" + mission.agent_id + "\","
+      "\"success\":" + (result.success ? "true" : "false") + ","
+      "\"retcode\":" + IntegerToString(
+         result.retcode
+      ) + ","
+      "\"order_ticket\":" + IntegerToString(
+         result.order_ticket
+      ) + ","
+      "\"deal_ticket\":" + IntegerToString(
+         result.deal_ticket
+      ) + ","
+      "\"execution_price\":" + DoubleToString(
+         result.price,
+         2
+      ) + ","
+      "\"comment\":\"" + result.comment + "\","
+      "\"completed_at\":\"2026-08-04T00:00:00Z\""
+      "}";
+
+
+   char request_body[];
+
+   StringToCharArray(
+      payload,
+      request_body
+   );
+
+
+   char response_body[];
+
+   string response_headers;
+
+
+   WebRequest(
+      "POST",
+      url,
+      "Content-Type: application/json\r\n",
+      3000,
+      request_body,
+      response_body,
+      response_headers
+   );
+}
 
 void PollCloud()
 {
@@ -234,13 +288,18 @@ TODOBAExecutionResult execution_result =
 
 
    if(
-      execution_result.success
-   )
-   {
-      SendCompleted(
-         mission
-      );
-   }
+   execution_result.success
+)
+{
+   SendBrokerEvidence(
+      mission,
+      execution_result
+   );
+
+   SendCompleted(
+      mission
+   );
+}
    else
    {
       SendFailed(

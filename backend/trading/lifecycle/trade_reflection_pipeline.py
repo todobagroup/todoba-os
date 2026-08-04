@@ -179,11 +179,11 @@ class TradeReflectionPipeline:
             memory_context.update(context)
 
         memory_experience = (
-            self.memory_bridge.remember_trade_outcome(
-                trade_experience,
-                context=memory_context,
-            )
-        )
+    self.memory_bridge.remember_trade_outcome(
+        trade_experience,
+        context=memory_context,
+    )
+)
 
         return TradeReflectionResult(
             observation=observation,

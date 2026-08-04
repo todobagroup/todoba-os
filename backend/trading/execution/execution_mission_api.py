@@ -41,9 +41,18 @@ def create_execution_mission_router(
         agent_id: str | None = None,
     ):
 
-        mission = store.pop()
+        if agent_id:
+
+            mission = store.pop_for_agent(
+                agent_id
+            )
+
+        else:
+
+            mission = store.pop()
 
         if mission is None:
+
             return {
                 "status": "empty",
                 "mission": None,

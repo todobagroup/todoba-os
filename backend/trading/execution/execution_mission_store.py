@@ -28,6 +28,7 @@ class ExecutionMissionStore:
         self,
         mission: ExecutionMission,
     ) -> ExecutionMission:
+
         if not isinstance(
             mission,
             ExecutionMission,
@@ -42,13 +43,40 @@ class ExecutionMissionStore:
 
         return mission
 
-    def pop(self) -> Optional[ExecutionMission]:
+    def pop(
+        self,
+    ) -> Optional[ExecutionMission]:
+
         if not self._missions:
             return None
 
         return self._missions.popleft()
 
-    def size(self) -> int:
+    def pop_for_agent(
+        self,
+        agent_id: str,
+    ) -> Optional[ExecutionMission]:
+        """
+        Return the first mission belonging
+        to the requested Trusted Agent.
+        """
+
+        for mission in self._missions:
+
+            if mission.agent_id == agent_id:
+
+                self._missions.remove(
+                    mission
+                )
+
+                return mission
+
+        return None
+
+    def size(
+        self,
+    ) -> int:
+
         return len(
             self._missions
         )

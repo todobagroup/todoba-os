@@ -128,8 +128,9 @@ void SendFailed(
 void PollCloud()
 {
    string url =
-      CloudBaseUrl + "/missions/next";
-
+      CloudBaseUrl
+      + "/missions/next?agent_id="
+      + AgentId;
 
    char request_body[];
 

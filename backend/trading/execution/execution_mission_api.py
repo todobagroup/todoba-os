@@ -13,6 +13,7 @@ from fastapi import APIRouter
 from backend.trading.execution.execution_mission_serializer import (
     ExecutionMissionSerializer,
 )
+
 from backend.trading.execution.execution_mission_store import (
     ExecutionMissionStore,
 )
@@ -21,6 +22,7 @@ from backend.trading.execution.execution_mission_store import (
 def create_execution_mission_router(
     store: ExecutionMissionStore,
 ) -> APIRouter:
+
     if not isinstance(
         store,
         ExecutionMissionStore,
@@ -35,7 +37,10 @@ def create_execution_mission_router(
     @router.get(
         "/missions/next"
     )
-    def next_mission():
+    def next_mission(
+        agent_id: str | None = None,
+    ):
+
         mission = store.pop()
 
         if mission is None:
@@ -53,6 +58,7 @@ def create_execution_mission_router(
         return {
             "status": "available",
             "mission": payload,
+            "agent_id": agent_id,
             **payload,
         }
 

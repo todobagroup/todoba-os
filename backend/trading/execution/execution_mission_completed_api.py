@@ -7,7 +7,6 @@ This API owns transport only.
 Storage belongs to ExecutionMissionCompletedStore.
 """
 
-
 from fastapi import APIRouter
 
 from backend.trading.execution.execution_mission_completed import (

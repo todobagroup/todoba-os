@@ -106,7 +106,7 @@ def test_full_trade_lifecycle_end_to_end():
         price=4050.0,
         retcode=10009,
         comment="executed",
-)
+    )
 
     trade_record = TradeRecordBuilder().build(
         trade_id="proof058-001",

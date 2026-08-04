@@ -89,3 +89,30 @@ def test_api_returns_only_requested_agent_mission():
     )
 
     assert store.size() == 1
+
+def test_store_consumes_mission_once():
+
+    store = ExecutionMissionStore()
+
+    mission = build_mission(
+        "mission-single-use",
+        "trusted-agent-a",
+    )
+
+    store.push(
+        mission
+    )
+
+    first = store.pop_for_agent(
+        "trusted-agent-a"
+    )
+
+    second = store.pop_for_agent(
+        "trusted-agent-a"
+    )
+
+    assert first is mission
+
+    assert second is None
+
+    assert store.size() == 0

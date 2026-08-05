@@ -1,5 +1,5 @@
 // TODOBA Trusted Agent
-// Result contract upgrade
+// Execution Started Evidence Upgrade
 
 #property strict
 
@@ -13,7 +13,7 @@
 
 
 #define TODOBA_AGENT_NAME "TODOBA Trusted Agent"
-#define TODOBA_AGENT_VERSION "1.1.0"
+#define TODOBA_AGENT_VERSION "1.2.0"
 
 
 input int PollIntervalSeconds = 5;
@@ -24,6 +24,51 @@ input string AgentId = "trusted-agent-001";
 TODOBAExecutionMissionState current_mission_state;
 
 TODOBAExecutionEngine execution_engine;
+
+
+
+void SendExecutionStarted(
+   TODOBAExecutionMission &mission
+)
+{
+   string url =
+      CloudBaseUrl + "/missions/execution_started";
+
+
+   string payload =
+      "{"
+      "\"mission_id\":\"" + mission.mission_id + "\","
+      "\"agent_id\":\"" + mission.agent_id + "\","
+      "\"sequence\":" + IntegerToString(
+         mission.sequence
+      ) + ","
+      "\"started_at\":\"2026-08-05T00:00:00Z\""
+      "}";
+
+
+   char request_body[];
+
+   StringToCharArray(
+      payload,
+      request_body
+   );
+
+
+   char response_body[];
+
+   string response_headers;
+
+
+   WebRequest(
+      "POST",
+      url,
+      "Content-Type: application/json\r\n",
+      3000,
+      request_body,
+      response_body,
+      response_headers
+   );
+}
 
 
 
@@ -123,6 +168,8 @@ void SendFailed(
    current_mission_state.Fail();
 }
 
+
+
 void SendBrokerEvidence(
    TODOBAExecutionMission &mission,
    TODOBAExecutionResult &result
@@ -137,7 +184,8 @@ void SendBrokerEvidence(
       "\"mission_id\":\"" + mission.mission_id + "\","
       "\"agent_id\":\"" + mission.agent_id + "\","
       "\"success\":" + (result.success ? "true" : "false") + ","
-      "\"retcode\":" + IntegerToString(
+      
+            "\"retcode\":" + IntegerToString(
          result.retcode
       ) + ","
       "\"order_ticket\":" + IntegerToString(
@@ -179,12 +227,15 @@ void SendBrokerEvidence(
    );
 }
 
+
+
 void PollCloud()
 {
    string url =
       CloudBaseUrl
       + "/missions/next?agent_id="
       + AgentId;
+
 
    char request_body[];
 
@@ -250,17 +301,22 @@ void PollCloud()
    );
 
 
-  current_mission_state.Start();
+   current_mission_state.Start();
 
 
-Print(
-   "TODOBA RECEIVED SYMBOL=[",
-   mission.symbol,
-   "]"
-);
+   SendExecutionStarted(
+      mission
+   );
 
 
-TODOBAExecutionResult execution_result =
+   Print(
+      "TODOBA RECEIVED SYMBOL=[",
+      mission.symbol,
+      "]"
+   );
+
+
+   TODOBAExecutionResult execution_result =
       execution_engine.Execute(
          mission.symbol,
          mission.order_type,
@@ -271,7 +327,9 @@ TODOBAExecutionResult execution_result =
          mission.magic_number,
          mission.comment
       );
-         Print(
+
+
+   Print(
       "TODOBA Execution Result: success=",
       execution_result.success,
       " retcode=",
@@ -288,18 +346,18 @@ TODOBAExecutionResult execution_result =
 
 
    if(
-   execution_result.success
-)
-{
-   SendBrokerEvidence(
-      mission,
-      execution_result
-   );
+      execution_result.success
+   )
+   {
+      SendBrokerEvidence(
+         mission,
+         execution_result
+      );
 
-   SendCompleted(
-      mission
-   );
-}
+      SendCompleted(
+         mission
+      );
+   }
    else
    {
       SendFailed(

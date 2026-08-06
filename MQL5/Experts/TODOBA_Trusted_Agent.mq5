@@ -1,5 +1,5 @@
 // TODOBA Trusted Agent
-// Execution Started Evidence Upgrade
+// Secure Mission Protocol Authentication Upgrade
 
 #property strict
 
@@ -13,17 +13,43 @@
 
 
 #define TODOBA_AGENT_NAME "TODOBA Trusted Agent"
-#define TODOBA_AGENT_VERSION "1.2.0"
+#define TODOBA_AGENT_VERSION "1.3.0"
 
 
 input int PollIntervalSeconds = 5;
 input string CloudBaseUrl = "http://127.0.0.1:8000";
 input string AgentId = "trusted-agent-001";
+input string AgentSecret = "";
 
 
 TODOBAExecutionMissionState current_mission_state;
 
 TODOBAExecutionEngine execution_engine;
+
+
+
+string BuildAuthenticationHeaders(
+   const bool include_content_type
+)
+{
+   string headers =
+      "X-TODOBA-Agent-ID: "
+      + AgentId
+      + "\r\n"
+      + "Authorization: Bearer "
+      + AgentSecret
+      + "\r\n";
+
+
+   if(include_content_type)
+   {
+      headers +=
+         "Content-Type: application/json\r\n";
+   }
+
+
+   return headers;
+}
 
 
 
@@ -62,7 +88,9 @@ void SendExecutionStarted(
    WebRequest(
       "POST",
       url,
-      "Content-Type: application/json\r\n",
+      BuildAuthenticationHeaders(
+         true
+      ),
       3000,
       request_body,
       response_body,
@@ -107,7 +135,9 @@ void SendCompleted(
    WebRequest(
       "POST",
       url,
-      "Content-Type: application/json\r\n",
+      BuildAuthenticationHeaders(
+         true
+      ),
       3000,
       request_body,
       response_body,
@@ -157,7 +187,9 @@ void SendFailed(
    WebRequest(
       "POST",
       url,
-      "Content-Type: application/json\r\n",
+      BuildAuthenticationHeaders(
+         true
+      ),
       3000,
       request_body,
       response_body,
@@ -183,9 +215,12 @@ void SendBrokerEvidence(
       "{"
       "\"mission_id\":\"" + mission.mission_id + "\","
       "\"agent_id\":\"" + mission.agent_id + "\","
-      "\"success\":" + (result.success ? "true" : "false") + ","
-      
-            "\"retcode\":" + IntegerToString(
+      "\"success\":" + (
+         result.success
+         ? "true"
+         : "false"
+      ) + ","
+      "\"retcode\":" + IntegerToString(
          result.retcode
       ) + ","
       "\"order_ticket\":" + IntegerToString(
@@ -219,7 +254,9 @@ void SendBrokerEvidence(
    WebRequest(
       "POST",
       url,
-      "Content-Type: application/json\r\n",
+      BuildAuthenticationHeaders(
+         true
+      ),
       3000,
       request_body,
       response_body,
@@ -233,8 +270,7 @@ void PollCloud()
 {
    string url =
       CloudBaseUrl
-      + "/missions/next?agent_id="
-      + AgentId;
+      + "/missions/next";
 
 
    char request_body[];
@@ -244,10 +280,12 @@ void PollCloud()
    string response_headers;
 
 
-   int status_code = WebRequest(
+   long status_code = WebRequest(
       "GET",
       url,
-      "",
+      BuildAuthenticationHeaders(
+         false
+      ),
       3000,
       request_body,
       response_body,
@@ -387,6 +425,10 @@ int OnInit()
 
 
    if(StringLen(AgentId) == 0)
+      return INIT_PARAMETERS_INCORRECT;
+
+
+   if(StringLen(AgentSecret) == 0)
       return INIT_PARAMETERS_INCORRECT;
 
 

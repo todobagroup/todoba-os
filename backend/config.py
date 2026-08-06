@@ -90,6 +90,16 @@ MT5_MAX_SPREAD_POINTS = _read_float(
     500.0,
 )
 
+TODOBA_TRUSTED_AGENT_ID = os.getenv(
+    "TODOBA_TRUSTED_AGENT_ID",
+    "trusted-agent-001",
+).strip()
+
+TODOBA_TRUSTED_AGENT_SECRET = os.getenv(
+    "TODOBA_TRUSTED_AGENT_SECRET",
+    "",
+).strip()
+
 DEBUG = os.getenv(
     "DEBUG",
     "true",
@@ -155,5 +165,27 @@ def validate_telegram_config() -> None:
 
         raise RuntimeError(
             "Invalid Telegram configuration:\n"
+            f"- {joined_errors}"
+        )
+
+
+def validate_trusted_agent_config() -> None:
+    errors: list[str] = []
+
+    if not TODOBA_TRUSTED_AGENT_ID:
+        errors.append(
+            "TODOBA_TRUSTED_AGENT_ID is required."
+        )
+
+    if not TODOBA_TRUSTED_AGENT_SECRET:
+        errors.append(
+            "TODOBA_TRUSTED_AGENT_SECRET is required."
+        )
+
+    if errors:
+        joined_errors = "\n- ".join(errors)
+
+        raise RuntimeError(
+            "Invalid Trusted Agent configuration:\n"
             f"- {joined_errors}"
         )

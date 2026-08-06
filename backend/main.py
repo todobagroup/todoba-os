@@ -1,86 +1,78 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
-from backend.trading.execution.broker_execution_evidence_api import (
-    create_broker_execution_evidence_router,
-)
 
-from backend.trading.execution.broker_execution_evidence_store import (
-    BrokerExecutionEvidenceStore,
-)
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
-from backend.brain_engine import brain_engine
 from backend.brain.memory import memory_engine
 from backend.brain.models.experience import Experience
-
+from backend.brain_engine import brain_engine
+from backend.config import (
+    TODOBA_TRUSTED_AGENT_ID,
+    TODOBA_TRUSTED_AGENT_SECRET,
+)
 from backend.runtime.runtime_bootstrap import (
     RuntimeBootstrap,
 )
-
 from backend.runtime.todoba_runtime import (
     TODOBARuntime,
 )
-
+from backend.trading.execution.broker_execution_evidence_api import (
+    create_broker_execution_evidence_router,
+)
+from backend.trading.execution.broker_execution_evidence_store import (
+    BrokerExecutionEvidenceStore,
+)
 from backend.trading.execution.execution_mission_api import (
     create_execution_mission_router,
 )
-
-from backend.trading.execution.execution_mission_injection_api import (
-    create_execution_mission_injection_router,
-)
-
-from backend.trading.execution.execution_mission_execution_started_api import (
-    create_execution_mission_execution_started_router,
-)
-
-from backend.trading.execution.execution_mission_execution_started_store import (
-    ExecutionMissionExecutionStartedStore,
-)
-
 from backend.trading.execution.execution_mission_completed_api import (
     create_execution_mission_completed_router,
 )
-
 from backend.trading.execution.execution_mission_completed_store import (
     ExecutionMissionCompletedStore,
 )
-
-from backend.trading.execution.execution_mission_failed_api import (
-    create_execution_mission_failed_router,
-)
-
-from backend.trading.execution.execution_mission_failed_store import (
-    ExecutionMissionFailedStore,
-)
-
-from backend.trading.execution.execution_mission_persistence import (
-    ExecutionMissionPersistence,
-)
-
-from backend.trading.execution.execution_mission_repository import (
-    ExecutionMissionRepository,
-)
-
-from backend.trading.execution.execution_mission_store import (
-    ExecutionMissionStore,
-)
-
 from backend.trading.execution.execution_mission_delivery_bridge import (
     ExecutionMissionDeliveryBridge,
 )
-
-from backend.trading.execution.execution_mission_registry import (
-    ExecutionMissionRegistry,
+from backend.trading.execution.execution_mission_execution_started_api import (
+    create_execution_mission_execution_started_router,
 )
-
-from backend.trading.execution.execution_mission_service import (
-    ExecutionMissionService,
+from backend.trading.execution.execution_mission_execution_started_store import (
+    ExecutionMissionExecutionStartedStore,
+)
+from backend.trading.execution.execution_mission_failed_api import (
+    create_execution_mission_failed_router,
+)
+from backend.trading.execution.execution_mission_failed_store import (
+    ExecutionMissionFailedStore,
+)
+from backend.trading.execution.execution_mission_injection_api import (
+    create_execution_mission_injection_router,
+)
+from backend.trading.execution.execution_mission_persistence import (
+    ExecutionMissionPersistence,
 )
 from backend.trading.execution.execution_mission_recovery import (
     ExecutionMissionRecovery,
 )
+from backend.trading.execution.execution_mission_registry import (
+    ExecutionMissionRegistry,
+)
+from backend.trading.execution.execution_mission_repository import (
+    ExecutionMissionRepository,
+)
+from backend.trading.execution.execution_mission_service import (
+    ExecutionMissionService,
+)
+from backend.trading.execution.execution_mission_store import (
+    ExecutionMissionStore,
+)
+from backend.trading.execution.trusted_agent_authenticator import (
+    TrustedAgentAuthenticator,
+)
+
 
 MISSION_STORAGE_PATH = (
     Path("data")
@@ -97,8 +89,9 @@ todoba_runtime: TODOBARuntime = (
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
-
+async def lifespan(
+    app: FastAPI,
+):
     execution_mission_recovery.restore()
 
     await todoba_runtime.start()
@@ -107,8 +100,17 @@ async def lifespan(app: FastAPI):
 
     await todoba_runtime.stop()
 
+
 app = FastAPI(
     lifespan=lifespan,
+)
+
+
+trusted_agent_authenticator = (
+    TrustedAgentAuthenticator(
+        agent_id=TODOBA_TRUSTED_AGENT_ID,
+        agent_secret=TODOBA_TRUSTED_AGENT_SECRET,
+    )
 )
 
 
@@ -152,6 +154,7 @@ execution_mission_recovery = (
         delivery_bridge=execution_mission_delivery_bridge,
     )
 )
+
 execution_mission_execution_started_store = (
     ExecutionMissionExecutionStartedStore()
 )
@@ -159,9 +162,11 @@ execution_mission_execution_started_store = (
 execution_mission_completed_store = (
     ExecutionMissionCompletedStore()
 )
+
 broker_execution_evidence_store = (
     BrokerExecutionEvidenceStore()
 )
+
 execution_mission_failed_store = (
     ExecutionMissionFailedStore()
 )
@@ -169,10 +174,10 @@ execution_mission_failed_store = (
 
 app.include_router(
     create_execution_mission_router(
-        execution_mission_store
+        execution_mission_store,
+        trusted_agent_authenticator,
     )
 )
-
 
 app.include_router(
     create_execution_mission_injection_router(
@@ -180,30 +185,31 @@ app.include_router(
     )
 )
 
-
 app.include_router(
     create_execution_mission_execution_started_router(
-        execution_mission_execution_started_store
+        execution_mission_execution_started_store,
+        trusted_agent_authenticator,
     )
 )
-
 
 app.include_router(
     create_execution_mission_completed_router(
-        execution_mission_completed_store
+        execution_mission_completed_store,
+        trusted_agent_authenticator,
     )
 )
 
-
 app.include_router(
     create_broker_execution_evidence_router(
-        broker_execution_evidence_store
+        broker_execution_evidence_store,
+        trusted_agent_authenticator,
     )
 )
 
 app.include_router(
     create_execution_mission_failed_router(
-        execution_mission_failed_store
+        execution_mission_failed_store,
+        trusted_agent_authenticator,
     )
 )
 
@@ -223,21 +229,20 @@ def home():
     }
 
 
-@app.get("/brain", response_class=HTMLResponse)
+@app.get(
+    "/brain",
+    response_class=HTMLResponse,
+)
 def brain():
-
     file = Path(
         "backend/brain/identity.md"
     )
 
     if file.exists():
-
         content = file.read_text(
             encoding="utf-8"
         )
-
     else:
-
         content = "Brain not found."
 
     return f"""
@@ -255,7 +260,6 @@ def brain():
 
 @app.get("/memory")
 def memory():
-
     objects = memory_engine.list()
 
     return {
@@ -271,7 +275,6 @@ def memory():
 def receive_experience(
     request: ExperienceRequest,
 ):
-
     experience = Experience(
         source=request.source,
         content=request.content,

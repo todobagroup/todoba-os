@@ -7,23 +7,33 @@ sys.path.insert(0, str(ROOT_DIR))
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from backend.trading.execution.execution_mission_api import (
-    create_execution_mission_router,
-)
-
-from backend.trading.execution.execution_mission_store import (
-    ExecutionMissionStore,
-)
-
 from backend.trading.execution.execution_mission import (
     ExecutionMission,
 )
+from backend.trading.execution.execution_mission_api import (
+    create_execution_mission_router,
+)
+from backend.trading.execution.execution_mission_store import (
+    ExecutionMissionStore,
+)
+from backend.trading.execution.trusted_agent_authenticator import (
+    TrustedAgentAuthenticator,
+)
+
+
+AGENT_ID = "trusted-agent-001"
+AGENT_SECRET = "test-trusted-agent-secret"
+
+AUTHENTICATION_HEADERS = {
+    "X-TODOBA-Agent-ID": AGENT_ID,
+    "Authorization": f"Bearer {AGENT_SECRET}",
+}
 
 
 def build_mission() -> ExecutionMission:
     return ExecutionMission(
         mission_id="delivery-001",
-        agent_id="trusted-agent-001",
+        agent_id=AGENT_ID,
         account_fingerprint="demo-account",
         symbol="XAUUSD",
         order_type="BUY LIMIT",
@@ -41,20 +51,55 @@ def build_mission() -> ExecutionMission:
 
 def build_client(
     store: ExecutionMissionStore,
-):
+) -> TestClient:
+    authenticator = TrustedAgentAuthenticator(
+        agent_id=AGENT_ID,
+        agent_secret=AGENT_SECRET,
+    )
+
     app = FastAPI()
 
     app.include_router(
         create_execution_mission_router(
-            store
+            store,
+            authenticator,
         )
     )
 
-    return TestClient(app)
+    return TestClient(
+        app
+    )
 
 
-def test_delivery_store_provides_mission_to_agent():
+def test_delivery_store_provides_mission_to_agent() -> None:
+    store = ExecutionMissionStore()
 
+    store.push(
+        build_mission()
+    )
+
+    client = build_client(
+        store
+    )
+
+    response = client.get(
+        "/missions/next",
+        headers=AUTHENTICATION_HEADERS,
+    )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+
+    assert payload["status"] == "available"
+    assert payload["mission"]["mission_id"] == (
+        "delivery-001"
+    )
+    assert payload["mission"]["agent_id"] == AGENT_ID
+    assert store.size() == 0
+
+
+def test_delivery_store_rejects_missing_credentials() -> None:
     store = ExecutionMissionStore()
 
     store.push(
@@ -69,20 +114,5 @@ def test_delivery_store_provides_mission_to_agent():
         "/missions/next"
     )
 
-    assert response.status_code == 200
-
-    payload = response.json()
-
-    assert payload["status"] == "available"
-
-    assert (
-        payload["mission"]["mission_id"]
-        == "delivery-001"
-    )
-
-    assert (
-        payload["mission"]["agent_id"]
-        == "trusted-agent-001"
-    )
-
-    assert store.size() == 0
+    assert response.status_code == 401
+    assert store.size() == 1

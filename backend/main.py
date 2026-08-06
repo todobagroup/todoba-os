@@ -90,6 +90,9 @@ from backend.trading.execution.execution_mission_repository import (
 from backend.trading.execution.execution_mission_service import (
     ExecutionMissionService,
 )
+from backend.trading.execution.execution_mission_status_api import (
+    create_execution_mission_status_router,
+)
 from backend.trading.execution.execution_mission_store import (
     ExecutionMissionStore,
 )
@@ -264,6 +267,12 @@ app.include_router(
 app.include_router(
     create_execution_mission_injection_router(
         execution_mission_service
+    )
+)
+
+app.include_router(
+    create_execution_mission_status_router(
+        execution_mission_registry
     )
 )
 

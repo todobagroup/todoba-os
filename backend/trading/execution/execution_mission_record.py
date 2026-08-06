@@ -15,7 +15,6 @@ from typing import Optional
 from backend.trading.execution.execution_mission import (
     ExecutionMission,
 )
-
 from backend.trading.execution.execution_mission_status import (
     ExecutionMissionStatus,
 )
@@ -39,9 +38,11 @@ class ExecutionMissionRecord:
     delivered_at: Optional[str] = None
 
     acknowledged_at: Optional[str] = None
+
     started_at: Optional[str] = None
 
     completed_at: Optional[str] = None
+
     failed_at: Optional[str] = None
 
-failure_reason: Optional[str] = None
+    failure_reason: Optional[str] = None

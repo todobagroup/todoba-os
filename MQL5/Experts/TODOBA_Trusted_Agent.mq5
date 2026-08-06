@@ -1,5 +1,5 @@
 // TODOBA Trusted Agent
-// Secure Mission Protocol Authentication Upgrade
+// Mission Acknowledgement Upgrade
 
 #property strict
 
@@ -13,7 +13,7 @@
 
 
 #define TODOBA_AGENT_NAME "TODOBA Trusted Agent"
-#define TODOBA_AGENT_VERSION "1.3.0"
+#define TODOBA_AGENT_VERSION "1.4.0"
 
 
 input int PollIntervalSeconds = 5;
@@ -49,6 +49,54 @@ string BuildAuthenticationHeaders(
 
 
    return headers;
+}
+
+
+
+void SendAcknowledgement(
+   TODOBAExecutionMission &mission
+)
+{
+   string url =
+      CloudBaseUrl + "/missions/acknowledge";
+
+
+   string payload =
+      "{"
+      "\"mission_id\":\"" + mission.mission_id + "\","
+      "\"agent_id\":\"" + mission.agent_id + "\","
+      "\"sequence\":" + IntegerToString(
+         mission.sequence
+      ) + ","
+      "\"status\":\"ACCEPTED\","
+      "\"acknowledged_at\":\"2026-08-06T00:00:00Z\""
+      "}";
+
+
+   char request_body[];
+
+   StringToCharArray(
+      payload,
+      request_body
+   );
+
+
+   char response_body[];
+
+   string response_headers;
+
+
+   WebRequest(
+      "POST",
+      url,
+      BuildAuthenticationHeaders(
+         true
+      ),
+      3000,
+      request_body,
+      response_body,
+      response_headers
+   );
 }
 
 
@@ -336,6 +384,11 @@ void PollCloud()
       mission.mission_id,
       mission.agent_id,
       mission.sequence
+   );
+
+
+   SendAcknowledgement(
+      mission
    );
 
 

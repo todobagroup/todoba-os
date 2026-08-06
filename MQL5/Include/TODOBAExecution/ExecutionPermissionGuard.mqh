@@ -6,13 +6,13 @@ class TODOBAExecutionPermissionGuard
 {
 private:
 
-   static int last_sequence;
+   static long last_sequence;
 
 
 public:
 
    static bool Allow(
-      const int sequence
+      const long sequence
    )
    {
       if(sequence <= 0)
@@ -27,14 +27,14 @@ public:
    }
 
 
-   static int LastSequence()
+   static long LastSequence()
    {
       return last_sequence;
    }
 };
 
 
-int TODOBAExecutionPermissionGuard::last_sequence = 0;
+long TODOBAExecutionPermissionGuard::last_sequence = 0;
 
 
 #endif

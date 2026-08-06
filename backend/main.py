@@ -24,11 +24,23 @@ from backend.trading.execution.broker_execution_evidence_api import (
 from backend.trading.execution.broker_execution_evidence_store import (
     BrokerExecutionEvidenceStore,
 )
+from backend.trading.execution.execution_mission_acknowledgement_api import (
+    create_execution_mission_acknowledgement_router,
+)
+from backend.trading.execution.execution_mission_acknowledgement_processor import (
+    ExecutionMissionAcknowledgementProcessor,
+)
+from backend.trading.execution.execution_mission_acknowledgement_store import (
+    ExecutionMissionAcknowledgementStore,
+)
 from backend.trading.execution.execution_mission_api import (
     create_execution_mission_router,
 )
 from backend.trading.execution.execution_mission_completed_api import (
     create_execution_mission_completed_router,
+)
+from backend.trading.execution.execution_mission_completed_processor import (
+    ExecutionMissionCompletedProcessor,
 )
 from backend.trading.execution.execution_mission_completed_store import (
     ExecutionMissionCompletedStore,
@@ -39,17 +51,29 @@ from backend.trading.execution.execution_mission_delivery_bridge import (
 from backend.trading.execution.execution_mission_execution_started_api import (
     create_execution_mission_execution_started_router,
 )
+from backend.trading.execution.execution_mission_execution_started_processor import (
+    ExecutionMissionExecutionStartedProcessor,
+)
 from backend.trading.execution.execution_mission_execution_started_store import (
     ExecutionMissionExecutionStartedStore,
 )
 from backend.trading.execution.execution_mission_failed_api import (
     create_execution_mission_failed_router,
 )
+from backend.trading.execution.execution_mission_failed_processor import (
+    ExecutionMissionFailedProcessor,
+)
 from backend.trading.execution.execution_mission_failed_store import (
     ExecutionMissionFailedStore,
 )
 from backend.trading.execution.execution_mission_injection_api import (
     create_execution_mission_injection_router,
+)
+from backend.trading.execution.execution_mission_lifecycle_scheduler import (
+    ExecutionMissionLifecycleScheduler,
+)
+from backend.trading.execution.execution_mission_lifecycle_service import (
+    ExecutionMissionLifecycleService,
 )
 from backend.trading.execution.execution_mission_persistence import (
     ExecutionMissionPersistence,
@@ -155,6 +179,11 @@ execution_mission_recovery = (
     )
 )
 
+
+execution_mission_acknowledgement_store = (
+    ExecutionMissionAcknowledgementStore()
+)
+
 execution_mission_execution_started_store = (
     ExecutionMissionExecutionStartedStore()
 )
@@ -163,12 +192,65 @@ execution_mission_completed_store = (
     ExecutionMissionCompletedStore()
 )
 
+execution_mission_failed_store = (
+    ExecutionMissionFailedStore()
+)
+
 broker_execution_evidence_store = (
     BrokerExecutionEvidenceStore()
 )
 
-execution_mission_failed_store = (
-    ExecutionMissionFailedStore()
+
+execution_mission_lifecycle_service = (
+    ExecutionMissionLifecycleService(
+        execution_mission_registry
+    )
+)
+
+execution_mission_acknowledgement_processor = (
+    ExecutionMissionAcknowledgementProcessor(
+        store=execution_mission_acknowledgement_store,
+        lifecycle_service=execution_mission_lifecycle_service,
+    )
+)
+
+execution_mission_execution_started_processor = (
+    ExecutionMissionExecutionStartedProcessor(
+        store=execution_mission_execution_started_store,
+        lifecycle_service=execution_mission_lifecycle_service,
+    )
+)
+
+execution_mission_completed_processor = (
+    ExecutionMissionCompletedProcessor(
+        store=execution_mission_completed_store,
+        lifecycle_service=execution_mission_lifecycle_service,
+    )
+)
+
+execution_mission_failed_processor = (
+    ExecutionMissionFailedProcessor(
+        store=execution_mission_failed_store,
+        lifecycle_service=execution_mission_lifecycle_service,
+    )
+)
+
+execution_mission_lifecycle_scheduler = (
+    ExecutionMissionLifecycleScheduler(
+        processors=[
+            execution_mission_acknowledgement_processor,
+            execution_mission_execution_started_processor,
+            execution_mission_completed_processor,
+            execution_mission_failed_processor,
+        ],
+        interval_seconds=5.0,
+    )
+)
+
+
+todoba_runtime.register(
+    start=execution_mission_lifecycle_scheduler.start,
+    stop=execution_mission_lifecycle_scheduler.stop,
 )
 
 
@@ -182,6 +264,13 @@ app.include_router(
 app.include_router(
     create_execution_mission_injection_router(
         execution_mission_service
+    )
+)
+
+app.include_router(
+    create_execution_mission_acknowledgement_router(
+        execution_mission_acknowledgement_store,
+        trusted_agent_authenticator,
     )
 )
 

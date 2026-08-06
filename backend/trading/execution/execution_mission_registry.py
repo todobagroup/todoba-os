@@ -24,13 +24,15 @@ class ExecutionMissionRegistry:
     """
 
     def __init__(self) -> None:
-        self._records: dict[str, ExecutionMissionRecord] = {}
+        self._records: dict[
+            str,
+            ExecutionMissionRecord,
+        ] = {}
 
     def register(
         self,
         record: ExecutionMissionRecord,
     ) -> ExecutionMissionRecord:
-
         if not isinstance(
             record,
             ExecutionMissionRecord,
@@ -49,15 +51,26 @@ class ExecutionMissionRegistry:
         self,
         mission_id: str,
     ) -> Optional[ExecutionMissionRecord]:
-
         return self._records.get(
             mission_id
         )
 
+    def remove(
+        self,
+        mission_id: str,
+    ) -> bool:
+        if mission_id not in self._records:
+            return False
+
+        del self._records[
+            mission_id
+        ]
+
+        return True
+
     def list(
         self,
     ) -> list[ExecutionMissionRecord]:
-
         return list(
             self._records.values()
         )
@@ -65,7 +78,6 @@ class ExecutionMissionRegistry:
     def size(
         self,
     ) -> int:
-
         return len(
             self._records
         )

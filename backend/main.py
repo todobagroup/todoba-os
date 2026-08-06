@@ -78,6 +78,12 @@ from backend.trading.execution.execution_mission_lifecycle_service import (
 from backend.trading.execution.execution_mission_persistence import (
     ExecutionMissionPersistence,
 )
+from backend.trading.execution.execution_mission_record_persistence import (
+    ExecutionMissionRecordPersistence,
+)
+from backend.trading.execution.execution_mission_record_recovery import (
+    ExecutionMissionRecordRecovery,
+)
 from backend.trading.execution.execution_mission_recovery import (
     ExecutionMissionRecovery,
 )
@@ -107,6 +113,12 @@ MISSION_STORAGE_PATH = (
     / "execution_missions.json"
 )
 
+MISSION_RECORD_STORAGE_PATH = (
+    Path("data")
+    / "trading"
+    / "execution_mission_records.json"
+)
+
 
 runtime_bootstrap = RuntimeBootstrap()
 
@@ -120,6 +132,8 @@ async def lifespan(
     app: FastAPI,
 ):
     execution_mission_recovery.restore()
+
+    execution_mission_record_recovery.restore()
 
     await todoba_runtime.start()
 
@@ -165,12 +179,19 @@ execution_mission_registry = (
     ExecutionMissionRegistry()
 )
 
+execution_mission_record_persistence = (
+    ExecutionMissionRecordPersistence(
+        MISSION_RECORD_STORAGE_PATH
+    )
+)
+
 execution_mission_service = (
     ExecutionMissionService(
         execution_mission_repository,
         execution_mission_persistence,
         execution_mission_delivery_bridge,
         execution_mission_registry,
+        execution_mission_record_persistence,
     )
 )
 
@@ -179,6 +200,13 @@ execution_mission_recovery = (
         repository=execution_mission_repository,
         persistence=execution_mission_persistence,
         delivery_bridge=execution_mission_delivery_bridge,
+    )
+)
+
+execution_mission_record_recovery = (
+    ExecutionMissionRecordRecovery(
+        persistence=execution_mission_record_persistence,
+        registry=execution_mission_registry,
     )
 )
 
@@ -206,7 +234,8 @@ broker_execution_evidence_store = (
 
 execution_mission_lifecycle_service = (
     ExecutionMissionLifecycleService(
-        execution_mission_registry
+        execution_mission_registry,
+        execution_mission_record_persistence,
     )
 )
 

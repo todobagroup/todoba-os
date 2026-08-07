@@ -51,6 +51,16 @@ from backend.trading.execution.execution_mission_completed_store import (
 from backend.trading.execution.execution_mission_delivery_bridge import (
     ExecutionMissionDeliveryBridge,
 )
+from backend.trading.execution.execution_mission_delivery_lease_registry import (
+    ExecutionMissionDeliveryLeaseRegistry,
+)
+from backend.trading.execution.execution_mission_delivery_lease_service import (
+    ExecutionMissionDeliveryLeaseService,
+)
+from backend.trading.execution.execution_mission_delivery_redelivery_processor import (
+    ExecutionMissionDeliveryRedeliveryProcessor,
+)
+
 from backend.trading.execution.execution_mission_evidence_idempotency_registry import (
     ExecutionMissionEvidenceIdempotencyRegistry,
 )
@@ -213,6 +223,30 @@ execution_mission_delivery_bridge = (
     )
 )
 
+execution_mission_delivery_lease_registry = (
+    ExecutionMissionDeliveryLeaseRegistry()
+)
+
+execution_mission_delivery_lease_service = (
+    ExecutionMissionDeliveryLeaseService(
+        registry=(
+            execution_mission_delivery_lease_registry
+        ),
+        lease_seconds=30.0,
+    )
+)
+
+execution_mission_delivery_lease_registry = (
+    ExecutionMissionDeliveryLeaseRegistry()
+)
+
+execution_mission_delivery_lease_service = (
+    ExecutionMissionDeliveryLeaseService(
+        registry=execution_mission_delivery_lease_registry,
+        lease_seconds=30.0,
+    )
+)
+
 execution_mission_registry = (
     ExecutionMissionRegistry()
 )
@@ -315,6 +349,9 @@ execution_mission_acknowledgement_processor = (
         store=execution_mission_acknowledgement_store,
         lifecycle_service=execution_mission_lifecycle_service,
         persistence=execution_mission_evidence_persistence,
+        lease_registry=(
+            execution_mission_delivery_lease_registry
+        ),
     )
 )
 
@@ -350,6 +387,16 @@ broker_execution_evidence_processor = (
     )
 )
 
+execution_mission_delivery_redelivery_processor = (
+    ExecutionMissionDeliveryRedeliveryProcessor(
+        repository=execution_mission_repository,
+        delivery_bridge=execution_mission_delivery_bridge,
+        lease_registry=(
+            execution_mission_delivery_lease_registry
+        ),
+    )
+)
+
 execution_mission_lifecycle_scheduler = (
     ExecutionMissionLifecycleScheduler(
         processors=[
@@ -358,6 +405,7 @@ execution_mission_lifecycle_scheduler = (
             execution_mission_completed_processor,
             execution_mission_failed_processor,
             broker_execution_evidence_processor,
+            execution_mission_delivery_redelivery_processor,
         ],
         interval_seconds=5.0,
     )
@@ -373,6 +421,7 @@ app.include_router(
     create_execution_mission_router(
         execution_mission_store,
         trusted_agent_authenticator,
+        execution_mission_delivery_lease_service,
     )
 )
 

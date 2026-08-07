@@ -2,6 +2,9 @@ from backend.main import (
     broker_execution_evidence_processor,
     execution_mission_acknowledgement_processor,
     execution_mission_completed_processor,
+    execution_mission_delivery_lease_registry,
+    execution_mission_delivery_lease_service,
+    execution_mission_delivery_redelivery_processor,
     execution_mission_execution_started_processor,
     execution_mission_failed_processor,
     execution_mission_lifecycle_scheduler,
@@ -15,6 +18,15 @@ from backend.trading.execution.execution_mission_acknowledgement_processor impor
 )
 from backend.trading.execution.execution_mission_completed_processor import (
     ExecutionMissionCompletedProcessor,
+)
+from backend.trading.execution.execution_mission_delivery_lease_registry import (
+    ExecutionMissionDeliveryLeaseRegistry,
+)
+from backend.trading.execution.execution_mission_delivery_lease_service import (
+    ExecutionMissionDeliveryLeaseService,
+)
+from backend.trading.execution.execution_mission_delivery_redelivery_processor import (
+    ExecutionMissionDeliveryRedeliveryProcessor,
 )
 from backend.trading.execution.execution_mission_execution_started_processor import (
     ExecutionMissionExecutionStartedProcessor,
@@ -37,8 +49,23 @@ def test_main_composes_execution_mission_lifecycle_runtime() -> None:
     )
 
     assert isinstance(
+        execution_mission_delivery_lease_registry,
+        ExecutionMissionDeliveryLeaseRegistry,
+    )
+
+    assert isinstance(
+        execution_mission_delivery_lease_service,
+        ExecutionMissionDeliveryLeaseService,
+    )
+
+    assert isinstance(
         execution_mission_acknowledgement_processor,
         ExecutionMissionAcknowledgementProcessor,
+    )
+
+    assert (
+        execution_mission_acknowledgement_processor.lease_registry
+        is execution_mission_delivery_lease_registry
     )
 
     assert isinstance(
@@ -62,6 +89,16 @@ def test_main_composes_execution_mission_lifecycle_runtime() -> None:
     )
 
     assert isinstance(
+        execution_mission_delivery_redelivery_processor,
+        ExecutionMissionDeliveryRedeliveryProcessor,
+    )
+
+    assert (
+        execution_mission_delivery_redelivery_processor.lease_registry
+        is execution_mission_delivery_lease_registry
+    )
+
+    assert isinstance(
         execution_mission_lifecycle_scheduler,
         ExecutionMissionLifecycleScheduler,
     )
@@ -72,4 +109,5 @@ def test_main_composes_execution_mission_lifecycle_runtime() -> None:
         execution_mission_completed_processor,
         execution_mission_failed_processor,
         broker_execution_evidence_processor,
+        execution_mission_delivery_redelivery_processor,
     ]

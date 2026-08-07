@@ -8,6 +8,8 @@ Responsibilities:
 - process acknowledgement evidence
 - remove successfully processed evidence
   from persistence
+- release delivery lease after successful
+  acknowledgement processing
 
 This component does not:
 - receive HTTP requests
@@ -17,11 +19,11 @@ This component does not:
 
 from typing import Optional
 
-from backend.trading.execution.execution_mission_acknowledgement import (
-    ExecutionMissionAcknowledgement,
-)
 from backend.trading.execution.execution_mission_acknowledgement_store import (
     ExecutionMissionAcknowledgementStore,
+)
+from backend.trading.execution.execution_mission_delivery_lease_registry import (
+    ExecutionMissionDeliveryLeaseRegistry,
 )
 from backend.trading.execution.execution_mission_evidence_persistence import (
     ExecutionMissionEvidencePersistence,
@@ -43,6 +45,9 @@ class ExecutionMissionAcknowledgementProcessor:
         lifecycle_service: ExecutionMissionLifecycleService,
         persistence: Optional[
             ExecutionMissionEvidencePersistence
+        ] = None,
+        lease_registry: Optional[
+            ExecutionMissionDeliveryLeaseRegistry
         ] = None,
     ) -> None:
         if not isinstance(
@@ -75,9 +80,22 @@ class ExecutionMissionAcknowledgementProcessor:
                 "ExecutionMissionEvidencePersistence."
             )
 
+        if (
+            lease_registry is not None
+            and not isinstance(
+                lease_registry,
+                ExecutionMissionDeliveryLeaseRegistry,
+            )
+        ):
+            raise TypeError(
+                "lease_registry must be "
+                "ExecutionMissionDeliveryLeaseRegistry."
+            )
+
         self.store = store
         self.lifecycle_service = lifecycle_service
         self.persistence = persistence
+        self.lease_registry = lease_registry
 
     def process_next(
         self,
@@ -97,6 +115,11 @@ class ExecutionMissionAcknowledgementProcessor:
         if self.persistence is not None:
             self.persistence.remove(
                 acknowledgement
+            )
+
+        if self.lease_registry is not None:
+            self.lease_registry.release(
+                acknowledgement.mission_id
             )
 
         return result

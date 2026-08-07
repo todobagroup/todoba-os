@@ -3,14 +3,14 @@ TODOBA Execution Mission Evidence Persistence
 
 Persists unprocessed execution mission evidence to disk.
 
-This component:
-- appends received evidence to persistent storage
-- removes evidence after successful processing
-- restores evidence into the correct in-memory store
+Responsibilities:
+- append received evidence to persistent storage
+- remove evidence after successful processing
+- restore evidence into the correct in-memory store
+- restore accepted evidence identities when configured
 
-It does not:
+This component does not:
 - process lifecycle transitions
-- decide evidence idempotency
 - receive HTTP requests
 - execute broker orders
 """
@@ -19,6 +19,7 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
+from typing import Optional
 
 from backend.trading.execution.broker_execution_evidence import (
     BrokerExecutionEvidence,
@@ -37,6 +38,12 @@ from backend.trading.execution.execution_mission_completed import (
 )
 from backend.trading.execution.execution_mission_completed_store import (
     ExecutionMissionCompletedStore,
+)
+from backend.trading.execution.execution_mission_evidence_idempotency_registry import (
+    ExecutionMissionEvidenceIdempotencyRegistry,
+)
+from backend.trading.execution.execution_mission_evidence_identity import (
+    ExecutionMissionEvidenceIdentity,
 )
 from backend.trading.execution.execution_mission_execution_started import (
     ExecutionMissionExecutionStarted,
@@ -148,9 +155,16 @@ class ExecutionMissionEvidencePersistence:
         broker_evidence_store: (
             BrokerExecutionEvidenceStore
         ),
+        idempotency_registry: Optional[
+            ExecutionMissionEvidenceIdempotencyRegistry
+        ] = None,
     ) -> int:
         """
-        Restore all persisted evidence into its owner store.
+        Restore persisted evidence into its owner store.
+
+        When an idempotency registry is configured,
+        restored identities are registered and duplicate
+        persisted evidence is not enqueued more than once.
         """
 
         self._validate_stores(
@@ -166,6 +180,18 @@ class ExecutionMissionEvidencePersistence:
                 broker_evidence_store
             ),
         )
+
+        if (
+            idempotency_registry is not None
+            and not isinstance(
+                idempotency_registry,
+                ExecutionMissionEvidenceIdempotencyRegistry,
+            )
+        ):
+            raise TypeError(
+                "idempotency_registry must be "
+                "ExecutionMissionEvidenceIdempotencyRegistry."
+            )
 
         payload = self._read_payload()
 
@@ -188,46 +214,39 @@ class ExecutionMissionEvidencePersistence:
                     "Evidence payload must be an object."
                 )
 
-            if evidence_type == ACKNOWLEDGEMENT:
-                acknowledgement_store.push(
-                    ExecutionMissionAcknowledgement(
-                        **evidence_payload
+            evidence = self._deserialize(
+                evidence_type=evidence_type,
+                evidence_payload=evidence_payload,
+            )
+
+            if idempotency_registry is not None:
+                identity = (
+                    ExecutionMissionEvidenceIdentity.build(
+                        evidence
                     )
                 )
 
-            elif evidence_type == EXECUTION_STARTED:
-                execution_started_store.push(
-                    ExecutionMissionExecutionStarted(
-                        **evidence_payload
-                    )
+                accepted = idempotency_registry.accept(
+                    identity
                 )
 
-            elif evidence_type == COMPLETED:
-                completed_store.push(
-                    ExecutionMissionCompleted(
-                        **evidence_payload
-                    )
-                )
+                if not accepted:
+                    continue
 
-            elif evidence_type == FAILED:
-                failed_store.push(
-                    ExecutionMissionFailed(
-                        **evidence_payload
-                    )
-                )
-
-            elif evidence_type == BROKER_EXECUTION:
-                broker_evidence_store.push(
-                    BrokerExecutionEvidence(
-                        **evidence_payload
-                    )
-                )
-
-            else:
-                raise ValueError(
-                    "Unsupported execution mission "
-                    "evidence type."
-                )
+            self._push_restored_evidence(
+                evidence=evidence,
+                acknowledgement_store=(
+                    acknowledgement_store
+                ),
+                execution_started_store=(
+                    execution_started_store
+                ),
+                completed_store=completed_store,
+                failed_store=failed_store,
+                broker_evidence_store=(
+                    broker_evidence_store
+                ),
+            )
 
             restored += 1
 
@@ -285,6 +304,111 @@ class ExecutionMissionEvidencePersistence:
                 evidence
             ),
         }
+
+    def _deserialize(
+        self,
+        *,
+        evidence_type: object,
+        evidence_payload: dict[str, Any],
+    ) -> object:
+        if evidence_type == ACKNOWLEDGEMENT:
+            return ExecutionMissionAcknowledgement(
+                **evidence_payload
+            )
+
+        if evidence_type == EXECUTION_STARTED:
+            return ExecutionMissionExecutionStarted(
+                **evidence_payload
+            )
+
+        if evidence_type == COMPLETED:
+            return ExecutionMissionCompleted(
+                **evidence_payload
+            )
+
+        if evidence_type == FAILED:
+            return ExecutionMissionFailed(
+                **evidence_payload
+            )
+
+        if evidence_type == BROKER_EXECUTION:
+            return BrokerExecutionEvidence(
+                **evidence_payload
+            )
+
+        raise ValueError(
+            "Unsupported execution mission "
+            "evidence type."
+        )
+
+    def _push_restored_evidence(
+        self,
+        *,
+        evidence: object,
+        acknowledgement_store: (
+            ExecutionMissionAcknowledgementStore
+        ),
+        execution_started_store: (
+            ExecutionMissionExecutionStartedStore
+        ),
+        completed_store: (
+            ExecutionMissionCompletedStore
+        ),
+        failed_store: (
+            ExecutionMissionFailedStore
+        ),
+        broker_evidence_store: (
+            BrokerExecutionEvidenceStore
+        ),
+    ) -> None:
+        if isinstance(
+            evidence,
+            ExecutionMissionAcknowledgement,
+        ):
+            acknowledgement_store.push(
+                evidence
+            )
+            return
+
+        if isinstance(
+            evidence,
+            ExecutionMissionExecutionStarted,
+        ):
+            execution_started_store.push(
+                evidence
+            )
+            return
+
+        if isinstance(
+            evidence,
+            ExecutionMissionCompleted,
+        ):
+            completed_store.push(
+                evidence
+            )
+            return
+
+        if isinstance(
+            evidence,
+            ExecutionMissionFailed,
+        ):
+            failed_store.push(
+                evidence
+            )
+            return
+
+        if isinstance(
+            evidence,
+            BrokerExecutionEvidence,
+        ):
+            broker_evidence_store.push(
+                evidence
+            )
+            return
+
+        raise TypeError(
+            "Unsupported execution mission evidence."
+        )
 
     def _read_payload(
         self,

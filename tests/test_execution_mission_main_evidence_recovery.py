@@ -43,6 +43,9 @@ def test_main_restores_evidence_before_runtime_start(
             "broker_evidence_store": (
                 main.broker_execution_evidence_store
             ),
+            "idempotency_registry": (
+                main.execution_mission_evidence_idempotency_registry
+            ),
         }
 
         return 0

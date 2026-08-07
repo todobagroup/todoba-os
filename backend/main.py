@@ -51,6 +51,9 @@ from backend.trading.execution.execution_mission_completed_store import (
 from backend.trading.execution.execution_mission_delivery_bridge import (
     ExecutionMissionDeliveryBridge,
 )
+from backend.trading.execution.execution_mission_evidence_idempotency_registry import (
+    ExecutionMissionEvidenceIdempotencyRegistry,
+)
 from backend.trading.execution.execution_mission_evidence_intake import (
     ExecutionMissionEvidenceIntake,
 )
@@ -151,22 +154,25 @@ async def lifespan(
     execution_mission_record_recovery.restore()
 
     execution_mission_evidence_persistence.restore(
-        acknowledgement_store=(
-            execution_mission_acknowledgement_store
-        ),
-        execution_started_store=(
-            execution_mission_execution_started_store
-        ),
-        completed_store=(
-            execution_mission_completed_store
-        ),
-        failed_store=(
-            execution_mission_failed_store
-        ),
-        broker_evidence_store=(
-            broker_execution_evidence_store
-        ),
-    )
+    acknowledgement_store=(
+        execution_mission_acknowledgement_store
+    ),
+    execution_started_store=(
+        execution_mission_execution_started_store
+    ),
+    completed_store=(
+        execution_mission_completed_store
+    ),
+    failed_store=(
+        execution_mission_failed_store
+    ),
+    broker_evidence_store=(
+        broker_execution_evidence_store
+    ),
+    idempotency_registry=(
+        execution_mission_evidence_idempotency_registry
+    ),
+)
 
     await todoba_runtime.start()
 
@@ -268,6 +274,9 @@ execution_mission_evidence_persistence = (
         MISSION_EVIDENCE_STORAGE_PATH
     )
 )
+execution_mission_evidence_idempotency_registry = (
+    ExecutionMissionEvidenceIdempotencyRegistry()
+)
 
 execution_mission_evidence_intake = (
     ExecutionMissionEvidenceIntake(
@@ -286,6 +295,9 @@ execution_mission_evidence_intake = (
         ),
         broker_evidence_store=(
             broker_execution_evidence_store
+        ),
+        idempotency_registry=(
+            execution_mission_evidence_idempotency_registry
         ),
     )
 )

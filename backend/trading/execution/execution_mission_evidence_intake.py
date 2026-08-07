@@ -5,14 +5,16 @@ Safely accepts execution mission evidence.
 
 Responsibilities:
 - persist evidence before acknowledging receipt
+- protect evidence intake from duplicate delivery
 - push persisted evidence into the correct in-memory store
 
 This component does not:
 - receive HTTP requests
 - process lifecycle transitions
 - remove processed evidence
-- decide evidence idempotency
 """
+
+from typing import Optional
 
 from backend.trading.execution.broker_execution_evidence import (
     BrokerExecutionEvidence,
@@ -31,6 +33,12 @@ from backend.trading.execution.execution_mission_completed import (
 )
 from backend.trading.execution.execution_mission_completed_store import (
     ExecutionMissionCompletedStore,
+)
+from backend.trading.execution.execution_mission_evidence_idempotency_registry import (
+    ExecutionMissionEvidenceIdempotencyRegistry,
+)
+from backend.trading.execution.execution_mission_evidence_identity import (
+    ExecutionMissionEvidenceIdentity,
 )
 from backend.trading.execution.execution_mission_evidence_persistence import (
     ExecutionMissionEvidencePersistence,
@@ -52,6 +60,9 @@ from backend.trading.execution.execution_mission_failed_store import (
 class ExecutionMissionEvidenceIntake:
     """
     Persists evidence before placing it in memory.
+
+    When an idempotency registry is configured,
+    duplicate evidence is ignored safely.
     """
 
     def __init__(
@@ -67,6 +78,9 @@ class ExecutionMissionEvidenceIntake:
         completed_store: ExecutionMissionCompletedStore,
         failed_store: ExecutionMissionFailedStore,
         broker_evidence_store: BrokerExecutionEvidenceStore,
+        idempotency_registry: Optional[
+            ExecutionMissionEvidenceIdempotencyRegistry
+        ] = None,
     ) -> None:
         if not isinstance(
             persistence,
@@ -122,34 +136,84 @@ class ExecutionMissionEvidenceIntake:
                 "BrokerExecutionEvidenceStore."
             )
 
+        if (
+            idempotency_registry is not None
+            and not isinstance(
+                idempotency_registry,
+                ExecutionMissionEvidenceIdempotencyRegistry,
+            )
+        ):
+            raise TypeError(
+                "idempotency_registry must be "
+                "ExecutionMissionEvidenceIdempotencyRegistry."
+            )
+
         self.persistence = persistence
+
         self.acknowledgement_store = (
             acknowledgement_store
         )
+
         self.execution_started_store = (
             execution_started_store
         )
+
         self.completed_store = completed_store
         self.failed_store = failed_store
+
         self.broker_evidence_store = (
             broker_evidence_store
+        )
+
+        self.idempotency_registry = (
+            idempotency_registry
         )
 
     def receive(
         self,
         evidence: object,
-    ) -> object:
+    ) -> object | None:
         """
-        Persist evidence first, then enqueue it in RAM.
+        Persist new evidence, then enqueue it in RAM.
+
+        Returns the evidence when accepted.
+        Returns None when the evidence is a duplicate.
         """
 
         store = self._resolve_store(
             evidence
         )
 
+        if self.idempotency_registry is None:
+            self.persistence.save(
+                evidence
+            )
+
+            store.push(
+                evidence
+            )
+
+            return evidence
+
+        identity = ExecutionMissionEvidenceIdentity.build(
+            evidence
+        )
+
+        if self.idempotency_registry.contains(
+            identity
+        ):
+            return None
+
         self.persistence.save(
             evidence
         )
+
+        accepted = self.idempotency_registry.accept(
+            identity
+        )
+
+        if not accepted:
+            return None
 
         store.push(
             evidence

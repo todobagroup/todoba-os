@@ -4,8 +4,8 @@ TODOBA Execution Mission Failed API
 Receives failure evidence from Trusted Agents.
 
 This API owns HTTP transport only.
-Storage and authentication policy belong to separate
-capabilities.
+Evidence intake and authentication policy belong
+to separate capabilities.
 """
 
 from fastapi import APIRouter
@@ -13,11 +13,11 @@ from fastapi import Depends
 from fastapi import HTTPException
 from fastapi import status
 
+from backend.trading.execution.execution_mission_evidence_intake import (
+    ExecutionMissionEvidenceIntake,
+)
 from backend.trading.execution.execution_mission_failed import (
     ExecutionMissionFailed,
-)
-from backend.trading.execution.execution_mission_failed_store import (
-    ExecutionMissionFailedStore,
 )
 from backend.trading.execution.trusted_agent_authentication_dependency import (
     create_trusted_agent_authentication_dependency,
@@ -28,16 +28,16 @@ from backend.trading.execution.trusted_agent_authenticator import (
 
 
 def create_execution_mission_failed_router(
-    store: ExecutionMissionFailedStore,
+    intake: ExecutionMissionEvidenceIntake,
     authenticator: TrustedAgentAuthenticator,
 ) -> APIRouter:
     if not isinstance(
-        store,
-        ExecutionMissionFailedStore,
+        intake,
+        ExecutionMissionEvidenceIntake,
     ):
         raise TypeError(
             "create_execution_mission_failed_router "
-            "requires ExecutionMissionFailedStore."
+            "requires ExecutionMissionEvidenceIntake."
         )
 
     if not isinstance(
@@ -75,14 +75,16 @@ def create_execution_mission_failed_router(
                 ),
             )
 
-        store.push(
+        intake.receive(
             evidence
         )
 
         return {
             "status": "failed",
             "mission_id": evidence.mission_id,
-            "store_size": store.size(),
+            "store_size": (
+                intake.failed_store.size()
+            ),
         }
 
     return router

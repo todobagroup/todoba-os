@@ -4,20 +4,25 @@ TODOBA Execution Mission Execution Started Processor
 Consumes execution started evidence and coordinates
 mission lifecycle updates.
 
+Responsibilities:
+- process execution started evidence
+- remove successfully processed evidence
+  from persistence
+
 This component does not:
 - receive HTTP requests
 - store execution evidence
 - execute broker orders
 """
 
-from backend.trading.execution.execution_mission_execution_started import (
-    ExecutionMissionExecutionStarted,
-)
+from typing import Optional
 
+from backend.trading.execution.execution_mission_evidence_persistence import (
+    ExecutionMissionEvidencePersistence,
+)
 from backend.trading.execution.execution_mission_execution_started_store import (
     ExecutionMissionExecutionStartedStore,
 )
-
 from backend.trading.execution.execution_mission_lifecycle_service import (
     ExecutionMissionLifecycleService,
 )
@@ -33,8 +38,10 @@ class ExecutionMissionExecutionStartedProcessor:
         *,
         store: ExecutionMissionExecutionStartedStore,
         lifecycle_service: ExecutionMissionLifecycleService,
+        persistence: Optional[
+            ExecutionMissionEvidencePersistence
+        ] = None,
     ) -> None:
-
         if not isinstance(
             store,
             ExecutionMissionExecutionStartedStore,
@@ -53,17 +60,38 @@ class ExecutionMissionExecutionStartedProcessor:
                 "requires ExecutionMissionLifecycleService."
             )
 
+        if (
+            persistence is not None
+            and not isinstance(
+                persistence,
+                ExecutionMissionEvidencePersistence,
+            )
+        ):
+            raise TypeError(
+                "persistence must be "
+                "ExecutionMissionEvidencePersistence."
+            )
+
         self.store = store
         self.lifecycle_service = lifecycle_service
+        self.persistence = persistence
 
-    def process_next(self):
-
+    def process_next(
+        self,
+    ):
         evidence = self.store.pop()
 
         if evidence is None:
             return None
 
-        return self.lifecycle_service.start_execution(
+        result = self.lifecycle_service.start_execution(
             mission_id=evidence.mission_id,
             started_at=evidence.started_at,
         )
+
+        if self.persistence is not None:
+            self.persistence.remove(
+                evidence
+            )
+
+        return result

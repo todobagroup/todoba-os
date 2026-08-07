@@ -21,6 +21,9 @@ from backend.runtime.todoba_runtime import (
 from backend.trading.execution.broker_execution_evidence_api import (
     create_broker_execution_evidence_router,
 )
+from backend.trading.execution.broker_execution_evidence_processor import (
+    BrokerExecutionEvidenceProcessor,
+)
 from backend.trading.execution.broker_execution_evidence_store import (
     BrokerExecutionEvidenceStore,
 )
@@ -47,6 +50,12 @@ from backend.trading.execution.execution_mission_completed_store import (
 )
 from backend.trading.execution.execution_mission_delivery_bridge import (
     ExecutionMissionDeliveryBridge,
+)
+from backend.trading.execution.execution_mission_evidence_intake import (
+    ExecutionMissionEvidenceIntake,
+)
+from backend.trading.execution.execution_mission_evidence_persistence import (
+    ExecutionMissionEvidencePersistence,
 )
 from backend.trading.execution.execution_mission_execution_started_api import (
     create_execution_mission_execution_started_router,
@@ -119,6 +128,12 @@ MISSION_RECORD_STORAGE_PATH = (
     / "execution_mission_records.json"
 )
 
+MISSION_EVIDENCE_STORAGE_PATH = (
+    Path("data")
+    / "trading"
+    / "execution_mission_evidence.json"
+)
+
 
 runtime_bootstrap = RuntimeBootstrap()
 
@@ -135,12 +150,29 @@ async def lifespan(
 
     execution_mission_record_recovery.restore()
 
+    execution_mission_evidence_persistence.restore(
+        acknowledgement_store=(
+            execution_mission_acknowledgement_store
+        ),
+        execution_started_store=(
+            execution_mission_execution_started_store
+        ),
+        completed_store=(
+            execution_mission_completed_store
+        ),
+        failed_store=(
+            execution_mission_failed_store
+        ),
+        broker_evidence_store=(
+            broker_execution_evidence_store
+        ),
+    )
+
     await todoba_runtime.start()
 
     yield
 
     await todoba_runtime.stop()
-
 
 app = FastAPI(
     lifespan=lifespan,
@@ -231,6 +263,33 @@ broker_execution_evidence_store = (
     BrokerExecutionEvidenceStore()
 )
 
+execution_mission_evidence_persistence = (
+    ExecutionMissionEvidencePersistence(
+        MISSION_EVIDENCE_STORAGE_PATH
+    )
+)
+
+execution_mission_evidence_intake = (
+    ExecutionMissionEvidenceIntake(
+        persistence=execution_mission_evidence_persistence,
+        acknowledgement_store=(
+            execution_mission_acknowledgement_store
+        ),
+        execution_started_store=(
+            execution_mission_execution_started_store
+        ),
+        completed_store=(
+            execution_mission_completed_store
+        ),
+        failed_store=(
+            execution_mission_failed_store
+        ),
+        broker_evidence_store=(
+            broker_execution_evidence_store
+        ),
+    )
+)
+
 
 execution_mission_lifecycle_service = (
     ExecutionMissionLifecycleService(
@@ -243,6 +302,7 @@ execution_mission_acknowledgement_processor = (
     ExecutionMissionAcknowledgementProcessor(
         store=execution_mission_acknowledgement_store,
         lifecycle_service=execution_mission_lifecycle_service,
+        persistence=execution_mission_evidence_persistence,
     )
 )
 
@@ -250,6 +310,7 @@ execution_mission_execution_started_processor = (
     ExecutionMissionExecutionStartedProcessor(
         store=execution_mission_execution_started_store,
         lifecycle_service=execution_mission_lifecycle_service,
+        persistence=execution_mission_evidence_persistence,
     )
 )
 
@@ -257,6 +318,7 @@ execution_mission_completed_processor = (
     ExecutionMissionCompletedProcessor(
         store=execution_mission_completed_store,
         lifecycle_service=execution_mission_lifecycle_service,
+        persistence=execution_mission_evidence_persistence,
     )
 )
 
@@ -264,6 +326,15 @@ execution_mission_failed_processor = (
     ExecutionMissionFailedProcessor(
         store=execution_mission_failed_store,
         lifecycle_service=execution_mission_lifecycle_service,
+        persistence=execution_mission_evidence_persistence,
+    )
+)
+
+broker_execution_evidence_processor = (
+    BrokerExecutionEvidenceProcessor(
+        store=broker_execution_evidence_store,
+        lifecycle_service=execution_mission_lifecycle_service,
+        persistence=execution_mission_evidence_persistence,
     )
 )
 
@@ -274,11 +345,11 @@ execution_mission_lifecycle_scheduler = (
             execution_mission_execution_started_processor,
             execution_mission_completed_processor,
             execution_mission_failed_processor,
+            broker_execution_evidence_processor,
         ],
         interval_seconds=5.0,
     )
 )
-
 
 todoba_runtime.register(
     start=execution_mission_lifecycle_scheduler.start,
@@ -307,39 +378,38 @@ app.include_router(
 
 app.include_router(
     create_execution_mission_acknowledgement_router(
-        execution_mission_acknowledgement_store,
+        execution_mission_evidence_intake,
         trusted_agent_authenticator,
     )
 )
 
 app.include_router(
     create_execution_mission_execution_started_router(
-        execution_mission_execution_started_store,
+        execution_mission_evidence_intake,
         trusted_agent_authenticator,
     )
 )
 
 app.include_router(
     create_execution_mission_completed_router(
-        execution_mission_completed_store,
+        execution_mission_evidence_intake,
         trusted_agent_authenticator,
     )
 )
 
 app.include_router(
     create_broker_execution_evidence_router(
-        broker_execution_evidence_store,
+        execution_mission_evidence_intake,
         trusted_agent_authenticator,
     )
 )
 
 app.include_router(
     create_execution_mission_failed_router(
-        execution_mission_failed_store,
+        execution_mission_evidence_intake,
         trusted_agent_authenticator,
     )
 )
-
 
 class ExperienceRequest(BaseModel):
     source: str

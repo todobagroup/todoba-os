@@ -7,11 +7,29 @@ sys.path.insert(0, str(ROOT_DIR))
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from backend.trading.execution.broker_execution_evidence_store import (
+    BrokerExecutionEvidenceStore,
+)
 from backend.trading.execution.execution_mission_acknowledgement_api import (
     create_execution_mission_acknowledgement_router,
 )
 from backend.trading.execution.execution_mission_acknowledgement_store import (
     ExecutionMissionAcknowledgementStore,
+)
+from backend.trading.execution.execution_mission_completed_store import (
+    ExecutionMissionCompletedStore,
+)
+from backend.trading.execution.execution_mission_evidence_intake import (
+    ExecutionMissionEvidenceIntake,
+)
+from backend.trading.execution.execution_mission_evidence_persistence import (
+    ExecutionMissionEvidencePersistence,
+)
+from backend.trading.execution.execution_mission_execution_started_store import (
+    ExecutionMissionExecutionStartedStore,
+)
+from backend.trading.execution.execution_mission_failed_store import (
+    ExecutionMissionFailedStore,
 )
 from backend.trading.execution.trusted_agent_authenticator import (
     TrustedAgentAuthenticator,
@@ -27,11 +45,40 @@ AUTHENTICATION_HEADERS = {
 }
 
 
-def create_client() -> tuple[
+def create_client(
+    tmp_path: Path,
+) -> tuple[
     TestClient,
     ExecutionMissionAcknowledgementStore,
+    ExecutionMissionEvidencePersistence,
 ]:
-    store = ExecutionMissionAcknowledgementStore()
+    acknowledgement_store = (
+        ExecutionMissionAcknowledgementStore()
+    )
+
+    persistence = ExecutionMissionEvidencePersistence(
+        tmp_path
+        / "execution_mission_evidence.json"
+    )
+
+    intake = ExecutionMissionEvidenceIntake(
+        persistence=persistence,
+        acknowledgement_store=(
+            acknowledgement_store
+        ),
+        execution_started_store=(
+            ExecutionMissionExecutionStartedStore()
+        ),
+        completed_store=(
+            ExecutionMissionCompletedStore()
+        ),
+        failed_store=(
+            ExecutionMissionFailedStore()
+        ),
+        broker_evidence_store=(
+            BrokerExecutionEvidenceStore()
+        ),
+    )
 
     authenticator = TrustedAgentAuthenticator(
         agent_id=AGENT_ID,
@@ -42,12 +89,16 @@ def create_client() -> tuple[
 
     app.include_router(
         create_execution_mission_acknowledgement_router(
-            store,
+            intake,
             authenticator,
         )
     )
 
-    return TestClient(app), store
+    return (
+        TestClient(app),
+        acknowledgement_store,
+        persistence,
+    )
 
 
 def build_payload(
@@ -62,8 +113,12 @@ def build_payload(
     }
 
 
-def test_acknowledge_mission_api() -> None:
-    client, store = create_client()
+def test_acknowledge_mission_api(
+    tmp_path: Path,
+) -> None:
+    client, store, persistence = create_client(
+        tmp_path
+    )
 
     response = client.post(
         "/missions/acknowledge",
@@ -77,11 +132,17 @@ def test_acknowledge_mission_api() -> None:
         "mission_id": "mission-001",
         "store_size": 1,
     }
+
+    assert persistence.size() == 1
     assert store.size() == 1
 
 
-def test_acknowledge_mission_api_rejects_missing_credentials() -> None:
-    client, store = create_client()
+def test_acknowledge_mission_api_rejects_missing_credentials(
+    tmp_path: Path,
+) -> None:
+    client, store, persistence = create_client(
+        tmp_path
+    )
 
     response = client.post(
         "/missions/acknowledge",
@@ -89,11 +150,16 @@ def test_acknowledge_mission_api_rejects_missing_credentials() -> None:
     )
 
     assert response.status_code == 401
+    assert persistence.size() == 0
     assert store.size() == 0
 
 
-def test_acknowledge_mission_api_rejects_wrong_agent_identity() -> None:
-    client, store = create_client()
+def test_acknowledge_mission_api_rejects_wrong_agent_identity(
+    tmp_path: Path,
+) -> None:
+    client, store, persistence = create_client(
+        tmp_path
+    )
 
     response = client.post(
         "/missions/acknowledge",
@@ -110,4 +176,6 @@ def test_acknowledge_mission_api_rejects_wrong_agent_identity() -> None:
             "to authenticated Agent."
         ),
     }
+
+    assert persistence.size() == 0
     assert store.size() == 0

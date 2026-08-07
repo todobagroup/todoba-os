@@ -4,16 +4,25 @@ TODOBA Execution Mission Completed Processor
 Consumes Trusted Agent completion evidence
 and coordinates mission lifecycle updates.
 
+Responsibilities:
+- process completion evidence
+- remove successfully processed evidence
+  from persistence
+
 This component does not:
 - receive HTTP requests
 - store completion evidence
 - execute broker orders
 """
 
+from typing import Optional
+
 from backend.trading.execution.execution_mission_completed_store import (
     ExecutionMissionCompletedStore,
 )
-
+from backend.trading.execution.execution_mission_evidence_persistence import (
+    ExecutionMissionEvidencePersistence,
+)
 from backend.trading.execution.execution_mission_lifecycle_service import (
     ExecutionMissionLifecycleService,
 )
@@ -29,8 +38,10 @@ class ExecutionMissionCompletedProcessor:
         *,
         store: ExecutionMissionCompletedStore,
         lifecycle_service: ExecutionMissionLifecycleService,
+        persistence: Optional[
+            ExecutionMissionEvidencePersistence
+        ] = None,
     ) -> None:
-
         if not isinstance(
             store,
             ExecutionMissionCompletedStore,
@@ -49,17 +60,38 @@ class ExecutionMissionCompletedProcessor:
                 "requires ExecutionMissionLifecycleService."
             )
 
+        if (
+            persistence is not None
+            and not isinstance(
+                persistence,
+                ExecutionMissionEvidencePersistence,
+            )
+        ):
+            raise TypeError(
+                "persistence must be "
+                "ExecutionMissionEvidencePersistence."
+            )
+
         self.store = store
         self.lifecycle_service = lifecycle_service
+        self.persistence = persistence
 
-    def process_next(self):
-
+    def process_next(
+        self,
+    ):
         evidence = self.store.pop()
 
         if evidence is None:
             return None
 
-        return self.lifecycle_service.complete_execution(
+        result = self.lifecycle_service.complete_execution(
             mission_id=evidence.mission_id,
             completed_at=evidence.completed_at,
         )
+
+        if self.persistence is not None:
+            self.persistence.remove(
+                evidence
+            )
+
+        return result

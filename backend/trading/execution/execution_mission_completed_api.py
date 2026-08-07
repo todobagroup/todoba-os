@@ -4,8 +4,8 @@ TODOBA Execution Mission Completed API
 Receives completion evidence from Trusted Agents.
 
 This API owns HTTP transport only.
-Storage and authentication policy belong to separate
-capabilities.
+Evidence intake and authentication policy belong
+to separate capabilities.
 """
 
 from fastapi import APIRouter
@@ -16,8 +16,8 @@ from fastapi import status
 from backend.trading.execution.execution_mission_completed import (
     ExecutionMissionCompleted,
 )
-from backend.trading.execution.execution_mission_completed_store import (
-    ExecutionMissionCompletedStore,
+from backend.trading.execution.execution_mission_evidence_intake import (
+    ExecutionMissionEvidenceIntake,
 )
 from backend.trading.execution.trusted_agent_authentication_dependency import (
     create_trusted_agent_authentication_dependency,
@@ -28,16 +28,16 @@ from backend.trading.execution.trusted_agent_authenticator import (
 
 
 def create_execution_mission_completed_router(
-    store: ExecutionMissionCompletedStore,
+    intake: ExecutionMissionEvidenceIntake,
     authenticator: TrustedAgentAuthenticator,
 ) -> APIRouter:
     if not isinstance(
-        store,
-        ExecutionMissionCompletedStore,
+        intake,
+        ExecutionMissionEvidenceIntake,
     ):
         raise TypeError(
             "create_execution_mission_completed_router "
-            "requires ExecutionMissionCompletedStore."
+            "requires ExecutionMissionEvidenceIntake."
         )
 
     if not isinstance(
@@ -75,14 +75,16 @@ def create_execution_mission_completed_router(
                 ),
             )
 
-        store.push(
+        intake.receive(
             evidence
         )
 
         return {
             "status": "completed",
             "mission_id": evidence.mission_id,
-            "store_size": store.size(),
+            "store_size": (
+                intake.completed_store.size()
+            ),
         }
 
     return router

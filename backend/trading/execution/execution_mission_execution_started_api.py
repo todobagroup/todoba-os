@@ -4,8 +4,8 @@ TODOBA Execution Mission Execution Started API
 Receives execution started evidence from Trusted Agents.
 
 This API owns HTTP transport only.
-Storage and authentication policy belong to separate
-capabilities.
+Evidence intake and authentication policy belong
+to separate capabilities.
 """
 
 from fastapi import APIRouter
@@ -13,11 +13,11 @@ from fastapi import Depends
 from fastapi import HTTPException
 from fastapi import status
 
+from backend.trading.execution.execution_mission_evidence_intake import (
+    ExecutionMissionEvidenceIntake,
+)
 from backend.trading.execution.execution_mission_execution_started import (
     ExecutionMissionExecutionStarted,
-)
-from backend.trading.execution.execution_mission_execution_started_store import (
-    ExecutionMissionExecutionStartedStore,
 )
 from backend.trading.execution.trusted_agent_authentication_dependency import (
     create_trusted_agent_authentication_dependency,
@@ -28,16 +28,16 @@ from backend.trading.execution.trusted_agent_authenticator import (
 
 
 def create_execution_mission_execution_started_router(
-    store: ExecutionMissionExecutionStartedStore,
+    intake: ExecutionMissionEvidenceIntake,
     authenticator: TrustedAgentAuthenticator,
 ) -> APIRouter:
     if not isinstance(
-        store,
-        ExecutionMissionExecutionStartedStore,
+        intake,
+        ExecutionMissionEvidenceIntake,
     ):
         raise TypeError(
             "create_execution_mission_execution_started_router "
-            "requires ExecutionMissionExecutionStartedStore."
+            "requires ExecutionMissionEvidenceIntake."
         )
 
     if not isinstance(
@@ -75,14 +75,16 @@ def create_execution_mission_execution_started_router(
                 ),
             )
 
-        store.push(
+        intake.receive(
             evidence
         )
 
         return {
             "status": "execution_started",
             "mission_id": evidence.mission_id,
-            "store_size": store.size(),
+            "store_size": (
+                intake.execution_started_store.size()
+            ),
         }
 
     return router

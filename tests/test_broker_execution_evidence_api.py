@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -6,6 +8,24 @@ from backend.trading.execution.broker_execution_evidence_api import (
 )
 from backend.trading.execution.broker_execution_evidence_store import (
     BrokerExecutionEvidenceStore,
+)
+from backend.trading.execution.execution_mission_acknowledgement_store import (
+    ExecutionMissionAcknowledgementStore,
+)
+from backend.trading.execution.execution_mission_completed_store import (
+    ExecutionMissionCompletedStore,
+)
+from backend.trading.execution.execution_mission_evidence_intake import (
+    ExecutionMissionEvidenceIntake,
+)
+from backend.trading.execution.execution_mission_evidence_persistence import (
+    ExecutionMissionEvidencePersistence,
+)
+from backend.trading.execution.execution_mission_execution_started_store import (
+    ExecutionMissionExecutionStartedStore,
+)
+from backend.trading.execution.execution_mission_failed_store import (
+    ExecutionMissionFailedStore,
 )
 from backend.trading.execution.trusted_agent_authenticator import (
     TrustedAgentAuthenticator,
@@ -21,8 +41,40 @@ AUTHENTICATION_HEADERS = {
 }
 
 
-def create_test_app():
-    store = BrokerExecutionEvidenceStore()
+def create_test_app(
+    tmp_path: Path,
+) -> tuple[
+    FastAPI,
+    BrokerExecutionEvidenceStore,
+    ExecutionMissionEvidencePersistence,
+]:
+    broker_evidence_store = (
+        BrokerExecutionEvidenceStore()
+    )
+
+    persistence = ExecutionMissionEvidencePersistence(
+        tmp_path
+        / "execution_mission_evidence.json"
+    )
+
+    intake = ExecutionMissionEvidenceIntake(
+        persistence=persistence,
+        acknowledgement_store=(
+            ExecutionMissionAcknowledgementStore()
+        ),
+        execution_started_store=(
+            ExecutionMissionExecutionStartedStore()
+        ),
+        completed_store=(
+            ExecutionMissionCompletedStore()
+        ),
+        failed_store=(
+            ExecutionMissionFailedStore()
+        ),
+        broker_evidence_store=(
+            broker_evidence_store
+        ),
+    )
 
     authenticator = TrustedAgentAuthenticator(
         agent_id=AGENT_ID,
@@ -33,12 +85,16 @@ def create_test_app():
 
     app.include_router(
         create_broker_execution_evidence_router(
-            store,
+            intake,
             authenticator,
         )
     )
 
-    return app, store
+    return (
+        app,
+        broker_evidence_store,
+        persistence,
+    )
 
 
 def build_payload(
@@ -57,8 +113,12 @@ def build_payload(
     }
 
 
-def test_broker_execution_evidence_is_stored() -> None:
-    app, store = create_test_app()
+def test_broker_execution_evidence_is_stored(
+    tmp_path: Path,
+) -> None:
+    app, store, persistence = create_test_app(
+        tmp_path
+    )
 
     client = TestClient(
         app
@@ -72,15 +132,22 @@ def test_broker_execution_evidence_is_stored() -> None:
 
     assert response.status_code == 200
 
-    data = response.json()
+    assert response.json() == {
+        "status": "stored",
+        "mission_id": "proof049-001",
+        "store_size": 1,
+    }
 
-    assert data["status"] == "stored"
-    assert data["mission_id"] == "proof049-001"
+    assert persistence.size() == 1
     assert store.size() == 1
 
 
-def test_broker_execution_evidence_rejects_missing_credentials() -> None:
-    app, store = create_test_app()
+def test_broker_execution_evidence_rejects_missing_credentials(
+    tmp_path: Path,
+) -> None:
+    app, store, persistence = create_test_app(
+        tmp_path
+    )
 
     client = TestClient(
         app
@@ -92,11 +159,16 @@ def test_broker_execution_evidence_rejects_missing_credentials() -> None:
     )
 
     assert response.status_code == 401
+    assert persistence.size() == 0
     assert store.size() == 0
 
 
-def test_broker_execution_evidence_rejects_wrong_agent_identity() -> None:
-    app, store = create_test_app()
+def test_broker_execution_evidence_rejects_wrong_agent_identity(
+    tmp_path: Path,
+) -> None:
+    app, store, persistence = create_test_app(
+        tmp_path
+    )
 
     client = TestClient(
         app
@@ -111,10 +183,13 @@ def test_broker_execution_evidence_rejects_wrong_agent_identity() -> None:
     )
 
     assert response.status_code == 403
+
     assert response.json() == {
         "detail": (
             "Broker execution evidence does not belong "
             "to authenticated Agent."
         ),
     }
+
+    assert persistence.size() == 0
     assert store.size() == 0

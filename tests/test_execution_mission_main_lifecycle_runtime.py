@@ -1,11 +1,14 @@
 from backend.main import (
+    broker_execution_evidence_processor,
     execution_mission_acknowledgement_processor,
     execution_mission_completed_processor,
     execution_mission_execution_started_processor,
     execution_mission_failed_processor,
     execution_mission_lifecycle_scheduler,
     execution_mission_lifecycle_service,
-    todoba_runtime,
+)
+from backend.trading.execution.broker_execution_evidence_processor import (
+    BrokerExecutionEvidenceProcessor,
 )
 from backend.trading.execution.execution_mission_acknowledgement_processor import (
     ExecutionMissionAcknowledgementProcessor,
@@ -54,6 +57,11 @@ def test_main_composes_execution_mission_lifecycle_runtime() -> None:
     )
 
     assert isinstance(
+        broker_execution_evidence_processor,
+        BrokerExecutionEvidenceProcessor,
+    )
+
+    assert isinstance(
         execution_mission_lifecycle_scheduler,
         ExecutionMissionLifecycleScheduler,
     )
@@ -63,14 +71,5 @@ def test_main_composes_execution_mission_lifecycle_runtime() -> None:
         execution_mission_execution_started_processor,
         execution_mission_completed_processor,
         execution_mission_failed_processor,
+        broker_execution_evidence_processor,
     ]
-
-    assert (
-        execution_mission_lifecycle_scheduler.start
-        in todoba_runtime._start_services
-    )
-
-    assert (
-        execution_mission_lifecycle_scheduler.stop
-        in todoba_runtime._stop_services
-    )

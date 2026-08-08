@@ -106,12 +106,22 @@ from backend.trading.execution.execution_mission_lifecycle_service import (
 from backend.trading.execution.execution_mission_persistence import (
     ExecutionMissionPersistence,
 )
+from backend.trading.execution.execution_mission_record_cleanup import (
+    ExecutionMissionRecordCleanup,
+)
 from backend.trading.execution.execution_mission_record_persistence import (
     ExecutionMissionRecordPersistence,
 )
 from backend.trading.execution.execution_mission_record_recovery import (
     ExecutionMissionRecordRecovery,
 )
+from backend.trading.execution.execution_mission_record_retention_policy import (
+    ExecutionMissionRecordRetentionPolicy,
+)
+from backend.trading.execution.execution_mission_record_retention_scheduler import (
+    ExecutionMissionRecordRetentionScheduler,
+)
+
 from backend.trading.execution.execution_mission_recovery import (
     ExecutionMissionRecovery,
 )
@@ -305,6 +315,27 @@ execution_mission_record_recovery = (
     )
 )
 
+execution_mission_record_retention_policy = (
+    ExecutionMissionRecordRetentionPolicy(
+        retention_days=30
+    )
+)
+
+execution_mission_record_cleanup = (
+    ExecutionMissionRecordCleanup(
+        execution_mission_registry,
+        execution_mission_record_persistence,
+    )
+)
+
+execution_mission_record_retention_scheduler = (
+    ExecutionMissionRecordRetentionScheduler(
+        policy=execution_mission_record_retention_policy,
+        cleanup=execution_mission_record_cleanup,
+        interval_seconds=3600.0,
+    )
+)
+
 
 execution_mission_acknowledgement_store = (
     ExecutionMissionAcknowledgementStore()
@@ -447,6 +478,11 @@ execution_mission_lifecycle_scheduler = (
 todoba_runtime.register(
     start=execution_mission_lifecycle_scheduler.start,
     stop=execution_mission_lifecycle_scheduler.stop,
+)
+
+todoba_runtime.register(
+    start=execution_mission_record_retention_scheduler.start,
+    stop=execution_mission_record_retention_scheduler.stop,
 )
 
 

@@ -188,9 +188,9 @@ todoba_runtime: TODOBARuntime = (
 async def lifespan(
     app: FastAPI,
 ):
-    execution_mission_recovery.restore()
-
     execution_mission_record_recovery.restore()
+    
+    execution_mission_recovery.restore()
 
     execution_mission_delivery_lease_recovery.restore()
 
@@ -321,6 +321,7 @@ execution_mission_recovery = (
         repository=execution_mission_repository,
         persistence=execution_mission_persistence,
         delivery_bridge=execution_mission_delivery_bridge,
+        registry=execution_mission_registry,
     )
 )
 

@@ -107,8 +107,8 @@ def test_main_restores_evidence_before_runtime_start(
             main.app
         ):
             assert calls == [
-                "missions",
                 "records",
+                "missions",
                 "delivery_leases",
                 "evidence",
                 "runtime_start",
@@ -119,8 +119,8 @@ def test_main_restores_evidence_before_runtime_start(
     )
 
     assert calls == [
-        "missions",
         "records",
+        "missions",
         "delivery_leases",
         "evidence",
         "runtime_start",

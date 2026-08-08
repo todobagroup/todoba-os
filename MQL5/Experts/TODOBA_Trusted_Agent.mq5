@@ -1,10 +1,10 @@
 // TODOBA Trusted Agent
-// Mission Acknowledgement Upgrade
+// Mission Signature Verification Upgrade
 
 #property strict
 
-
 #include <TODOBAExecution/ExecutionMissionParser.mqh>
+#include <TODOBAExecution/ExecutionMissionSignatureVerifier.mqh>
 #include <TODOBAExecution/ExecutionMissionValidator.mqh>
 #include <TODOBAExecution/ExecutionPermissionGuard.mqh>
 #include <TODOBAExecution/ExecutionMissionState.mqh>
@@ -13,19 +13,25 @@
 
 
 #define TODOBA_AGENT_NAME "TODOBA Trusted Agent"
-#define TODOBA_AGENT_VERSION "1.4.0"
+#define TODOBA_AGENT_VERSION "1.5.0"
 
 
 input int PollIntervalSeconds = 5;
-input string CloudBaseUrl = "http://127.0.0.1:8000";
-input string AgentId = "trusted-agent-001";
+
+input string CloudBaseUrl =
+   "http://127.0.0.1:8000";
+
+input string AgentId =
+   "trusted-agent-001";
+
 input string AgentSecret = "";
+
+input string MissionSigningSecret = "";
 
 
 TODOBAExecutionMissionState current_mission_state;
 
 TODOBAExecutionEngine execution_engine;
-
 
 
 string BuildAuthenticationHeaders(
@@ -40,17 +46,14 @@ string BuildAuthenticationHeaders(
       + AgentSecret
       + "\r\n";
 
-
    if(include_content_type)
    {
       headers +=
          "Content-Type: application/json\r\n";
    }
 
-
    return headers;
 }
-
 
 
 void SendAcknowledgement(
@@ -58,20 +61,27 @@ void SendAcknowledgement(
 )
 {
    string url =
-      CloudBaseUrl + "/missions/acknowledge";
-
+      CloudBaseUrl
+      + "/missions/acknowledge";
 
    string payload =
       "{"
-      "\"mission_id\":\"" + mission.mission_id + "\","
-      "\"agent_id\":\"" + mission.agent_id + "\","
-      "\"sequence\":" + IntegerToString(
+      "\"mission_id\":\""
+      + mission.mission_id
+      + "\","
+      "\"agent_id\":\""
+      + mission.agent_id
+      + "\","
+      "\"sequence\":"
+      + IntegerToString(
          mission.sequence
-      ) + ","
+      )
+      + ","
       "\"status\":\"ACCEPTED\","
-      "\"acknowledged_at\":\"2026-08-06T00:00:00Z\""
+      "\"acknowledged_at\":\""
+      "2026-08-06T00:00:00Z"
+      "\""
       "}";
-
 
    char request_body[];
 
@@ -80,11 +90,9 @@ void SendAcknowledgement(
       request_body
    );
 
-
    char response_body[];
 
    string response_headers;
-
 
    WebRequest(
       "POST",
@@ -98,7 +106,6 @@ void SendAcknowledgement(
       response_headers
    );
 }
-
 
 
 void SendExecutionStarted(
@@ -106,19 +113,26 @@ void SendExecutionStarted(
 )
 {
    string url =
-      CloudBaseUrl + "/missions/execution_started";
-
+      CloudBaseUrl
+      + "/missions/execution_started";
 
    string payload =
       "{"
-      "\"mission_id\":\"" + mission.mission_id + "\","
-      "\"agent_id\":\"" + mission.agent_id + "\","
-      "\"sequence\":" + IntegerToString(
+      "\"mission_id\":\""
+      + mission.mission_id
+      + "\","
+      "\"agent_id\":\""
+      + mission.agent_id
+      + "\","
+      "\"sequence\":"
+      + IntegerToString(
          mission.sequence
-      ) + ","
-      "\"started_at\":\"2026-08-05T00:00:00Z\""
+      )
+      + ","
+      "\"started_at\":\""
+      "2026-08-05T00:00:00Z"
+      "\""
       "}";
-
 
    char request_body[];
 
@@ -127,11 +141,9 @@ void SendExecutionStarted(
       request_body
    );
 
-
    char response_body[];
 
    string response_headers;
-
 
    WebRequest(
       "POST",
@@ -145,7 +157,6 @@ void SendExecutionStarted(
       response_headers
    );
 }
-
 
 
 void SendCompleted(
@@ -153,19 +164,26 @@ void SendCompleted(
 )
 {
    string url =
-      CloudBaseUrl + "/missions/completed";
-
+      CloudBaseUrl
+      + "/missions/completed";
 
    string payload =
       "{"
-      "\"mission_id\":\"" + mission.mission_id + "\","
-      "\"agent_id\":\"" + mission.agent_id + "\","
-      "\"sequence\":" + IntegerToString(
+      "\"mission_id\":\""
+      + mission.mission_id
+      + "\","
+      "\"agent_id\":\""
+      + mission.agent_id
+      + "\","
+      "\"sequence\":"
+      + IntegerToString(
          mission.sequence
-      ) + ","
-      "\"completed_at\":\"2026-08-02T00:05:00\""
+      )
+      + ","
+      "\"completed_at\":\""
+      "2026-08-02T00:05:00"
+      "\""
       "}";
-
 
    char request_body[];
 
@@ -174,11 +192,9 @@ void SendCompleted(
       request_body
    );
 
-
    char response_body[];
 
    string response_headers;
-
 
    WebRequest(
       "POST",
@@ -192,10 +208,8 @@ void SendCompleted(
       response_headers
    );
 
-
    current_mission_state.Complete();
 }
-
 
 
 void SendFailed(
@@ -204,20 +218,28 @@ void SendFailed(
 )
 {
    string url =
-      CloudBaseUrl + "/missions/failed";
-
+      CloudBaseUrl
+      + "/missions/failed";
 
    string payload =
       "{"
-      "\"mission_id\":\"" + mission.mission_id + "\","
-      "\"agent_id\":\"" + mission.agent_id + "\","
-      "\"sequence\":" + IntegerToString(
+      "\"mission_id\":\""
+      + mission.mission_id
+      + "\","
+      "\"agent_id\":\""
+      + mission.agent_id
+      + "\","
+      "\"sequence\":"
+      + IntegerToString(
          mission.sequence
-      ) + ","
-      "\"failed_at\":\"2026-08-02T00:05:00\","
-      "\"failure_reason\":\"" + reason + "\""
+      )
+      + ","
+      "\"failed_at\":\""
+      "2026-08-02T00:05:00\","
+      "\"failure_reason\":\""
+      + reason
+      + "\""
       "}";
-
 
    char request_body[];
 
@@ -226,11 +248,9 @@ void SendFailed(
       request_body
    );
 
-
    char response_body[];
 
    string response_headers;
-
 
    WebRequest(
       "POST",
@@ -244,10 +264,8 @@ void SendFailed(
       response_headers
    );
 
-
    current_mission_state.Fail();
 }
-
 
 
 void SendBrokerEvidence(
@@ -256,35 +274,52 @@ void SendBrokerEvidence(
 )
 {
    string url =
-      CloudBaseUrl + "/broker/evidence";
-
+      CloudBaseUrl
+      + "/broker/evidence";
 
    string payload =
       "{"
-      "\"mission_id\":\"" + mission.mission_id + "\","
-      "\"agent_id\":\"" + mission.agent_id + "\","
-      "\"success\":" + (
+      "\"mission_id\":\""
+      + mission.mission_id
+      + "\","
+      "\"agent_id\":\""
+      + mission.agent_id
+      + "\","
+      "\"success\":"
+      + (
          result.success
          ? "true"
          : "false"
-      ) + ","
-      "\"retcode\":" + IntegerToString(
+      )
+      + ","
+      "\"retcode\":"
+      + IntegerToString(
          result.retcode
-      ) + ","
-      "\"order_ticket\":" + IntegerToString(
+      )
+      + ","
+      "\"order_ticket\":"
+      + IntegerToString(
          result.order_ticket
-      ) + ","
-      "\"deal_ticket\":" + IntegerToString(
+      )
+      + ","
+      "\"deal_ticket\":"
+      + IntegerToString(
          result.deal_ticket
-      ) + ","
-      "\"execution_price\":" + DoubleToString(
+      )
+      + ","
+      "\"execution_price\":"
+      + DoubleToString(
          result.price,
          2
-      ) + ","
-      "\"comment\":\"" + result.comment + "\","
-      "\"completed_at\":\"2026-08-04T00:00:00Z\""
+      )
+      + ","
+      "\"comment\":\""
+      + result.comment
+      + "\","
+      "\"completed_at\":\""
+      "2026-08-04T00:00:00Z"
+      "\""
       "}";
-
 
    char request_body[];
 
@@ -293,11 +328,9 @@ void SendBrokerEvidence(
       request_body
    );
 
-
    char response_body[];
 
    string response_headers;
-
 
    WebRequest(
       "POST",
@@ -313,20 +346,17 @@ void SendBrokerEvidence(
 }
 
 
-
 void PollCloud()
 {
    string url =
       CloudBaseUrl
       + "/missions/next";
 
-
    char request_body[];
 
    char response_body[];
 
    string response_headers;
-
 
    long status_code = WebRequest(
       "GET",
@@ -340,19 +370,15 @@ void PollCloud()
       response_headers
    );
 
-
    if(status_code != 200)
       return;
-
 
    string response =
       CharArrayToString(
          response_body
       );
 
-
    TODOBAExecutionMission mission;
-
 
    if(
       !TODOBAExecutionMissionParser::Parse(
@@ -360,8 +386,52 @@ void PollCloud()
          mission
       )
    )
+   {
       return;
+   }
 
+   string mission_signature = "";
+
+   if(
+      !TODOBAExecutionMissionParser::ExtractSignature(
+         response,
+         mission_signature
+      )
+   )
+   {
+      Print(
+         TODOBA_AGENT_NAME,
+         " rejected mission=",
+         mission.mission_id,
+         " reason=missing signature"
+      );
+
+      return;
+   }
+
+   if(
+      !TODOBAExecutionMissionSignatureVerifier::Verify(
+         mission,
+         mission_signature,
+         MissionSigningSecret
+      )
+   )
+   {
+      Print(
+         TODOBA_AGENT_NAME,
+         " rejected mission=",
+         mission.mission_id,
+         " reason=invalid signature"
+      );
+
+      return;
+   }
+
+   Print(
+      TODOBA_AGENT_NAME,
+      " verified mission=",
+      mission.mission_id
+   );
 
    if(
       !TODOBAExecutionMissionValidator::Validate(
@@ -369,16 +439,18 @@ void PollCloud()
          AgentId
       )
    )
+   {
       return;
-
+   }
 
    if(
       !TODOBAExecutionPermissionGuard::Allow(
          mission.sequence
       )
    )
+   {
       return;
-
+   }
 
    current_mission_state.Initialize(
       mission.mission_id,
@@ -386,26 +458,21 @@ void PollCloud()
       mission.sequence
    );
 
-
    SendAcknowledgement(
       mission
    );
 
-
    current_mission_state.Start();
-
 
    SendExecutionStarted(
       mission
    );
-
 
    Print(
       "TODOBA RECEIVED SYMBOL=[",
       mission.symbol,
       "]"
    );
-
 
    TODOBAExecutionResult execution_result =
       execution_engine.Execute(
@@ -418,7 +485,6 @@ void PollCloud()
          mission.magic_number,
          mission.comment
       );
-
 
    Print(
       "TODOBA Execution Result: success=",
@@ -435,10 +501,7 @@ void PollCloud()
       execution_result.comment
    );
 
-
-   if(
-      execution_result.success
-   )
+   if(execution_result.success)
    {
       SendBrokerEvidence(
          mission,
@@ -457,7 +520,6 @@ void PollCloud()
       );
    }
 
-
    Print(
       TODOBA_AGENT_NAME,
       " finished mission=",
@@ -466,29 +528,26 @@ void PollCloud()
 }
 
 
-
 int OnInit()
 {
    if(PollIntervalSeconds < 1)
       return INIT_PARAMETERS_INCORRECT;
 
-
    if(StringLen(CloudBaseUrl) == 0)
       return INIT_PARAMETERS_INCORRECT;
-
 
    if(StringLen(AgentId) == 0)
       return INIT_PARAMETERS_INCORRECT;
 
-
    if(StringLen(AgentSecret) == 0)
       return INIT_PARAMETERS_INCORRECT;
 
+   if(StringLen(MissionSigningSecret) == 0)
+      return INIT_PARAMETERS_INCORRECT;
 
    EventSetTimer(
       PollIntervalSeconds
    );
-
 
    Print(
       TODOBA_AGENT_NAME,
@@ -497,10 +556,8 @@ int OnInit()
       " initialized."
    );
 
-
    return INIT_SUCCEEDED;
 }
-
 
 
 void OnDeinit(
@@ -509,7 +566,6 @@ void OnDeinit(
 {
    EventKillTimer();
 }
-
 
 
 void OnTimer()

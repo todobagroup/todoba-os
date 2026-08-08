@@ -6,9 +6,9 @@ ExecutionMission payloads.
 
 Responsibilities:
 
-- canonicalize mission payloads
 - create HMAC-SHA256 signatures
 - verify mission signatures
+- use the cross-language signing payload contract
 
 This component does not:
 
@@ -20,13 +20,12 @@ This component does not:
 
 import hashlib
 import hmac
-import json
 
 from backend.trading.execution.execution_mission import (
     ExecutionMission,
 )
-from backend.trading.execution.execution_mission_serializer import (
-    ExecutionMissionSerializer,
+from backend.trading.execution.execution_mission_signing_payload import (
+    ExecutionMissionSigningPayload,
 )
 
 
@@ -64,8 +63,10 @@ class ExecutionMissionSigner:
         self,
         mission: ExecutionMission,
     ) -> str:
-        payload = self._canonical_payload(
-            mission
+        payload = (
+            ExecutionMissionSigningPayload.build(
+                mission
+            )
         )
 
         return hmac.new(
@@ -97,36 +98,4 @@ class ExecutionMissionSigner:
         return hmac.compare_digest(
             normalized_signature,
             expected_signature,
-        )
-
-    @staticmethod
-    def _canonical_payload(
-        mission: ExecutionMission,
-    ) -> bytes:
-        if not isinstance(
-            mission,
-            ExecutionMission,
-        ):
-            raise TypeError(
-                "mission must be ExecutionMission."
-            )
-
-        payload = (
-            ExecutionMissionSerializer.serialize(
-                mission
-            )
-        )
-
-        canonical_json = json.dumps(
-            payload,
-            sort_keys=True,
-            separators=(
-                ",",
-                ":",
-            ),
-            ensure_ascii=False,
-        )
-
-        return canonical_json.encode(
-            "utf-8"
         )

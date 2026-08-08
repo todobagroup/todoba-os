@@ -1,6 +1,7 @@
 #ifndef TODOBA_EXECUTION_MISSION_PARSER_MQH
 #define TODOBA_EXECUTION_MISSION_PARSER_MQH
 
+
 struct TODOBAExecutionMission
 {
    string mission_id;
@@ -29,21 +30,35 @@ struct TODOBAExecutionMission
 class TODOBAExecutionMissionParser
 {
 private:
+
    static bool ExtractString(
       const string json,
       const string key,
       string &value
    )
    {
-      string marker = "\"" + key + "\":\"";
-      int start = StringFind(json, marker);
+      string marker =
+         "\""
+         + key
+         + "\":\"";
+
+      int start = StringFind(
+         json,
+         marker
+      );
 
       if(start < 0)
          return false;
 
-      start += StringLen(marker);
+      start += StringLen(
+         marker
+      );
 
-      int finish = StringFind(json, "\"", start);
+      int finish = StringFind(
+         json,
+         "\"",
+         start
+      );
 
       if(finish < 0)
          return false;
@@ -64,22 +79,32 @@ private:
       double &value
    )
    {
-      string marker = "\"" + key + "\":";
-      int start = StringFind(json, marker);
+      string marker =
+         "\""
+         + key
+         + "\":";
+
+      int start = StringFind(
+         json,
+         marker
+      );
 
       if(start < 0)
          return false;
 
-      start += StringLen(marker);
+      start += StringLen(
+         marker
+      );
 
       int finish = start;
 
       while(finish < StringLen(json))
       {
-         ushort character = StringGetCharacter(
-            json,
-            finish
-         );
+         ushort character =
+            StringGetCharacter(
+               json,
+               finish
+            );
 
          if(
             character == ',' ||
@@ -101,7 +126,9 @@ private:
          finish - start
       );
 
-      value = StringToDouble(raw);
+      value = StringToDouble(
+         raw
+      );
 
       return true;
    }
@@ -115,8 +142,16 @@ private:
    {
       double number = 0.0;
 
-      if(!ExtractNumber(json, key, number))
+      if(
+         !ExtractNumber(
+            json,
+            key,
+            number
+         )
+      )
+      {
          return false;
+      }
 
       value = (long)number;
 
@@ -125,6 +160,7 @@ private:
 
 
 public:
+
    static bool Parse(
       const string response,
       TODOBAExecutionMission &mission
@@ -140,118 +176,166 @@ public:
          return false;
       }
 
-      if(!ExtractString(
-         response,
-         "mission_id",
-         mission.mission_id
-      ))
+      if(
+         !ExtractString(
+            response,
+            "mission_id",
+            mission.mission_id
+         )
+      )
          return false;
 
-      if(!ExtractString(
-         response,
-         "agent_id",
-         mission.agent_id
-      ))
+      if(
+         !ExtractString(
+            response,
+            "agent_id",
+            mission.agent_id
+         )
+      )
          return false;
 
-      if(!ExtractString(
-         response,
-         "account_fingerprint",
-         mission.account_fingerprint
-      ))
+      if(
+         !ExtractString(
+            response,
+            "account_fingerprint",
+            mission.account_fingerprint
+         )
+      )
          return false;
 
-      if(!ExtractString(
-         response,
-         "symbol",
-         mission.symbol
-      ))
+      if(
+         !ExtractString(
+            response,
+            "symbol",
+            mission.symbol
+         )
+      )
          return false;
 
-      if(!ExtractString(
-         response,
-         "order_type",
-         mission.order_type
-      ))
+      if(
+         !ExtractString(
+            response,
+            "order_type",
+            mission.order_type
+         )
+      )
          return false;
 
-      if(!ExtractNumber(
-         response,
-         "volume",
-         mission.volume
-      ))
+      if(
+         !ExtractNumber(
+            response,
+            "volume",
+            mission.volume
+         )
+      )
          return false;
 
-      string entry_marker = "\"entry\":null";
+      string entry_marker =
+         "\"entry\":null";
 
-      if(StringFind(response, entry_marker) >= 0)
+      if(
+         StringFind(
+            response,
+            entry_marker
+         ) >= 0
+      )
       {
          mission.entry = 0.0;
          mission.has_entry = false;
       }
       else
       {
-         if(!ExtractNumber(
-            response,
-            "entry",
-            mission.entry
-         ))
+         if(
+            !ExtractNumber(
+               response,
+               "entry",
+               mission.entry
+            )
+         )
             return false;
 
          mission.has_entry = true;
       }
 
-      if(!ExtractNumber(
-         response,
-         "sl",
-         mission.sl
-      ))
+      if(
+         !ExtractNumber(
+            response,
+            "sl",
+            mission.sl
+         )
+      )
          return false;
 
-      if(!ExtractNumber(
-         response,
-         "tp",
-         mission.tp
-      ))
+      if(
+         !ExtractNumber(
+            response,
+            "tp",
+            mission.tp
+         )
+      )
          return false;
 
-      if(!ExtractLong(
-         response,
-         "magic_number",
-         mission.magic_number
-      ))
+      if(
+         !ExtractLong(
+            response,
+            "magic_number",
+            mission.magic_number
+         )
+      )
          return false;
 
-      if(!ExtractString(
-         response,
-         "comment",
-         mission.comment
-      ))
+      if(
+         !ExtractString(
+            response,
+            "comment",
+            mission.comment
+         )
+      )
          return false;
 
-      if(!ExtractString(
-         response,
-         "created_at",
-         mission.created_at
-      ))
+      if(
+         !ExtractString(
+            response,
+            "created_at",
+            mission.created_at
+         )
+      )
          return false;
 
-      if(!ExtractString(
-         response,
-         "expires_at",
-         mission.expires_at
-      ))
+      if(
+         !ExtractString(
+            response,
+            "expires_at",
+            mission.expires_at
+         )
+      )
          return false;
 
-      if(!ExtractLong(
-         response,
-         "sequence",
-         mission.sequence
-      ))
+      if(
+         !ExtractLong(
+            response,
+            "sequence",
+            mission.sequence
+         )
+      )
          return false;
 
       return true;
    }
+
+
+   static bool ExtractSignature(
+      const string response,
+      string &signature
+   )
+   {
+      return ExtractString(
+         response,
+         "mission_signature",
+         signature
+      );
+   }
 };
+
 
 #endif

@@ -236,17 +236,6 @@ execution_mission_delivery_lease_service = (
     )
 )
 
-execution_mission_delivery_lease_registry = (
-    ExecutionMissionDeliveryLeaseRegistry()
-)
-
-execution_mission_delivery_lease_service = (
-    ExecutionMissionDeliveryLeaseService(
-        registry=execution_mission_delivery_lease_registry,
-        lease_seconds=30.0,
-    )
-)
-
 execution_mission_registry = (
     ExecutionMissionRegistry()
 )

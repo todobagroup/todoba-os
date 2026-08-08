@@ -97,6 +97,9 @@ from backend.trading.execution.execution_mission_failed_store import (
 from backend.trading.execution.execution_mission_injection_api import (
     create_execution_mission_injection_router,
 )
+from backend.trading.execution.execution_mission_delivery_expiration_policy import (
+    ExecutionMissionDeliveryExpirationPolicy,
+)
 from backend.trading.execution.execution_mission_lifecycle_scheduler import (
     ExecutionMissionLifecycleScheduler,
 )
@@ -266,6 +269,9 @@ execution_mission_delivery_lease_recovery = (
             execution_mission_delivery_lease_registry
         ),
     )
+)
+execution_mission_delivery_expiration_policy = (
+    ExecutionMissionDeliveryExpirationPolicy()
 )
 
 execution_mission_delivery_lease_service = (
@@ -492,6 +498,7 @@ app.include_router(
         trusted_agent_authenticator,
         execution_mission_delivery_lease_service,
         execution_mission_lifecycle_service,
+        execution_mission_delivery_expiration_policy,
     )
 )
 

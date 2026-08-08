@@ -10,6 +10,9 @@ from backend.trading.execution.execution_mission import (
 from backend.trading.execution.execution_mission_api import (
     create_execution_mission_router,
 )
+from backend.trading.execution.execution_mission_delivery_expiration_policy import (
+    ExecutionMissionDeliveryExpirationPolicy,
+)
 from backend.trading.execution.execution_mission_delivery_lease_registry import (
     ExecutionMissionDeliveryLeaseRegistry,
 )
@@ -39,7 +42,7 @@ from backend.trading.execution.trusted_agent_authenticator import (
 AGENT_ID = "trusted-agent-001"
 AGENT_SECRET = "secure-secret"
 
-MISSION_ID = "proof075-mission-001"
+MISSION_ID = "proof078-mission-001"
 
 AUTHENTICATION_HEADERS = {
     "X-TODOBA-Agent-ID": AGENT_ID,
@@ -59,7 +62,10 @@ def fixed_clock() -> datetime:
     )
 
 
-def build_mission() -> ExecutionMission:
+def build_mission(
+    *,
+    expires_at: str = "2026-08-08T13:00:00Z",
+) -> ExecutionMission:
     return ExecutionMission(
         mission_id=MISSION_ID,
         agent_id=AGENT_ID,
@@ -71,9 +77,9 @@ def build_mission() -> ExecutionMission:
         sl=4100.0,
         tp=4200.0,
         magic_number=10001,
-        comment="TODOBA Proof075",
+        comment="TODOBA Proof078",
         created_at="2026-08-08T11:59:00Z",
-        expires_at="2026-08-08T13:00:00Z",
+        expires_at=expires_at,
         sequence=1,
     )
 
@@ -98,6 +104,10 @@ def build_client(
         mission_registry
     )
 
+    expiration_policy = (
+        ExecutionMissionDeliveryExpirationPolicy()
+    )
+
     app = FastAPI()
 
     app.include_router(
@@ -106,6 +116,7 @@ def build_client(
             authenticator,
             lease_service,
             lifecycle_service,
+            expiration_policy,
         )
     )
 
@@ -257,3 +268,69 @@ def test_empty_poll_does_not_create_delivery_lease_or_tracking() -> None:
 
     assert lease_registry.size() == 0
     assert mission_registry.size() == 0
+
+
+def test_expired_mission_is_not_delivered_or_leased() -> None:
+    store = ExecutionMissionStore()
+
+    lease_registry = (
+        ExecutionMissionDeliveryLeaseRegistry()
+    )
+
+    mission_registry = ExecutionMissionRegistry()
+
+    mission = build_mission(
+        expires_at="2026-08-08T12:00:00Z"
+    )
+
+    mission_registry.register(
+        ExecutionMissionRecord(
+            mission=mission
+        )
+    )
+
+    store.push(
+        mission
+    )
+
+    client = build_client(
+        store,
+        lease_registry,
+        mission_registry,
+    )
+
+    response = client.get(
+        "/missions/next",
+        headers=AUTHENTICATION_HEADERS,
+    )
+
+    assert response.status_code == 200
+
+    assert response.json() == {
+        "status": "empty",
+        "mission": None,
+    }
+
+    assert store.size() == 0
+    assert lease_registry.size() == 0
+
+    record = mission_registry.get(
+        MISSION_ID
+    )
+
+    assert record is not None
+
+    assert record.status == (
+        ExecutionMissionStatus.FAILED
+    )
+
+    assert record.delivered_at is None
+    assert record.delivery_attempt_count == 0
+
+    assert record.failed_at == (
+        "2026-08-08T12:00:00Z"
+    )
+
+    assert record.failure_reason == (
+        "Execution mission expired before delivery."
+    )

@@ -5,8 +5,8 @@ Exposes the remote mission polling boundary.
 
 This module owns HTTP transport only.
 Mission storage, delivery leasing, lifecycle tracking,
-serialization, and authentication policy belong
-to separate capabilities.
+delivery expiration policy, serialization,
+and authentication policy belong to separate capabilities.
 """
 
 from typing import Optional
@@ -14,6 +14,9 @@ from typing import Optional
 from fastapi import APIRouter
 from fastapi import Depends
 
+from backend.trading.execution.execution_mission_delivery_expiration_policy import (
+    ExecutionMissionDeliveryExpirationPolicy,
+)
 from backend.trading.execution.execution_mission_delivery_lease_service import (
     ExecutionMissionDeliveryLeaseService,
 )
@@ -42,6 +45,9 @@ def create_execution_mission_router(
     ] = None,
     lifecycle_service: Optional[
         ExecutionMissionLifecycleService
+    ] = None,
+    expiration_policy: Optional[
+        ExecutionMissionDeliveryExpirationPolicy
     ] = None,
 ) -> APIRouter:
     if not isinstance(
@@ -86,6 +92,18 @@ def create_execution_mission_router(
             "ExecutionMissionLifecycleService."
         )
 
+    if (
+        expiration_policy is not None
+        and not isinstance(
+            expiration_policy,
+            ExecutionMissionDeliveryExpirationPolicy,
+        )
+    ):
+        raise TypeError(
+            "expiration_policy must be "
+            "ExecutionMissionDeliveryExpirationPolicy."
+        )
+
     require_trusted_agent = (
         create_trusted_agent_authentication_dependency(
             authenticator
@@ -111,6 +129,35 @@ def create_execution_mission_router(
                 "status": "empty",
                 "mission": None,
             }
+
+        if (
+            expiration_policy is not None
+            and lease_service is not None
+        ):
+            current_time = lease_service.clock()
+
+            if expiration_policy.is_expired(
+                mission,
+                current_time,
+            ):
+                if lifecycle_service is not None:
+                    lifecycle_service.fail_execution(
+                        mission_id=mission.mission_id,
+                        failed_at=(
+                            lease_service._serialize_utc(
+                                current_time
+                            )
+                        ),
+                        failure_reason=(
+                            "Execution mission expired "
+                            "before delivery."
+                        ),
+                    )
+
+                return {
+                    "status": "empty",
+                    "mission": None,
+                }
 
         lease = None
 

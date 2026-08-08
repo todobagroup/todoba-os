@@ -3,6 +3,7 @@ from backend.main import (
     execution_mission_acknowledgement_processor,
     execution_mission_completed_processor,
     execution_mission_delivery_lease_persistence,
+    execution_mission_delivery_expiration_policy,
     execution_mission_delivery_lease_recovery,
     execution_mission_delivery_lease_registry,
     execution_mission_delivery_lease_service,
@@ -62,6 +63,9 @@ from backend.trading.execution.execution_mission_record_retention_policy import 
 )
 from backend.trading.execution.execution_mission_record_retention_scheduler import (
     ExecutionMissionRecordRetentionScheduler,
+)
+from backend.trading.execution.execution_mission_delivery_expiration_policy import (
+    ExecutionMissionDeliveryExpirationPolicy,
 )
 
 
@@ -230,6 +234,10 @@ def test_main_composes_execution_mission_lifecycle_runtime() -> None:
         execution_mission_lifecycle_scheduler,
         ExecutionMissionLifecycleScheduler,
     )
+    assert isinstance(
+    execution_mission_delivery_expiration_policy,
+    ExecutionMissionDeliveryExpirationPolicy,
+)
 
     assert execution_mission_lifecycle_scheduler.processors == [
         execution_mission_acknowledgement_processor,

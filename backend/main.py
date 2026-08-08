@@ -423,6 +423,10 @@ execution_mission_delivery_redelivery_processor = (
         lease_persistence=(
             execution_mission_delivery_lease_persistence
         ),
+        lifecycle_service=(
+            execution_mission_lifecycle_service
+        ),
+        max_delivery_attempts=3,
     )
 )
 

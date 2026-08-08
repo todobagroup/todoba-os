@@ -146,6 +146,16 @@ def test_main_composes_execution_mission_lifecycle_runtime() -> None:
         is execution_mission_delivery_lease_persistence
     )
 
+    assert (
+        execution_mission_delivery_redelivery_processor.lifecycle_service
+        is execution_mission_lifecycle_service
+    )
+
+    assert (
+        execution_mission_delivery_redelivery_processor.max_delivery_attempts
+        == 3
+    )
+
     assert isinstance(
         execution_mission_lifecycle_scheduler,
         ExecutionMissionLifecycleScheduler,

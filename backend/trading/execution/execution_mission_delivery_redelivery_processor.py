@@ -5,14 +5,18 @@ Redelivers execution missions whose delivery leases
 have expired before acknowledgement.
 
 Responsibilities:
+
 - inspect active delivery leases
 - detect expired leases
+- enforce bounded delivery attempts
 - recover the original execution mission
-- redeliver the mission
-- release the expired lease after successful redelivery
+- redeliver the mission when attempts remain
+- fail the mission when attempts are exhausted
+- release expired delivery leases
 - persist remaining delivery leases when configured
 
 This component does not:
+
 - receive HTTP requests
 - acknowledge missions
 - execute broker orders
@@ -37,6 +41,9 @@ from backend.trading.execution.execution_mission_delivery_lease_persistence impo
 )
 from backend.trading.execution.execution_mission_delivery_lease_registry import (
     ExecutionMissionDeliveryLeaseRegistry,
+)
+from backend.trading.execution.execution_mission_lifecycle_service import (
+    ExecutionMissionLifecycleService,
 )
 from backend.trading.execution.execution_mission_repository import (
     ExecutionMissionRepository,
@@ -64,6 +71,10 @@ class ExecutionMissionDeliveryRedeliveryProcessor:
         lease_persistence: Optional[
             ExecutionMissionDeliveryLeasePersistence
         ] = None,
+        lifecycle_service: Optional[
+            ExecutionMissionLifecycleService
+        ] = None,
+        max_delivery_attempts: int = 3,
     ) -> None:
         if not isinstance(
             repository,
@@ -112,11 +123,43 @@ class ExecutionMissionDeliveryRedeliveryProcessor:
                 "ExecutionMissionDeliveryLeasePersistence."
             )
 
+        if (
+            lifecycle_service is not None
+            and not isinstance(
+                lifecycle_service,
+                ExecutionMissionLifecycleService,
+            )
+        ):
+            raise TypeError(
+                "lifecycle_service must be "
+                "ExecutionMissionLifecycleService."
+            )
+
+        if (
+            not isinstance(
+                max_delivery_attempts,
+                int,
+            )
+            or isinstance(
+                max_delivery_attempts,
+                bool,
+            )
+            or max_delivery_attempts <= 0
+        ):
+            raise ValueError(
+                "max_delivery_attempts must be "
+                "a positive integer."
+            )
+
         self.repository = repository
         self.delivery_bridge = delivery_bridge
         self.lease_registry = lease_registry
         self.clock = clock
         self.lease_persistence = lease_persistence
+        self.lifecycle_service = lifecycle_service
+        self.max_delivery_attempts = (
+            max_delivery_attempts
+        )
 
     def process_next(
         self,
@@ -159,25 +202,104 @@ class ExecutionMissionDeliveryRedeliveryProcessor:
                     "Execution mission not found for redelivery."
                 )
 
+            if self._delivery_attempts_exhausted(
+                mission.mission_id
+            ):
+                self._fail_exhausted_mission(
+                    mission_id=mission.mission_id,
+                    failed_at=self._format_datetime(
+                        now_utc
+                    ),
+                )
+
+                self._release_lease(
+                    mission.mission_id
+                )
+
+                return None
+
             result = self.delivery_bridge.deliver(
                 mission
             )
 
-            released = self.lease_registry.release(
+            self._release_lease(
                 lease.mission_id
             )
-
-            if (
-                released is not None
-                and self.lease_persistence is not None
-            ):
-                self.lease_persistence.save(
-                    self.lease_registry
-                )
 
             return result
 
         return None
+
+    def _delivery_attempts_exhausted(
+        self,
+        mission_id: str,
+    ) -> bool:
+        if self.lifecycle_service is None:
+            return False
+
+        record = self.lifecycle_service.registry.get(
+            mission_id
+        )
+
+        if record is None:
+            raise ValueError(
+                "Execution mission record not found."
+            )
+
+        return (
+            record.delivery_attempt_count
+            >= self.max_delivery_attempts
+        )
+
+    def _fail_exhausted_mission(
+        self,
+        *,
+        mission_id: str,
+        failed_at: str,
+    ) -> None:
+        if self.lifecycle_service is None:
+            return
+
+        self.lifecycle_service.fail_execution(
+            mission_id=mission_id,
+            failed_at=failed_at,
+            failure_reason=(
+                "Delivery attempts exhausted."
+            ),
+        )
+
+    def _release_lease(
+        self,
+        mission_id: str,
+    ) -> None:
+        released = self.lease_registry.release(
+            mission_id
+        )
+
+        if (
+            released is not None
+            and self.lease_persistence is not None
+        ):
+            self.lease_persistence.save(
+                self.lease_registry
+            )
+
+    @staticmethod
+    def _format_datetime(
+        value: datetime,
+    ) -> str:
+        return (
+            value.astimezone(
+                timezone.utc
+            )
+            .isoformat(
+                timespec="seconds"
+            )
+            .replace(
+                "+00:00",
+                "Z",
+            )
+        )
 
     @staticmethod
     def _is_expired(

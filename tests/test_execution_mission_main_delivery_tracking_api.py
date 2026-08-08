@@ -47,7 +47,7 @@ def build_mission() -> ExecutionMission:
         magic_number=10001,
         comment="TODOBA Proof075 Main Delivery",
         created_at="2026-08-08T09:00:00Z",
-        expires_at="2026-08-08T10:00:00Z",
+        expires_at="2099-01-01T00:00:00Z",
         sequence=1,
     )
 

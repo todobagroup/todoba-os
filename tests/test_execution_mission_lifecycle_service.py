@@ -10,20 +10,29 @@ from backend.trading.execution.execution_mission import (
 from backend.trading.execution.execution_mission_lifecycle_service import (
     ExecutionMissionLifecycleService,
 )
+from backend.trading.execution.execution_mission_persistence import (
+    ExecutionMissionPersistence,
+)
 from backend.trading.execution.execution_mission_record import (
     ExecutionMissionRecord,
 )
 from backend.trading.execution.execution_mission_registry import (
     ExecutionMissionRegistry,
 )
+from backend.trading.execution.execution_mission_repository import (
+    ExecutionMissionRepository,
+)
 from backend.trading.execution.execution_mission_status import (
     ExecutionMissionStatus,
 )
 
 
+MISSION_ID = "lifecycle-001"
+
+
 def build_record() -> ExecutionMissionRecord:
     mission = ExecutionMission(
-        mission_id="lifecycle-001",
+        mission_id=MISSION_ID,
         agent_id="trusted-agent-001",
         account_fingerprint="account-test",
         symbol="XAUUSD",
@@ -58,7 +67,7 @@ def test_lifecycle_service_marks_mission_delivered() -> None:
     )
 
     updated_record = service.mark_delivered(
-        mission_id="lifecycle-001",
+        mission_id=MISSION_ID,
         delivered_at="2026-07-29T00:04:00",
     )
 
@@ -87,12 +96,12 @@ def test_lifecycle_service_increments_delivery_attempt_count() -> None:
     )
 
     service.mark_delivered(
-        mission_id="lifecycle-001",
+        mission_id=MISSION_ID,
         delivered_at="2026-07-29T00:04:00",
     )
 
     updated_record = service.mark_delivered(
-        mission_id="lifecycle-001",
+        mission_id=MISSION_ID,
         delivered_at="2026-07-29T00:06:00",
     )
 
@@ -117,7 +126,7 @@ def test_lifecycle_service_acknowledges_mission() -> None:
     )
 
     updated_record = service.acknowledge(
-        mission_id="lifecycle-001",
+        mission_id=MISSION_ID,
         acknowledged_at="2026-07-29T00:05:00",
     )
 
@@ -128,3 +137,110 @@ def test_lifecycle_service_acknowledges_mission() -> None:
     assert updated_record.acknowledged_at == (
         "2026-07-29T00:05:00"
     )
+
+
+def test_completed_mission_is_removed_from_persistent_repository(
+    tmp_path: Path,
+) -> None:
+    record = build_record()
+
+    registry = ExecutionMissionRegistry()
+
+    registry.register(
+        record
+    )
+
+    repository = ExecutionMissionRepository()
+
+    repository.save(
+        record.mission
+    )
+
+    mission_persistence = ExecutionMissionPersistence(
+        tmp_path / "missions.json"
+    )
+
+    mission_persistence.save(
+        repository
+    )
+
+    service = ExecutionMissionLifecycleService(
+        registry,
+        repository=repository,
+        mission_persistence=mission_persistence,
+    )
+
+    result = service.complete_execution(
+        mission_id=MISSION_ID,
+        completed_at="2026-07-29T00:10:00",
+    )
+
+    assert result.status == (
+        ExecutionMissionStatus.COMPLETED
+    )
+
+    assert repository.get(
+        MISSION_ID
+    ) is None
+
+    restored_repository = ExecutionMissionRepository()
+
+    assert mission_persistence.restore(
+        restored_repository
+    ) == 0
+
+    assert restored_repository.size() == 0
+
+
+def test_failed_mission_is_removed_from_persistent_repository(
+    tmp_path: Path,
+) -> None:
+    record = build_record()
+
+    registry = ExecutionMissionRegistry()
+
+    registry.register(
+        record
+    )
+
+    repository = ExecutionMissionRepository()
+
+    repository.save(
+        record.mission
+    )
+
+    mission_persistence = ExecutionMissionPersistence(
+        tmp_path / "missions.json"
+    )
+
+    mission_persistence.save(
+        repository
+    )
+
+    service = ExecutionMissionLifecycleService(
+        registry,
+        repository=repository,
+        mission_persistence=mission_persistence,
+    )
+
+    result = service.fail_execution(
+        mission_id=MISSION_ID,
+        failed_at="2026-07-29T00:10:00",
+        failure_reason="proof079_failure",
+    )
+
+    assert result.status == (
+        ExecutionMissionStatus.FAILED
+    )
+
+    assert repository.get(
+        MISSION_ID
+    ) is None
+
+    restored_repository = ExecutionMissionRepository()
+
+    assert mission_persistence.restore(
+        restored_repository
+    ) == 0
+
+    assert restored_repository.size() == 0

@@ -401,6 +401,8 @@ execution_mission_lifecycle_service = (
     ExecutionMissionLifecycleService(
         execution_mission_registry,
         execution_mission_record_persistence,
+        repository=execution_mission_repository,
+        mission_persistence=execution_mission_persistence,
     )
 )
 

@@ -5,6 +5,7 @@ Coordinates execution mission lifecycle updates.
 
 This component owns:
 - lifecycle state transitions
+- delivery attempt tracking
 - mission record persistence after transitions
 
 This component does not:
@@ -73,6 +74,32 @@ class ExecutionMissionLifecycleService:
                 self.registry
             )
 
+    def mark_delivered(
+        self,
+        mission_id: str,
+        delivered_at: str,
+    ) -> ExecutionMissionRecord:
+        record = self.registry.get(
+            mission_id
+        )
+
+        if record is None:
+            raise ValueError(
+                "Execution mission record not found."
+            )
+
+        record.status = (
+            ExecutionMissionStatus.DELIVERED
+        )
+
+        record.delivered_at = delivered_at
+
+        record.delivery_attempt_count += 1
+
+        self._persist_records()
+
+        return record
+
     def acknowledge(
         self,
         mission_id: str,
@@ -91,9 +118,7 @@ class ExecutionMissionLifecycleService:
             ExecutionMissionStatus.ACKNOWLEDGED
         )
 
-        record.acknowledged_at = (
-            acknowledged_at
-        )
+        record.acknowledged_at = acknowledged_at
 
         self._persist_records()
 
@@ -117,9 +142,7 @@ class ExecutionMissionLifecycleService:
             ExecutionMissionStatus.EXECUTING
         )
 
-        record.started_at = (
-            started_at
-        )
+        record.started_at = started_at
 
         self._persist_records()
 
@@ -143,9 +166,7 @@ class ExecutionMissionLifecycleService:
             ExecutionMissionStatus.COMPLETED
         )
 
-        record.completed_at = (
-            completed_at
-        )
+        record.completed_at = completed_at
 
         self._persist_records()
 
@@ -170,13 +191,9 @@ class ExecutionMissionLifecycleService:
             ExecutionMissionStatus.FAILED
         )
 
-        record.failed_at = (
-            failed_at
-        )
+        record.failed_at = failed_at
 
-        record.failure_reason = (
-            failure_reason
-        )
+        record.failure_reason = failure_reason
 
         self._persist_records()
 

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from backend.trading.execution.execution_mission import (
@@ -39,6 +40,7 @@ def build_record() -> ExecutionMissionRecord:
         mission=mission,
         status=ExecutionMissionStatus.FAILED,
         delivered_at="2026-08-06T00:01:00Z",
+        delivery_attempt_count=3,
         acknowledged_at="2026-08-06T00:02:00Z",
         started_at="2026-08-06T00:03:00Z",
         failed_at="2026-08-06T00:04:00Z",
@@ -94,6 +96,7 @@ def test_record_persistence_saves_and_restores_lifecycle(
     assert restored.delivered_at == (
         "2026-08-06T00:01:00Z"
     )
+    assert restored.delivery_attempt_count == 3
     assert restored.acknowledged_at == (
         "2026-08-06T00:02:00Z"
     )
@@ -107,6 +110,66 @@ def test_record_persistence_saves_and_restores_lifecycle(
     assert restored.failure_reason == (
         "broker_rejected_order"
     )
+
+
+def test_record_persistence_restores_legacy_record_with_zero_attempts(
+    tmp_path: Path,
+) -> None:
+    storage_path = (
+        tmp_path
+        / "legacy_execution_mission_records.json"
+    )
+
+    storage_path.write_text(
+        json.dumps(
+            [
+                {
+                    "mission": {
+                        "mission_id": "legacy-record-001",
+                        "agent_id": "trusted-agent-001",
+                        "account_fingerprint": "demo-account",
+                        "symbol": "XAUUSD",
+                        "order_type": "BUY",
+                        "volume": 0.01,
+                        "entry": None,
+                        "sl": 4100.0,
+                        "tp": 4200.0,
+                        "magic_number": 10001,
+                        "comment": "TODOBA Legacy Record",
+                        "created_at": "2026-08-05T00:00:00Z",
+                        "expires_at": "2026-08-05T01:00:00Z",
+                        "sequence": 1,
+                    },
+                    "status": "CREATED",
+                    "delivered_at": None,
+                    "acknowledged_at": None,
+                    "started_at": None,
+                    "completed_at": None,
+                    "failed_at": None,
+                    "failure_reason": None,
+                }
+            ],
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+
+    persistence = ExecutionMissionRecordPersistence(
+        storage_path
+    )
+
+    registry = ExecutionMissionRegistry()
+
+    assert persistence.restore(
+        registry
+    ) == 1
+
+    restored = registry.get(
+        "legacy-record-001"
+    )
+
+    assert restored is not None
+    assert restored.delivery_attempt_count == 0
 
 
 def test_record_persistence_restore_without_file_returns_zero(

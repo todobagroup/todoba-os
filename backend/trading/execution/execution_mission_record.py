@@ -37,6 +37,8 @@ class ExecutionMissionRecord:
 
     delivered_at: Optional[str] = None
 
+    delivery_attempt_count: int = 0
+
     acknowledged_at: Optional[str] = None
 
     started_at: Optional[str] = None

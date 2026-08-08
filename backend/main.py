@@ -451,6 +451,7 @@ app.include_router(
         execution_mission_store,
         trusted_agent_authenticator,
         execution_mission_delivery_lease_service,
+        execution_mission_lifecycle_service,
     )
 )
 

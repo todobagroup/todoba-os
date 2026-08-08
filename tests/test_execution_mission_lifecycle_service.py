@@ -7,26 +7,21 @@ sys.path.insert(0, str(ROOT_DIR))
 from backend.trading.execution.execution_mission import (
     ExecutionMission,
 )
-
-from backend.trading.execution.execution_mission_record import (
-    ExecutionMissionRecord,
-)
-
-from backend.trading.execution.execution_mission_registry import (
-    ExecutionMissionRegistry,
-)
-
 from backend.trading.execution.execution_mission_lifecycle_service import (
     ExecutionMissionLifecycleService,
 )
-
+from backend.trading.execution.execution_mission_record import (
+    ExecutionMissionRecord,
+)
+from backend.trading.execution.execution_mission_registry import (
+    ExecutionMissionRegistry,
+)
 from backend.trading.execution.execution_mission_status import (
     ExecutionMissionStatus,
 )
 
 
-def test_lifecycle_service_acknowledges_mission():
-
+def build_record() -> ExecutionMissionRecord:
     mission = ExecutionMission(
         mission_id="lifecycle-001",
         agent_id="trusted-agent-001",
@@ -44,9 +39,72 @@ def test_lifecycle_service_acknowledges_mission():
         sequence=1,
     )
 
-    record = ExecutionMissionRecord(
+    return ExecutionMissionRecord(
         mission=mission
     )
+
+
+def test_lifecycle_service_marks_mission_delivered() -> None:
+    record = build_record()
+
+    registry = ExecutionMissionRegistry()
+
+    registry.register(
+        record
+    )
+
+    service = ExecutionMissionLifecycleService(
+        registry
+    )
+
+    updated_record = service.mark_delivered(
+        mission_id="lifecycle-001",
+        delivered_at="2026-07-29T00:04:00",
+    )
+
+    assert updated_record.status == (
+        ExecutionMissionStatus.DELIVERED
+    )
+
+    assert updated_record.delivered_at == (
+        "2026-07-29T00:04:00"
+    )
+
+    assert updated_record.delivery_attempt_count == 1
+
+
+def test_lifecycle_service_increments_delivery_attempt_count() -> None:
+    record = build_record()
+
+    registry = ExecutionMissionRegistry()
+
+    registry.register(
+        record
+    )
+
+    service = ExecutionMissionLifecycleService(
+        registry
+    )
+
+    service.mark_delivered(
+        mission_id="lifecycle-001",
+        delivered_at="2026-07-29T00:04:00",
+    )
+
+    updated_record = service.mark_delivered(
+        mission_id="lifecycle-001",
+        delivered_at="2026-07-29T00:06:00",
+    )
+
+    assert updated_record.delivery_attempt_count == 2
+
+    assert updated_record.delivered_at == (
+        "2026-07-29T00:06:00"
+    )
+
+
+def test_lifecycle_service_acknowledges_mission() -> None:
+    record = build_record()
 
     registry = ExecutionMissionRegistry()
 

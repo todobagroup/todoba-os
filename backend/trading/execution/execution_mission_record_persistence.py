@@ -4,11 +4,14 @@ TODOBA Execution Mission Record Persistence
 Persists execution mission lifecycle records to disk.
 
 This component:
+
 - saves ExecutionMissionRegistry
 - restores ExecutionMissionRegistry
 - preserves mission lifecycle state
+- preserves delivery attempt tracking
 
 It does not:
+
 - execute broker orders
 - receive HTTP requests
 - own runtime lifecycle
@@ -97,6 +100,9 @@ class ExecutionMissionRecordPersistence:
                     },
                     "status": record.status.value,
                     "delivered_at": record.delivered_at,
+                    "delivery_attempt_count": (
+                        record.delivery_attempt_count
+                    ),
                     "acknowledged_at": (
                         record.acknowledged_at
                     ),
@@ -178,6 +184,10 @@ class ExecutionMissionRecordPersistence:
                     item["status"]
                 ),
                 delivered_at=item["delivered_at"],
+                delivery_attempt_count=item.get(
+                    "delivery_attempt_count",
+                    0,
+                ),
                 acknowledged_at=item[
                     "acknowledged_at"
                 ],

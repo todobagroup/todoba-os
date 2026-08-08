@@ -4,8 +4,9 @@ TODOBA Execution Mission API
 Exposes the remote mission polling boundary.
 
 This module owns HTTP transport only.
-Mission storage, delivery leasing, serialization,
-and authentication policy belong to separate capabilities.
+Mission storage, delivery leasing, lifecycle tracking,
+serialization, and authentication policy belong
+to separate capabilities.
 """
 
 from typing import Optional
@@ -15,6 +16,9 @@ from fastapi import Depends
 
 from backend.trading.execution.execution_mission_delivery_lease_service import (
     ExecutionMissionDeliveryLeaseService,
+)
+from backend.trading.execution.execution_mission_lifecycle_service import (
+    ExecutionMissionLifecycleService,
 )
 from backend.trading.execution.execution_mission_serializer import (
     ExecutionMissionSerializer,
@@ -35,6 +39,9 @@ def create_execution_mission_router(
     authenticator: TrustedAgentAuthenticator,
     lease_service: Optional[
         ExecutionMissionDeliveryLeaseService
+    ] = None,
+    lifecycle_service: Optional[
+        ExecutionMissionLifecycleService
     ] = None,
 ) -> APIRouter:
     if not isinstance(
@@ -65,6 +72,18 @@ def create_execution_mission_router(
         raise TypeError(
             "lease_service must be "
             "ExecutionMissionDeliveryLeaseService."
+        )
+
+    if (
+        lifecycle_service is not None
+        and not isinstance(
+            lifecycle_service,
+            ExecutionMissionLifecycleService,
+        )
+    ):
+        raise TypeError(
+            "lifecycle_service must be "
+            "ExecutionMissionLifecycleService."
         )
 
     require_trusted_agent = (
@@ -99,6 +118,15 @@ def create_execution_mission_router(
             lease = lease_service.acquire(
                 mission_id=mission.mission_id,
                 agent_id=authenticated_agent_id,
+            )
+
+        if (
+            lifecycle_service is not None
+            and lease is not None
+        ):
+            lifecycle_service.mark_delivered(
+                mission_id=mission.mission_id,
+                delivered_at=lease.leased_at,
             )
 
         payload = ExecutionMissionSerializer.serialize(

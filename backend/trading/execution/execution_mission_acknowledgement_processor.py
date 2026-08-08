@@ -7,9 +7,10 @@ mission lifecycle updates.
 Responsibilities:
 - process acknowledgement evidence
 - remove successfully processed evidence
-  from persistence
+  from evidence persistence
 - release delivery lease after successful
   acknowledgement processing
+- persist remaining delivery leases when configured
 
 This component does not:
 - receive HTTP requests
@@ -21,6 +22,9 @@ from typing import Optional
 
 from backend.trading.execution.execution_mission_acknowledgement_store import (
     ExecutionMissionAcknowledgementStore,
+)
+from backend.trading.execution.execution_mission_delivery_lease_persistence import (
+    ExecutionMissionDeliveryLeasePersistence,
 )
 from backend.trading.execution.execution_mission_delivery_lease_registry import (
     ExecutionMissionDeliveryLeaseRegistry,
@@ -48,6 +52,9 @@ class ExecutionMissionAcknowledgementProcessor:
         ] = None,
         lease_registry: Optional[
             ExecutionMissionDeliveryLeaseRegistry
+        ] = None,
+        lease_persistence: Optional[
+            ExecutionMissionDeliveryLeasePersistence
         ] = None,
     ) -> None:
         if not isinstance(
@@ -92,10 +99,23 @@ class ExecutionMissionAcknowledgementProcessor:
                 "ExecutionMissionDeliveryLeaseRegistry."
             )
 
+        if (
+            lease_persistence is not None
+            and not isinstance(
+                lease_persistence,
+                ExecutionMissionDeliveryLeasePersistence,
+            )
+        ):
+            raise TypeError(
+                "lease_persistence must be "
+                "ExecutionMissionDeliveryLeasePersistence."
+            )
+
         self.store = store
         self.lifecycle_service = lifecycle_service
         self.persistence = persistence
         self.lease_registry = lease_registry
+        self.lease_persistence = lease_persistence
 
     def process_next(
         self,
@@ -118,8 +138,16 @@ class ExecutionMissionAcknowledgementProcessor:
             )
 
         if self.lease_registry is not None:
-            self.lease_registry.release(
+            released = self.lease_registry.release(
                 acknowledgement.mission_id
             )
+
+            if (
+                released is not None
+                and self.lease_persistence is not None
+            ):
+                self.lease_persistence.save(
+                    self.lease_registry
+                )
 
         return result

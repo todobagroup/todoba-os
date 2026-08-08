@@ -20,6 +20,12 @@ def test_main_restores_evidence_before_runtime_start(
         )
         return 0
 
+    def restore_delivery_leases() -> int:
+        calls.append(
+            "delivery_leases"
+        )
+        return 0
+
     def restore_evidence(
         **stores,
     ) -> int:
@@ -73,6 +79,12 @@ def test_main_restores_evidence_before_runtime_start(
     )
 
     monkeypatch.setattr(
+        main.execution_mission_delivery_lease_recovery,
+        "restore",
+        restore_delivery_leases,
+    )
+
+    monkeypatch.setattr(
         main.execution_mission_evidence_persistence,
         "restore",
         restore_evidence,
@@ -97,6 +109,7 @@ def test_main_restores_evidence_before_runtime_start(
             assert calls == [
                 "missions",
                 "records",
+                "delivery_leases",
                 "evidence",
                 "runtime_start",
             ]
@@ -108,6 +121,7 @@ def test_main_restores_evidence_before_runtime_start(
     assert calls == [
         "missions",
         "records",
+        "delivery_leases",
         "evidence",
         "runtime_start",
         "runtime_stop",

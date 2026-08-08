@@ -1,5 +1,6 @@
 from datetime import datetime
 from datetime import timezone
+from pathlib import Path
 
 import pytest
 
@@ -11,6 +12,9 @@ from backend.trading.execution.execution_mission_delivery_bridge import (
 )
 from backend.trading.execution.execution_mission_delivery_lease import (
     ExecutionMissionDeliveryLease,
+)
+from backend.trading.execution.execution_mission_delivery_lease_persistence import (
+    ExecutionMissionDeliveryLeasePersistence,
 )
 from backend.trading.execution.execution_mission_delivery_lease_registry import (
     ExecutionMissionDeliveryLeaseRegistry,
@@ -26,7 +30,7 @@ from backend.trading.execution.execution_mission_store import (
 )
 
 
-MISSION_ID = "proof073-redelivery-001"
+MISSION_ID = "proof074-redelivery-001"
 AGENT_ID = "trusted-agent-001"
 
 
@@ -34,7 +38,7 @@ def fixed_clock() -> datetime:
     return datetime(
         2026,
         8,
-        7,
+        8,
         12,
         1,
         0,
@@ -54,9 +58,9 @@ def build_mission() -> ExecutionMission:
         sl=4100.0,
         tp=4200.0,
         magic_number=10001,
-        comment="TODOBA Proof073 Redelivery",
-        created_at="2026-08-07T12:00:00Z",
-        expires_at="2026-08-07T13:00:00Z",
+        comment="TODOBA Proof074 Redelivery",
+        created_at="2026-08-08T12:00:00Z",
+        expires_at="2026-08-08T13:00:00Z",
         sequence=1,
     )
 
@@ -68,7 +72,7 @@ def build_lease(
     return ExecutionMissionDeliveryLease(
         mission_id=MISSION_ID,
         agent_id=AGENT_ID,
-        leased_at="2026-08-07T12:00:00Z",
+        leased_at="2026-08-08T12:00:00Z",
         expires_at=expires_at,
     )
 
@@ -78,6 +82,7 @@ def build_processor(
     repository: ExecutionMissionRepository,
     store: ExecutionMissionStore,
     lease_registry: ExecutionMissionDeliveryLeaseRegistry,
+    lease_persistence: ExecutionMissionDeliveryLeasePersistence,
 ) -> ExecutionMissionDeliveryRedeliveryProcessor:
     delivery_bridge = ExecutionMissionDeliveryBridge(
         store
@@ -88,10 +93,13 @@ def build_processor(
         delivery_bridge=delivery_bridge,
         lease_registry=lease_registry,
         clock=fixed_clock,
+        lease_persistence=lease_persistence,
     )
 
 
-def test_expired_lease_redelivers_mission() -> None:
+def test_expired_lease_redelivers_and_persists_release(
+    tmp_path: Path,
+) -> None:
     repository = ExecutionMissionRepository()
 
     mission = build_mission()
@@ -108,14 +116,25 @@ def test_expired_lease_redelivers_mission() -> None:
 
     lease_registry.acquire(
         build_lease(
-            expires_at="2026-08-07T12:00:30Z",
+            expires_at="2026-08-08T12:00:30Z",
         )
+    )
+
+    lease_persistence = (
+        ExecutionMissionDeliveryLeasePersistence(
+            tmp_path / "delivery_leases.json"
+        )
+    )
+
+    lease_persistence.save(
+        lease_registry
     )
 
     processor = build_processor(
         repository=repository,
         store=store,
         lease_registry=lease_registry,
+        lease_persistence=lease_persistence,
     )
 
     result = processor.process_next()
@@ -132,8 +151,20 @@ def test_expired_lease_redelivers_mission() -> None:
         MISSION_ID
     ) is None
 
+    restored_registry = (
+        ExecutionMissionDeliveryLeaseRegistry()
+    )
 
-def test_active_lease_is_not_redelivered() -> None:
+    assert lease_persistence.restore(
+        restored_registry
+    ) == 0
+
+    assert restored_registry.size() == 0
+
+
+def test_active_lease_is_not_redelivered_or_removed(
+    tmp_path: Path,
+) -> None:
     repository = ExecutionMissionRepository()
 
     mission = build_mission()
@@ -149,17 +180,28 @@ def test_active_lease_is_not_redelivered() -> None:
     )
 
     lease = build_lease(
-        expires_at="2026-08-07T12:01:30Z",
+        expires_at="2026-08-08T12:01:30Z",
     )
 
     lease_registry.acquire(
         lease
     )
 
+    lease_persistence = (
+        ExecutionMissionDeliveryLeasePersistence(
+            tmp_path / "delivery_leases.json"
+        )
+    )
+
+    lease_persistence.save(
+        lease_registry
+    )
+
     processor = build_processor(
         repository=repository,
         store=store,
         lease_registry=lease_registry,
+        lease_persistence=lease_persistence,
     )
 
     result = processor.process_next()
@@ -172,8 +214,22 @@ def test_active_lease_is_not_redelivered() -> None:
         MISSION_ID
     ) == lease
 
+    restored_registry = (
+        ExecutionMissionDeliveryLeaseRegistry()
+    )
 
-def test_expired_lease_without_mission_fails_safely() -> None:
+    assert lease_persistence.restore(
+        restored_registry
+    ) == 1
+
+    assert restored_registry.get(
+        MISSION_ID
+    ) == lease
+
+
+def test_expired_lease_without_mission_keeps_persisted_lease(
+    tmp_path: Path,
+) -> None:
     repository = ExecutionMissionRepository()
 
     store = ExecutionMissionStore()
@@ -183,17 +239,28 @@ def test_expired_lease_without_mission_fails_safely() -> None:
     )
 
     lease = build_lease(
-        expires_at="2026-08-07T12:00:30Z",
+        expires_at="2026-08-08T12:00:30Z",
     )
 
     lease_registry.acquire(
         lease
     )
 
+    lease_persistence = (
+        ExecutionMissionDeliveryLeasePersistence(
+            tmp_path / "delivery_leases.json"
+        )
+    )
+
+    lease_persistence.save(
+        lease_registry
+    )
+
     processor = build_processor(
         repository=repository,
         store=store,
         lease_registry=lease_registry,
+        lease_persistence=lease_persistence,
     )
 
     with pytest.raises(
@@ -205,5 +272,17 @@ def test_expired_lease_without_mission_fails_safely() -> None:
     assert store.size() == 0
 
     assert lease_registry.get(
+        MISSION_ID
+    ) == lease
+
+    restored_registry = (
+        ExecutionMissionDeliveryLeaseRegistry()
+    )
+
+    assert lease_persistence.restore(
+        restored_registry
+    ) == 1
+
+    assert restored_registry.get(
         MISSION_ID
     ) == lease

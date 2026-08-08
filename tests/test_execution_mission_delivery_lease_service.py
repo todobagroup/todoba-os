@@ -1,8 +1,12 @@
 from datetime import datetime
 from datetime import timezone
+from pathlib import Path
 
 import pytest
 
+from backend.trading.execution.execution_mission_delivery_lease_persistence import (
+    ExecutionMissionDeliveryLeasePersistence,
+)
 from backend.trading.execution.execution_mission_delivery_lease_registry import (
     ExecutionMissionDeliveryLeaseRegistry,
 )
@@ -15,12 +19,24 @@ def fixed_clock() -> datetime:
     return datetime(
         2026,
         8,
-        7,
+        8,
         12,
         0,
         0,
         tzinfo=timezone.utc,
     )
+
+
+class FailingLeasePersistence(
+    ExecutionMissionDeliveryLeasePersistence
+):
+    def save(
+        self,
+        registry: ExecutionMissionDeliveryLeaseRegistry,
+    ) -> None:
+        raise RuntimeError(
+            "Lease persistence failed."
+        )
 
 
 def test_service_creates_lease_with_expiration() -> None:
@@ -33,12 +49,12 @@ def test_service_creates_lease_with_expiration() -> None:
     )
 
     lease = service.acquire(
-        mission_id="proof073-mission-001",
+        mission_id="proof074-mission-001",
         agent_id="trusted-agent-001",
     )
 
     assert lease.mission_id == (
-        "proof073-mission-001"
+        "proof074-mission-001"
     )
 
     assert lease.agent_id == (
@@ -46,11 +62,11 @@ def test_service_creates_lease_with_expiration() -> None:
     )
 
     assert lease.leased_at == (
-        "2026-08-07T12:00:00Z"
+        "2026-08-08T12:00:00Z"
     )
 
     assert lease.expires_at == (
-        "2026-08-07T12:00:30Z"
+        "2026-08-08T12:00:30Z"
     )
 
     assert registry.size() == 1
@@ -66,17 +82,16 @@ def test_service_returns_existing_lease_for_same_agent() -> None:
     )
 
     first = service.acquire(
-        mission_id="proof073-mission-001",
+        mission_id="proof074-mission-001",
         agent_id="trusted-agent-001",
     )
 
     second = service.acquire(
-        mission_id="proof073-mission-001",
+        mission_id="proof074-mission-001",
         agent_id="trusted-agent-001",
     )
 
     assert second == first
-
     assert registry.size() == 1
 
 
@@ -90,7 +105,7 @@ def test_service_rejects_conflicting_agent() -> None:
     )
 
     service.acquire(
-        mission_id="proof073-mission-001",
+        mission_id="proof074-mission-001",
         agent_id="trusted-agent-001",
     )
 
@@ -98,7 +113,7 @@ def test_service_rejects_conflicting_agent() -> None:
         ValueError
     ):
         service.acquire(
-            mission_id="proof073-mission-001",
+            mission_id="proof074-mission-001",
             agent_id="trusted-agent-002",
         )
 
@@ -126,7 +141,7 @@ def test_service_rejects_naive_clock() -> None:
         return datetime(
             2026,
             8,
-            7,
+            8,
             12,
             0,
             0,
@@ -145,6 +160,77 @@ def test_service_rejects_naive_clock() -> None:
         ),
     ):
         service.acquire(
-            mission_id="proof073-mission-001",
+            mission_id="proof074-mission-001",
             agent_id="trusted-agent-001",
         )
+
+
+def test_service_persists_acquired_lease(
+    tmp_path: Path,
+) -> None:
+    registry = ExecutionMissionDeliveryLeaseRegistry()
+
+    persistence = (
+        ExecutionMissionDeliveryLeasePersistence(
+            tmp_path / "delivery_leases.json"
+        )
+    )
+
+    service = ExecutionMissionDeliveryLeaseService(
+        registry=registry,
+        lease_seconds=30,
+        clock=fixed_clock,
+        persistence=persistence,
+    )
+
+    service.acquire(
+        mission_id="proof074-mission-001",
+        agent_id="trusted-agent-001",
+    )
+
+    assert registry.size() == 1
+    assert persistence.storage_path.exists()
+
+    restored_registry = (
+        ExecutionMissionDeliveryLeaseRegistry()
+    )
+
+    assert persistence.restore(
+        restored_registry
+    ) == 1
+
+    assert restored_registry.get(
+        "proof074-mission-001"
+    ) is not None
+
+
+def test_service_rolls_back_new_lease_when_persistence_fails(
+    tmp_path: Path,
+) -> None:
+    registry = ExecutionMissionDeliveryLeaseRegistry()
+
+    persistence = FailingLeasePersistence(
+        tmp_path / "delivery_leases.json"
+    )
+
+    service = ExecutionMissionDeliveryLeaseService(
+        registry=registry,
+        lease_seconds=30,
+        clock=fixed_clock,
+        persistence=persistence,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Lease persistence failed.",
+    ):
+        service.acquire(
+            mission_id="proof074-mission-001",
+            agent_id="trusted-agent-001",
+        )
+
+    assert registry.size() == 0
+
+    assert registry.get(
+        "proof074-mission-001"
+    ) is None

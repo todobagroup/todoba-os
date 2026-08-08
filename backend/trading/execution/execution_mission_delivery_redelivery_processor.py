@@ -10,17 +10,18 @@ Responsibilities:
 - recover the original execution mission
 - redeliver the mission
 - release the expired lease after successful redelivery
+- persist remaining delivery leases when configured
 
 This component does not:
 - receive HTTP requests
 - acknowledge missions
-- persist leases
 - execute broker orders
 """
 
 from datetime import datetime
 from datetime import timezone
 from typing import Callable
+from typing import Optional
 
 from backend.trading.execution.execution_mission import (
     ExecutionMission,
@@ -31,6 +32,9 @@ from backend.trading.execution.execution_mission_delivery_bridge import (
 from backend.trading.execution.execution_mission_delivery_lease import (
     ExecutionMissionDeliveryLease,
 )
+from backend.trading.execution.execution_mission_delivery_lease_persistence import (
+    ExecutionMissionDeliveryLeasePersistence,
+)
 from backend.trading.execution.execution_mission_delivery_lease_registry import (
     ExecutionMissionDeliveryLeaseRegistry,
 )
@@ -40,10 +44,6 @@ from backend.trading.execution.execution_mission_repository import (
 
 
 def utc_now() -> datetime:
-    """
-    Return the current timezone-aware UTC datetime.
-    """
-
     return datetime.now(
         timezone.utc
     )
@@ -61,6 +61,9 @@ class ExecutionMissionDeliveryRedeliveryProcessor:
         delivery_bridge: ExecutionMissionDeliveryBridge,
         lease_registry: ExecutionMissionDeliveryLeaseRegistry,
         clock: Callable[[], datetime] = utc_now,
+        lease_persistence: Optional[
+            ExecutionMissionDeliveryLeasePersistence
+        ] = None,
     ) -> None:
         if not isinstance(
             repository,
@@ -97,10 +100,23 @@ class ExecutionMissionDeliveryRedeliveryProcessor:
                 "clock must be callable."
             )
 
+        if (
+            lease_persistence is not None
+            and not isinstance(
+                lease_persistence,
+                ExecutionMissionDeliveryLeasePersistence,
+            )
+        ):
+            raise TypeError(
+                "lease_persistence must be "
+                "ExecutionMissionDeliveryLeasePersistence."
+            )
+
         self.repository = repository
         self.delivery_bridge = delivery_bridge
         self.lease_registry = lease_registry
         self.clock = clock
+        self.lease_persistence = lease_persistence
 
     def process_next(
         self,
@@ -147,9 +163,17 @@ class ExecutionMissionDeliveryRedeliveryProcessor:
                 mission
             )
 
-            self.lease_registry.release(
+            released = self.lease_registry.release(
                 lease.mission_id
             )
+
+            if (
+                released is not None
+                and self.lease_persistence is not None
+            ):
+                self.lease_persistence.save(
+                    self.lease_registry
+                )
 
             return result
 

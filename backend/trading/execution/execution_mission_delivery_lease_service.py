@@ -1,28 +1,18 @@
 """
 TODOBA Execution Mission Delivery Lease Service
 
-Creates temporary delivery leases for execution missions.
-
-Responsibilities:
-- create UTC lease timestamps
-- calculate lease expiration
-- acquire leases through the lease registry
-
-This component does not:
-- deliver missions
-- acknowledge missions
-- retry missions
-- persist leases
-- receive HTTP requests
+Creates and persists temporary delivery leases
+for execution missions.
 """
 
-from datetime import datetime
-from datetime import timedelta
-from datetime import timezone
-from typing import Callable
+from datetime import datetime, timedelta, timezone
+from typing import Callable, Optional
 
 from backend.trading.execution.execution_mission_delivery_lease import (
     ExecutionMissionDeliveryLease,
+)
+from backend.trading.execution.execution_mission_delivery_lease_persistence import (
+    ExecutionMissionDeliveryLeasePersistence,
 )
 from backend.trading.execution.execution_mission_delivery_lease_registry import (
     ExecutionMissionDeliveryLeaseRegistry,
@@ -30,10 +20,6 @@ from backend.trading.execution.execution_mission_delivery_lease_registry import 
 
 
 def utc_now() -> datetime:
-    """
-    Return the current timezone-aware UTC datetime.
-    """
-
     return datetime.now(
         timezone.utc
     )
@@ -50,6 +36,9 @@ class ExecutionMissionDeliveryLeaseService:
         registry: ExecutionMissionDeliveryLeaseRegistry,
         lease_seconds: float,
         clock: Callable[[], datetime] = utc_now,
+        persistence: Optional[
+            ExecutionMissionDeliveryLeasePersistence
+        ] = None,
     ) -> None:
         if not isinstance(
             registry,
@@ -74,20 +63,29 @@ class ExecutionMissionDeliveryLeaseService:
                 "lease_seconds must be greater than zero."
             )
 
-        if not callable(
-            clock
-        ):
+        if not callable(clock):
             raise TypeError(
                 "clock must be callable."
             )
 
-        self.registry = registry
+        if (
+            persistence is not None
+            and not isinstance(
+                persistence,
+                ExecutionMissionDeliveryLeasePersistence,
+            )
+        ):
+            raise TypeError(
+                "persistence must be "
+                "ExecutionMissionDeliveryLeasePersistence."
+            )
 
+        self.registry = registry
         self.lease_seconds = float(
             lease_seconds
         )
-
         self.clock = clock
+        self.persistence = persistence
 
     def acquire(
         self,
@@ -117,13 +115,6 @@ class ExecutionMissionDeliveryLeaseService:
             timezone.utc
         )
 
-        expires_at = (
-            now_utc
-            + timedelta(
-                seconds=self.lease_seconds
-            )
-        )
-
         lease = ExecutionMissionDeliveryLease(
             mission_id=mission_id,
             agent_id=agent_id,
@@ -131,13 +122,34 @@ class ExecutionMissionDeliveryLeaseService:
                 now_utc
             ),
             expires_at=self._serialize_utc(
-                expires_at
+                now_utc
+                + timedelta(
+                    seconds=self.lease_seconds
+                )
             ),
         )
 
-        return self.registry.acquire(
+        existing = self.registry.get(
+            mission_id
+        )
+
+        acquired = self.registry.acquire(
             lease
         )
+
+        if self.persistence is not None:
+            try:
+                self.persistence.save(
+                    self.registry
+                )
+            except Exception:
+                if existing is None:
+                    self.registry.release(
+                        mission_id
+                    )
+                raise
+
+        return acquired
 
     @staticmethod
     def _serialize_utc(

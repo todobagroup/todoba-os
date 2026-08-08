@@ -51,6 +51,12 @@ from backend.trading.execution.execution_mission_completed_store import (
 from backend.trading.execution.execution_mission_delivery_bridge import (
     ExecutionMissionDeliveryBridge,
 )
+from backend.trading.execution.execution_mission_delivery_lease_persistence import (
+    ExecutionMissionDeliveryLeasePersistence,
+)
+from backend.trading.execution.execution_mission_delivery_lease_recovery import (
+    ExecutionMissionDeliveryLeaseRecovery,
+)
 from backend.trading.execution.execution_mission_delivery_lease_registry import (
     ExecutionMissionDeliveryLeaseRegistry,
 )
@@ -147,6 +153,12 @@ MISSION_EVIDENCE_STORAGE_PATH = (
     / "execution_mission_evidence.json"
 )
 
+MISSION_DELIVERY_LEASE_STORAGE_PATH = (
+    Path("data")
+    / "trading"
+    / "execution_mission_delivery_leases.json"
+)
+
 
 runtime_bootstrap = RuntimeBootstrap()
 
@@ -162,6 +174,8 @@ async def lifespan(
     execution_mission_recovery.restore()
 
     execution_mission_record_recovery.restore()
+
+    execution_mission_delivery_lease_recovery.restore()
 
     execution_mission_evidence_persistence.restore(
     acknowledgement_store=(
@@ -227,12 +241,32 @@ execution_mission_delivery_lease_registry = (
     ExecutionMissionDeliveryLeaseRegistry()
 )
 
+execution_mission_delivery_lease_persistence = (
+    ExecutionMissionDeliveryLeasePersistence(
+        MISSION_DELIVERY_LEASE_STORAGE_PATH
+    )
+)
+
+execution_mission_delivery_lease_recovery = (
+    ExecutionMissionDeliveryLeaseRecovery(
+        persistence=(
+            execution_mission_delivery_lease_persistence
+        ),
+        registry=(
+            execution_mission_delivery_lease_registry
+        ),
+    )
+)
+
 execution_mission_delivery_lease_service = (
     ExecutionMissionDeliveryLeaseService(
         registry=(
             execution_mission_delivery_lease_registry
         ),
         lease_seconds=30.0,
+        persistence=(
+            execution_mission_delivery_lease_persistence
+        ),
     )
 )
 
@@ -341,6 +375,9 @@ execution_mission_acknowledgement_processor = (
         lease_registry=(
             execution_mission_delivery_lease_registry
         ),
+        lease_persistence=(
+            execution_mission_delivery_lease_persistence
+        ),
     )
 )
 
@@ -382,6 +419,9 @@ execution_mission_delivery_redelivery_processor = (
         delivery_bridge=execution_mission_delivery_bridge,
         lease_registry=(
             execution_mission_delivery_lease_registry
+        ),
+        lease_persistence=(
+            execution_mission_delivery_lease_persistence
         ),
     )
 )

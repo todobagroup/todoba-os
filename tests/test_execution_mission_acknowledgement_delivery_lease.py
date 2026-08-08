@@ -17,6 +17,9 @@ from backend.trading.execution.execution_mission_acknowledgement_store import (
 from backend.trading.execution.execution_mission_delivery_lease import (
     ExecutionMissionDeliveryLease,
 )
+from backend.trading.execution.execution_mission_delivery_lease_persistence import (
+    ExecutionMissionDeliveryLeasePersistence,
+)
 from backend.trading.execution.execution_mission_delivery_lease_registry import (
     ExecutionMissionDeliveryLeaseRegistry,
 )
@@ -34,7 +37,7 @@ from backend.trading.execution.execution_mission_registry import (
 )
 
 
-MISSION_ID = "proof073-ack-001"
+MISSION_ID = "proof074-ack-001"
 AGENT_ID = "trusted-agent-001"
 
 
@@ -50,22 +53,20 @@ def build_mission() -> ExecutionMission:
         sl=4100.0,
         tp=4200.0,
         magic_number=10001,
-        comment="TODOBA Proof073 ACK Lease",
-        created_at="2026-08-07T12:00:00Z",
-        expires_at="2026-08-07T13:00:00Z",
+        comment="TODOBA Proof074 ACK Lease",
+        created_at="2026-08-08T12:00:00Z",
+        expires_at="2026-08-08T13:00:00Z",
         sequence=1,
     )
 
 
-def build_acknowledgement() -> (
-    ExecutionMissionAcknowledgement
-):
+def build_acknowledgement() -> ExecutionMissionAcknowledgement:
     return ExecutionMissionAcknowledgement(
         mission_id=MISSION_ID,
         agent_id=AGENT_ID,
         sequence=1,
         status="ACCEPTED",
-        acknowledged_at="2026-08-07T12:00:05Z",
+        acknowledged_at="2026-08-08T12:00:05Z",
     )
 
 
@@ -73,12 +74,12 @@ def build_lease() -> ExecutionMissionDeliveryLease:
     return ExecutionMissionDeliveryLease(
         mission_id=MISSION_ID,
         agent_id=AGENT_ID,
-        leased_at="2026-08-07T12:00:00Z",
-        expires_at="2026-08-07T12:00:30Z",
+        leased_at="2026-08-08T12:00:00Z",
+        expires_at="2026-08-08T12:00:30Z",
     )
 
 
-def test_acknowledgement_releases_delivery_lease(
+def test_acknowledgement_releases_and_persists_delivery_lease(
     tmp_path: Path,
 ) -> None:
     registry = ExecutionMissionRegistry()
@@ -105,11 +106,13 @@ def test_acknowledgement_releases_delivery_lease(
         acknowledgement
     )
 
-    persistence = ExecutionMissionEvidencePersistence(
-        tmp_path / "evidence.json"
+    evidence_persistence = (
+        ExecutionMissionEvidencePersistence(
+            tmp_path / "evidence.json"
+        )
     )
 
-    persistence.save(
+    evidence_persistence.save(
         acknowledgement
     )
 
@@ -121,12 +124,23 @@ def test_acknowledgement_releases_delivery_lease(
         build_lease()
     )
 
+    lease_persistence = (
+        ExecutionMissionDeliveryLeasePersistence(
+            tmp_path / "delivery_leases.json"
+        )
+    )
+
+    lease_persistence.save(
+        lease_registry
+    )
+
     processor = (
         ExecutionMissionAcknowledgementProcessor(
             store=acknowledgement_store,
             lifecycle_service=lifecycle_service,
-            persistence=persistence,
+            persistence=evidence_persistence,
             lease_registry=lease_registry,
+            lease_persistence=lease_persistence,
         )
     )
 
@@ -140,7 +154,17 @@ def test_acknowledgement_releases_delivery_lease(
 
     assert lease_registry.size() == 0
 
-    assert persistence.size() == 0
+    assert evidence_persistence.size() == 0
+
+    restored_registry = (
+        ExecutionMissionDeliveryLeaseRegistry()
+    )
+
+    assert lease_persistence.restore(
+        restored_registry
+    ) == 0
+
+    assert restored_registry.size() == 0
 
 
 def test_acknowledgement_keeps_delivery_lease_when_lifecycle_fails(
@@ -164,11 +188,13 @@ def test_acknowledgement_keeps_delivery_lease_when_lifecycle_fails(
         acknowledgement
     )
 
-    persistence = ExecutionMissionEvidencePersistence(
-        tmp_path / "evidence.json"
+    evidence_persistence = (
+        ExecutionMissionEvidencePersistence(
+            tmp_path / "evidence.json"
+        )
     )
 
-    persistence.save(
+    evidence_persistence.save(
         acknowledgement
     )
 
@@ -176,16 +202,29 @@ def test_acknowledgement_keeps_delivery_lease_when_lifecycle_fails(
         ExecutionMissionDeliveryLeaseRegistry()
     )
 
+    lease = build_lease()
+
     lease_registry.acquire(
-        build_lease()
+        lease
+    )
+
+    lease_persistence = (
+        ExecutionMissionDeliveryLeasePersistence(
+            tmp_path / "delivery_leases.json"
+        )
+    )
+
+    lease_persistence.save(
+        lease_registry
     )
 
     processor = (
         ExecutionMissionAcknowledgementProcessor(
             store=acknowledgement_store,
             lifecycle_service=lifecycle_service,
-            persistence=persistence,
+            persistence=evidence_persistence,
             lease_registry=lease_registry,
+            lease_persistence=lease_persistence,
         )
     )
 
@@ -197,8 +236,18 @@ def test_acknowledgement_keeps_delivery_lease_when_lifecycle_fails(
 
     assert lease_registry.get(
         MISSION_ID
-    ) is not None
+    ) == lease
 
     assert lease_registry.size() == 1
 
-    assert persistence.size() == 1
+    restored_registry = (
+        ExecutionMissionDeliveryLeaseRegistry()
+    )
+
+    assert lease_persistence.restore(
+        restored_registry
+    ) == 1
+
+    assert restored_registry.get(
+        MISSION_ID
+    ) == lease

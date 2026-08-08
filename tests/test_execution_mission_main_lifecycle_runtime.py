@@ -2,6 +2,8 @@ from backend.main import (
     broker_execution_evidence_processor,
     execution_mission_acknowledgement_processor,
     execution_mission_completed_processor,
+    execution_mission_delivery_lease_persistence,
+    execution_mission_delivery_lease_recovery,
     execution_mission_delivery_lease_registry,
     execution_mission_delivery_lease_service,
     execution_mission_delivery_redelivery_processor,
@@ -18,6 +20,12 @@ from backend.trading.execution.execution_mission_acknowledgement_processor impor
 )
 from backend.trading.execution.execution_mission_completed_processor import (
     ExecutionMissionCompletedProcessor,
+)
+from backend.trading.execution.execution_mission_delivery_lease_persistence import (
+    ExecutionMissionDeliveryLeasePersistence,
+)
+from backend.trading.execution.execution_mission_delivery_lease_recovery import (
+    ExecutionMissionDeliveryLeaseRecovery,
 )
 from backend.trading.execution.execution_mission_delivery_lease_registry import (
     ExecutionMissionDeliveryLeaseRegistry,
@@ -54,8 +62,38 @@ def test_main_composes_execution_mission_lifecycle_runtime() -> None:
     )
 
     assert isinstance(
+        execution_mission_delivery_lease_persistence,
+        ExecutionMissionDeliveryLeasePersistence,
+    )
+
+    assert isinstance(
+        execution_mission_delivery_lease_recovery,
+        ExecutionMissionDeliveryLeaseRecovery,
+    )
+
+    assert isinstance(
         execution_mission_delivery_lease_service,
         ExecutionMissionDeliveryLeaseService,
+    )
+
+    assert (
+        execution_mission_delivery_lease_service.registry
+        is execution_mission_delivery_lease_registry
+    )
+
+    assert (
+        execution_mission_delivery_lease_service.persistence
+        is execution_mission_delivery_lease_persistence
+    )
+
+    assert (
+        execution_mission_delivery_lease_recovery.registry
+        is execution_mission_delivery_lease_registry
+    )
+
+    assert (
+        execution_mission_delivery_lease_recovery.persistence
+        is execution_mission_delivery_lease_persistence
     )
 
     assert isinstance(
@@ -66,6 +104,11 @@ def test_main_composes_execution_mission_lifecycle_runtime() -> None:
     assert (
         execution_mission_acknowledgement_processor.lease_registry
         is execution_mission_delivery_lease_registry
+    )
+
+    assert (
+        execution_mission_acknowledgement_processor.lease_persistence
+        is execution_mission_delivery_lease_persistence
     )
 
     assert isinstance(
@@ -96,6 +139,11 @@ def test_main_composes_execution_mission_lifecycle_runtime() -> None:
     assert (
         execution_mission_delivery_redelivery_processor.lease_registry
         is execution_mission_delivery_lease_registry
+    )
+
+    assert (
+        execution_mission_delivery_redelivery_processor.lease_persistence
+        is execution_mission_delivery_lease_persistence
     )
 
     assert isinstance(

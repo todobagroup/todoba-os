@@ -18,6 +18,7 @@ from backend.main import (
     execution_mission_record_retention_scheduler,
     execution_mission_registry,
     todoba_runtime,
+    execution_mission_signer,
 )
 from backend.trading.execution.broker_execution_evidence_processor import (
     BrokerExecutionEvidenceProcessor,
@@ -36,6 +37,9 @@ from backend.trading.execution.execution_mission_delivery_lease_recovery import 
 )
 from backend.trading.execution.execution_mission_delivery_lease_registry import (
     ExecutionMissionDeliveryLeaseRegistry,
+)
+from backend.trading.execution.execution_mission_signer import (
+    ExecutionMissionSigner,
 )
 from backend.trading.execution.execution_mission_delivery_lease_service import (
     ExecutionMissionDeliveryLeaseService,
@@ -74,6 +78,10 @@ def test_main_composes_execution_mission_lifecycle_runtime() -> None:
         execution_mission_lifecycle_service,
         ExecutionMissionLifecycleService,
     )
+    assert isinstance(
+        execution_mission_signer,
+        ExecutionMissionSigner,
+)
 
     assert isinstance(
         execution_mission_delivery_lease_registry,

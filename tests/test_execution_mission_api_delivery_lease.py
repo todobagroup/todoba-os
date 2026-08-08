@@ -28,6 +28,9 @@ from backend.trading.execution.execution_mission_record import (
 from backend.trading.execution.execution_mission_registry import (
     ExecutionMissionRegistry,
 )
+from backend.trading.execution.execution_mission_signer import (
+    ExecutionMissionSigner,
+)
 from backend.trading.execution.execution_mission_status import (
     ExecutionMissionStatus,
 )
@@ -41,8 +44,9 @@ from backend.trading.execution.trusted_agent_authenticator import (
 
 AGENT_ID = "trusted-agent-001"
 AGENT_SECRET = "secure-secret"
+SIGNING_SECRET = "proof080-signing-secret"
 
-MISSION_ID = "proof078-mission-001"
+MISSION_ID = "proof080-mission-001"
 
 AUTHENTICATION_HEADERS = {
     "X-TODOBA-Agent-ID": AGENT_ID,
@@ -77,7 +81,7 @@ def build_mission(
         sl=4100.0,
         tp=4200.0,
         magic_number=10001,
-        comment="TODOBA Proof078",
+        comment="TODOBA Proof080",
         created_at="2026-08-08T11:59:00Z",
         expires_at=expires_at,
         sequence=1,
@@ -108,6 +112,10 @@ def build_client(
         ExecutionMissionDeliveryExpirationPolicy()
     )
 
+    signer = ExecutionMissionSigner(
+        SIGNING_SECRET
+    )
+
     app = FastAPI()
 
     app.include_router(
@@ -117,6 +125,7 @@ def build_client(
             lease_service,
             lifecycle_service,
             expiration_policy,
+            signer,
         )
     )
 
@@ -125,7 +134,7 @@ def build_client(
     )
 
 
-def test_poll_creates_delivery_lease_and_tracks_delivery() -> None:
+def test_poll_creates_delivery_lease_tracks_delivery_and_signs_mission() -> None:
     store = ExecutionMissionStore()
 
     lease_registry = (
@@ -165,6 +174,28 @@ def test_poll_creates_delivery_lease_and_tracks_delivery() -> None:
 
     assert payload["mission"]["mission_id"] == (
         MISSION_ID
+    )
+
+    signature = payload[
+        "mission_signature"
+    ]
+
+    assert isinstance(
+        signature,
+        str,
+    )
+
+    assert len(
+        signature
+    ) == 64
+
+    verifier = ExecutionMissionSigner(
+        SIGNING_SECRET
+    )
+
+    assert verifier.verify(
+        mission,
+        signature,
     )
 
     assert payload["delivery_lease"] == {
@@ -270,7 +301,7 @@ def test_empty_poll_does_not_create_delivery_lease_or_tracking() -> None:
     assert mission_registry.size() == 0
 
 
-def test_expired_mission_is_not_delivered_or_leased() -> None:
+def test_expired_mission_is_not_delivered_or_signed() -> None:
     store = ExecutionMissionStore()
 
     lease_registry = (

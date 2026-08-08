@@ -11,6 +11,7 @@ from backend.brain_engine import brain_engine
 from backend.config import (
     TODOBA_TRUSTED_AGENT_ID,
     TODOBA_TRUSTED_AGENT_SECRET,
+    TODOBA_EXECUTION_MISSION_SIGNING_SECRET,
 )
 from backend.runtime.runtime_bootstrap import (
     RuntimeBootstrap,
@@ -62,6 +63,9 @@ from backend.trading.execution.execution_mission_delivery_lease_registry import 
 )
 from backend.trading.execution.execution_mission_delivery_lease_service import (
     ExecutionMissionDeliveryLeaseService,
+)
+from backend.trading.execution.execution_mission_signer import (
+    ExecutionMissionSigner,
 )
 from backend.trading.execution.execution_mission_delivery_redelivery_processor import (
     ExecutionMissionDeliveryRedeliveryProcessor,
@@ -232,6 +236,12 @@ trusted_agent_authenticator = (
 
 execution_mission_repository = (
     ExecutionMissionRepository()
+)
+
+execution_mission_signer = (
+    ExecutionMissionSigner(
+        TODOBA_EXECUTION_MISSION_SIGNING_SECRET
+    )
 )
 
 execution_mission_persistence = (
@@ -501,6 +511,7 @@ app.include_router(
         execution_mission_delivery_lease_service,
         execution_mission_lifecycle_service,
         execution_mission_delivery_expiration_policy,
+        execution_mission_signer,
     )
 )
 

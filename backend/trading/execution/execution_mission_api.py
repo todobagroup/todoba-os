@@ -5,7 +5,7 @@ Exposes the remote mission polling boundary.
 
 This module owns HTTP transport only.
 Mission storage, delivery leasing, lifecycle tracking,
-delivery expiration policy, serialization,
+delivery expiration policy, serialization, signing,
 and authentication policy belong to separate capabilities.
 """
 
@@ -25,6 +25,9 @@ from backend.trading.execution.execution_mission_lifecycle_service import (
 )
 from backend.trading.execution.execution_mission_serializer import (
     ExecutionMissionSerializer,
+)
+from backend.trading.execution.execution_mission_signer import (
+    ExecutionMissionSigner,
 )
 from backend.trading.execution.execution_mission_store import (
     ExecutionMissionStore,
@@ -48,6 +51,9 @@ def create_execution_mission_router(
     ] = None,
     expiration_policy: Optional[
         ExecutionMissionDeliveryExpirationPolicy
+    ] = None,
+    signer: Optional[
+        ExecutionMissionSigner
     ] = None,
 ) -> APIRouter:
     if not isinstance(
@@ -102,6 +108,17 @@ def create_execution_mission_router(
         raise TypeError(
             "expiration_policy must be "
             "ExecutionMissionDeliveryExpirationPolicy."
+        )
+
+    if (
+        signer is not None
+        and not isinstance(
+            signer,
+            ExecutionMissionSigner,
+        )
+    ):
+        raise TypeError(
+            "signer must be ExecutionMissionSigner."
         )
 
     require_trusted_agent = (
@@ -186,6 +203,13 @@ def create_execution_mission_router(
             "agent_id": authenticated_agent_id,
             **payload,
         }
+
+        if signer is not None:
+            response["mission_signature"] = (
+                signer.sign(
+                    mission
+                )
+            )
 
         if lease is not None:
             response["delivery_lease"] = {

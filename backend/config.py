@@ -100,6 +100,11 @@ TODOBA_TRUSTED_AGENT_SECRET = os.getenv(
     "",
 ).strip()
 
+TODOBA_EXECUTION_MISSION_SIGNING_SECRET = os.getenv(
+    "TODOBA_EXECUTION_MISSION_SIGNING_SECRET",
+    "",
+).strip()
+
 DEBUG = os.getenv(
     "DEBUG",
     "true",
@@ -181,6 +186,11 @@ def validate_trusted_agent_config() -> None:
         errors.append(
             "TODOBA_TRUSTED_AGENT_SECRET is required."
         )
+
+    if not TODOBA_EXECUTION_MISSION_SIGNING_SECRET:
+        errors.append(
+            "TODOBA_EXECUTION_MISSION_SIGNING_SECRET is required."
+       )   
 
     if errors:
         joined_errors = "\n- ".join(errors)

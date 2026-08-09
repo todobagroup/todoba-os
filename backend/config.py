@@ -52,6 +52,17 @@ def _read_float(
         ) from error
 
 
+TODOBA_API_HOST = os.getenv(
+    "TODOBA_API_HOST",
+    "127.0.0.1",
+).strip()
+
+TODOBA_API_PORT = _read_int(
+    "TODOBA_API_PORT",
+    8000,
+)
+
+
 TELEGRAM_API_ID = _read_int(
     "TELEGRAM_API_ID"
 )
@@ -166,7 +177,9 @@ def validate_telegram_config() -> None:
         )
 
     if errors:
-        joined_errors = "\n- ".join(errors)
+        joined_errors = "\n- ".join(
+            errors
+        )
 
         raise RuntimeError(
             "Invalid Telegram configuration:\n"
@@ -189,11 +202,14 @@ def validate_trusted_agent_config() -> None:
 
     if not TODOBA_EXECUTION_MISSION_SIGNING_SECRET:
         errors.append(
-            "TODOBA_EXECUTION_MISSION_SIGNING_SECRET is required."
-       )   
+            "TODOBA_EXECUTION_MISSION_SIGNING_SECRET "
+            "is required."
+        )
 
     if errors:
-        joined_errors = "\n- ".join(errors)
+        joined_errors = "\n- ".join(
+            errors
+        )
 
         raise RuntimeError(
             "Invalid Trusted Agent configuration:\n"

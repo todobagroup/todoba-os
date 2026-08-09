@@ -10,12 +10,17 @@ runtime capabilities.
 
 import uvicorn
 
+from backend.config import (
+    TODOBA_API_HOST,
+    TODOBA_API_PORT,
+)
+
 
 def main() -> None:
     uvicorn.run(
         "backend.main:app",
-        host="127.0.0.1",
-        port=8000,
+        host=TODOBA_API_HOST,
+        port=TODOBA_API_PORT,
         reload=False,
     )
 

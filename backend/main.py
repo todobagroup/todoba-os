@@ -9,12 +9,14 @@ from backend.brain.memory import memory_engine
 from backend.brain.models.experience import Experience
 from backend.brain_engine import brain_engine
 from backend.config import (
+    TODOBA_RUNTIME_MODE,
     TODOBA_TRUSTED_AGENT_ID,
     TODOBA_TRUSTED_AGENT_SECRET,
     TODOBA_EXECUTION_MISSION_SIGNING_SECRET,
 )
-from backend.runtime.runtime_bootstrap import (
-    RuntimeBootstrap,
+from backend.runtime.runtime_mode import (
+    RuntimeMode,
+    create_runtime,
 )
 from backend.runtime.todoba_runtime import (
     TODOBARuntime,
@@ -70,7 +72,6 @@ from backend.trading.execution.execution_mission_signer import (
 from backend.trading.execution.execution_mission_delivery_redelivery_processor import (
     ExecutionMissionDeliveryRedeliveryProcessor,
 )
-
 from backend.trading.execution.execution_mission_evidence_idempotency_registry import (
     ExecutionMissionEvidenceIdempotencyRegistry,
 )
@@ -128,7 +129,6 @@ from backend.trading.execution.execution_mission_record_retention_policy import 
 from backend.trading.execution.execution_mission_record_retention_scheduler import (
     ExecutionMissionRecordRetentionScheduler,
 )
-
 from backend.trading.execution.execution_mission_recovery import (
     ExecutionMissionRecovery,
 )
@@ -177,10 +177,10 @@ MISSION_DELIVERY_LEASE_STORAGE_PATH = (
 )
 
 
-runtime_bootstrap = RuntimeBootstrap()
-
-todoba_runtime: TODOBARuntime = (
-    runtime_bootstrap.create_runtime()
+todoba_runtime: TODOBARuntime = create_runtime(
+    RuntimeMode(
+        TODOBA_RUNTIME_MODE
+    )
 )
 
 
@@ -189,37 +189,38 @@ async def lifespan(
     app: FastAPI,
 ):
     execution_mission_record_recovery.restore()
-    
+
     execution_mission_recovery.restore()
 
     execution_mission_delivery_lease_recovery.restore()
 
     execution_mission_evidence_persistence.restore(
-    acknowledgement_store=(
-        execution_mission_acknowledgement_store
-    ),
-    execution_started_store=(
-        execution_mission_execution_started_store
-    ),
-    completed_store=(
-        execution_mission_completed_store
-    ),
-    failed_store=(
-        execution_mission_failed_store
-    ),
-    broker_evidence_store=(
-        broker_execution_evidence_store
-    ),
-    idempotency_registry=(
-        execution_mission_evidence_idempotency_registry
-    ),
-)
+        acknowledgement_store=(
+            execution_mission_acknowledgement_store
+        ),
+        execution_started_store=(
+            execution_mission_execution_started_store
+        ),
+        completed_store=(
+            execution_mission_completed_store
+        ),
+        failed_store=(
+            execution_mission_failed_store
+        ),
+        broker_evidence_store=(
+            broker_execution_evidence_store
+        ),
+        idempotency_registry=(
+            execution_mission_evidence_idempotency_registry
+        ),
+    )
 
     await todoba_runtime.start()
 
     yield
 
     await todoba_runtime.stop()
+
 
 app = FastAPI(
     lifespan=lifespan,
@@ -280,6 +281,7 @@ execution_mission_delivery_lease_recovery = (
         ),
     )
 )
+
 execution_mission_delivery_expiration_policy = (
     ExecutionMissionDeliveryExpirationPolicy()
 )
@@ -379,6 +381,7 @@ execution_mission_evidence_persistence = (
         MISSION_EVIDENCE_STORAGE_PATH
     )
 )
+
 execution_mission_evidence_idempotency_registry = (
     ExecutionMissionEvidenceIdempotencyRegistry()
 )
@@ -562,6 +565,7 @@ app.include_router(
         trusted_agent_authenticator,
     )
 )
+
 
 class ExperienceRequest(BaseModel):
     source: str

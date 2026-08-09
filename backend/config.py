@@ -62,6 +62,11 @@ TODOBA_API_PORT = _read_int(
     8000,
 )
 
+TODOBA_RUNTIME_MODE = os.getenv(
+    "TODOBA_RUNTIME_MODE",
+    "LOCAL_TRADING",
+).strip().upper()
+
 
 TELEGRAM_API_ID = _read_int(
     "TELEGRAM_API_ID"

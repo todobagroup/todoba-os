@@ -1,5 +1,5 @@
 // TODOBA Trusted Agent
-// Mission Signature Verification Upgrade
+// Production Cloud Endpoint Upgrade
 
 #property strict
 
@@ -11,15 +11,13 @@
 #include <TODOBAExecution/ExecutionEngine.mqh>
 #include <TODOBAExecution/ExecutionResult.mqh>
 
-
 #define TODOBA_AGENT_NAME "TODOBA Trusted Agent"
-#define TODOBA_AGENT_VERSION "1.5.0"
-
+#define TODOBA_AGENT_VERSION "1.6.0"
 
 input int PollIntervalSeconds = 5;
 
 input string CloudBaseUrl =
-   "http://127.0.0.1:8000";
+   "https://api.todobagroup.com";
 
 input string AgentId =
    "trusted-agent-001";
@@ -27,7 +25,6 @@ input string AgentId =
 input string AgentSecret = "";
 
 input string MissionSigningSecret = "";
-
 
 TODOBAExecutionMissionState current_mission_state;
 

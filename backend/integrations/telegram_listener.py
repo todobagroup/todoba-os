@@ -58,6 +58,9 @@ from backend.trading.execution.trade_task_execution_mission_adapter import (
 from backend.trading.profile.trading_profile import (
     TradingProfile,
 )
+from backend.trading.risk.position_sizing_engine import (
+    PositionSizingEngine,
+)
 from backend.trading.signal.incoming_signal import (
     IncomingSignal,
 )
@@ -264,6 +267,20 @@ def process_remote_vps_signal(
         remote_profile,
     )
 
+    sizing_result = (
+        PositionSizingEngine().evaluate(
+            account_equity=float(
+                broker_state["equity"]
+            ),
+        )
+    )
+
+    if not sizing_result.approved:
+        raise RuntimeError(
+            "Trade rejected by Stable Lot Policy: "
+            f"{sizing_result.reason}"
+        )
+
     created_at = datetime.now(
         UTC
     )
@@ -289,7 +306,7 @@ def process_remote_vps_signal(
         account_fingerprint=str(
             broker_state["account_fingerprint"]
         ),
-        volume=execution_plan.lot,
+        volume=sizing_result.volume,
         magic_number=execution_plan.magic_number,
         comment=execution_plan.comment,
         created_at=_to_utc_iso8601(

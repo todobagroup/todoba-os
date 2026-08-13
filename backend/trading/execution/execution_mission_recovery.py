@@ -1,15 +1,18 @@
 """
 TODOBA Execution Mission Recovery
 
-Restores execution missions after runtime restart.
+Restores eligible execution missions after runtime restart.
 
-This component:
+Responsibilities:
 
-- restores missions from persistence
-- verifies lifecycle record ownership
-- moves valid restored missions back to delivery queue
+- restore persisted missions
+- verify lifecycle record ownership
+- remove orphaned missions
+- remove terminal FAILED and COMPLETED missions
+- persist recovery cleanup
+- redeliver only eligible missions
 
-It does not:
+This component does not:
 
 - receive HTTP requests
 - execute broker orders
@@ -18,6 +21,9 @@ It does not:
 
 from typing import Optional
 
+from backend.trading.execution.execution_mission import (
+    ExecutionMission,
+)
 from backend.trading.execution.execution_mission_delivery_bridge import (
     ExecutionMissionDeliveryBridge,
 )
@@ -30,11 +36,14 @@ from backend.trading.execution.execution_mission_registry import (
 from backend.trading.execution.execution_mission_repository import (
     ExecutionMissionRepository,
 )
+from backend.trading.execution.execution_mission_status import (
+    ExecutionMissionStatus,
+)
 
 
 class ExecutionMissionRecovery:
     """
-    Recovery lifecycle for execution missions.
+    Recovery lifecycle for persisted execution missions.
     """
 
     def __init__(
@@ -91,10 +100,12 @@ class ExecutionMissionRecovery:
         self.delivery_bridge = delivery_bridge
         self.registry = registry
 
-    def restore(self) -> int:
+    def restore(
+        self,
+    ) -> int:
         """
-        Restore persisted missions and deliver only
-        missions that still own lifecycle records.
+        Restore persisted missions and redeliver only
+        missions that remain lifecycle eligible.
         """
 
         self.persistence.restore(
@@ -102,15 +113,19 @@ class ExecutionMissionRecovery:
         )
 
         restored = 0
+        repository_changed = False
 
         for mission in self.repository.all():
-            if (
-                self.registry is not None
-                and self.registry.get(
+            if self._must_remove(
+                mission
+            ):
+                removed = self.repository.remove(
                     mission.mission_id
                 )
-                is None
-            ):
+
+                if removed:
+                    repository_changed = True
+
                 continue
 
             self.delivery_bridge.deliver(
@@ -119,4 +134,28 @@ class ExecutionMissionRecovery:
 
             restored += 1
 
+        if repository_changed:
+            self.persistence.save(
+                self.repository
+            )
+
         return restored
+
+    def _must_remove(
+        self,
+        mission: ExecutionMission,
+    ) -> bool:
+        if self.registry is None:
+            return False
+
+        record = self.registry.get(
+            mission.mission_id
+        )
+
+        if record is None:
+            return True
+
+        return record.status in {
+            ExecutionMissionStatus.FAILED,
+            ExecutionMissionStatus.COMPLETED,
+        }

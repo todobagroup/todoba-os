@@ -1,45 +1,55 @@
-from pathlib import Path
-import sys
+"""
+TODOBA Execution Mission Injection API Tests
 
-ROOT_DIR = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT_DIR))
+Proof:
+
+Authenticated Executor
+->
+Execution Mission Injection API
+->
+ExecutionMissionService
+->
+Repository + Registry + Delivery Store
+"""
+
+import sys
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from backend.trading.execution.execution_mission_injection_api import (
-    create_execution_mission_injection_router,
-)
-
-from backend.trading.execution.execution_mission_service import (
-    ExecutionMissionService,
-)
-
-from backend.trading.execution.execution_mission_repository import (
-    ExecutionMissionRepository,
-)
-
-from backend.trading.execution.execution_mission_persistence import (
-    ExecutionMissionPersistence,
-)
+ROOT_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT_DIR))
 
 from backend.trading.execution.execution_mission_delivery_bridge import (
     ExecutionMissionDeliveryBridge,
 )
-
+from backend.trading.execution.execution_mission_injection_api import (
+    create_execution_mission_injection_router,
+)
+from backend.trading.execution.execution_mission_persistence import (
+    ExecutionMissionPersistence,
+)
+from backend.trading.execution.execution_mission_registry import (
+    ExecutionMissionRegistry,
+)
+from backend.trading.execution.execution_mission_repository import (
+    ExecutionMissionRepository,
+)
+from backend.trading.execution.execution_mission_service import (
+    ExecutionMissionService,
+)
 from backend.trading.execution.execution_mission_store import (
     ExecutionMissionStore,
 )
-
-from backend.trading.execution.execution_mission_registry import (
-    ExecutionMissionRegistry,
+from backend.trading.execution.executor_authenticator import (
+    ExecutorAuthenticator,
 )
 
 
 def test_inject_mission_uses_execution_service(
     tmp_path,
 ):
-
     repository = ExecutionMissionRepository()
 
     persistence = ExecutionMissionPersistence(
@@ -61,11 +71,17 @@ def test_inject_mission_uses_execution_service(
         registry,
     )
 
+    authenticator = ExecutorAuthenticator(
+        executor_id="telegram-executor-001",
+        executor_secret="test-secret",
+    )
+
     app = FastAPI()
 
     app.include_router(
         create_execution_mission_injection_router(
-            service
+            service,
+            authenticator,
         )
     )
 
@@ -73,6 +89,14 @@ def test_inject_mission_uses_execution_service(
 
     response = client.post(
         "/missions/inject",
+        headers={
+            "X-TODOBA-Executor-ID": (
+                "telegram-executor-001"
+            ),
+            "Authorization": (
+                "Bearer test-secret"
+            ),
+        },
         json={
             "mission_id": "service-api-001",
             "agent_id": "trusted-agent-001",
@@ -99,7 +123,5 @@ def test_inject_mission_uses_execution_service(
     }
 
     assert repository.size() == 1
-
     assert registry.size() == 1
-
     assert store.size() == 1

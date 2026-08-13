@@ -7,5 +7,10 @@ backend/**pycache**/
 todoba.session
 todoba.session-journal
 data/
+
 # MetaTrader build artifacts
 *.ex5
+MQL5/Experts/*.log
+
+# Local MQL5 credentials
+MQL5/Include/TODOBAExecution/TODOBAAgentCredentials.mqh

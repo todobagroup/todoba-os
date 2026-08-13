@@ -2,11 +2,16 @@ from pathlib import Path
 import sys
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT_DIR))
+sys.path.insert(
+    0,
+    str(
+        ROOT_DIR
+    ),
+)
 
 from fastapi.testclient import TestClient
 
-from backend.main import app
+from backend import main
 
 
 AGENT_ID = "trusted-agent-001"
@@ -18,9 +23,11 @@ AUTHENTICATION_HEADERS = {
 }
 
 
-def test_main_app_contains_failed_api() -> None:
+def test_main_app_contains_failed_api(
+    isolated_main_execution_mission_evidence: Path,
+) -> None:
     client = TestClient(
-        app
+        main.app
     )
 
     response = client.post(
@@ -36,3 +43,7 @@ def test_main_app_contains_failed_api() -> None:
     )
 
     assert response.status_code == 200
+
+    assert (
+        isolated_main_execution_mission_evidence.exists()
+    )

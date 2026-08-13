@@ -121,6 +121,16 @@ TODOBA_EXECUTION_MISSION_SIGNING_SECRET = os.getenv(
     "",
 ).strip()
 
+TODOBA_EXECUTOR_ID = os.getenv(
+    "TODOBA_EXECUTOR_ID",
+    "telegram-executor-001",
+).strip()
+
+TODOBA_EXECUTOR_SECRET = os.getenv(
+    "TODOBA_EXECUTOR_SECRET",
+    "",
+).strip()
+
 DEBUG = os.getenv(
     "DEBUG",
     "true",
@@ -158,12 +168,13 @@ def validate_telegram_config() -> None:
     allowed_modes = {
         "DRY_RUN",
         "LIVE_DEMO",
+        "REMOTE_VPS",
     }
 
     if TELEGRAM_EXECUTION_MODE not in allowed_modes:
         errors.append(
             "TELEGRAM_EXECUTION_MODE must be "
-            "DRY_RUN or LIVE_DEMO."
+            "DRY_RUN, LIVE_DEMO, or REMOTE_VPS."
         )
 
     if (

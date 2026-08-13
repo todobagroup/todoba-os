@@ -2,8 +2,6 @@ from datetime import datetime
 from datetime import timezone
 from pathlib import Path
 
-import pytest
-
 from backend.trading.execution.execution_mission import (
     ExecutionMission,
 )
@@ -77,26 +75,49 @@ def build_mission() -> ExecutionMission:
     )
 
 
-def build_lease(
+def build_case(
+    tmp_path: Path,
     *,
-    expires_at: str,
-) -> ExecutionMissionDeliveryLease:
-    return ExecutionMissionDeliveryLease(
+    lease_expires_at: str,
+    delivery_attempt_count: int,
+    include_mission: bool = True,
+) -> dict:
+    mission = build_mission()
+
+    repository = ExecutionMissionRepository()
+
+    if include_mission:
+        repository.save(
+            mission
+        )
+
+    store = ExecutionMissionStore()
+
+    lease_registry = (
+        ExecutionMissionDeliveryLeaseRegistry()
+    )
+
+    lease = ExecutionMissionDeliveryLease(
         mission_id=MISSION_ID,
         agent_id=AGENT_ID,
         leased_at="2026-08-08T12:00:00Z",
-        expires_at=expires_at,
+        expires_at=lease_expires_at,
     )
 
+    lease_registry.acquire(
+        lease
+    )
 
-def build_lifecycle_service(
-    *,
-    mission: ExecutionMission,
-    delivery_attempt_count: int,
-) -> tuple[
-    ExecutionMissionLifecycleService,
-    ExecutionMissionRegistry,
-]:
+    lease_persistence = (
+        ExecutionMissionDeliveryLeasePersistence(
+            tmp_path / "delivery_leases.json"
+        )
+    )
+
+    lease_persistence.save(
+        lease_registry
+    )
+
     mission_registry = ExecutionMissionRegistry()
 
     mission_registry.register(
@@ -104,341 +125,179 @@ def build_lifecycle_service(
             mission=mission,
             status=ExecutionMissionStatus.DELIVERED,
             delivered_at="2026-08-08T12:00:00Z",
-            delivery_attempt_count=delivery_attempt_count,
+            delivery_attempt_count=(
+                delivery_attempt_count
+            ),
         )
     )
 
-    return (
+    lifecycle_service = (
         ExecutionMissionLifecycleService(
             mission_registry
-        ),
-        mission_registry,
+        )
     )
 
-
-def build_processor(
-    *,
-    repository: ExecutionMissionRepository,
-    store: ExecutionMissionStore,
-    lease_registry: ExecutionMissionDeliveryLeaseRegistry,
-    lease_persistence: ExecutionMissionDeliveryLeasePersistence,
-    lifecycle_service: ExecutionMissionLifecycleService,
-    max_delivery_attempts: int = 3,
-) -> ExecutionMissionDeliveryRedeliveryProcessor:
-    delivery_bridge = ExecutionMissionDeliveryBridge(
-        store
+    processor = (
+        ExecutionMissionDeliveryRedeliveryProcessor(
+            repository=repository,
+            delivery_bridge=(
+                ExecutionMissionDeliveryBridge(
+                    store
+                )
+            ),
+            lease_registry=lease_registry,
+            clock=fixed_clock,
+            lease_persistence=lease_persistence,
+            lifecycle_service=lifecycle_service,
+            max_delivery_attempts=3,
+        )
     )
 
-    return ExecutionMissionDeliveryRedeliveryProcessor(
-        repository=repository,
-        delivery_bridge=delivery_bridge,
-        lease_registry=lease_registry,
-        clock=fixed_clock,
-        lease_persistence=lease_persistence,
-        lifecycle_service=lifecycle_service,
-        max_delivery_attempts=max_delivery_attempts,
+    return {
+        "mission": mission,
+        "repository": repository,
+        "store": store,
+        "lease": lease,
+        "lease_registry": lease_registry,
+        "lease_persistence": lease_persistence,
+        "mission_registry": mission_registry,
+        "processor": processor,
+    }
+
+
+def assert_no_persisted_lease(
+    case: dict,
+) -> None:
+    restored_registry = (
+        ExecutionMissionDeliveryLeaseRegistry()
     )
+
+    assert case[
+        "lease_persistence"
+    ].restore(
+        restored_registry
+    ) == 0
 
 
 def test_expired_lease_redelivers_when_attempts_remain(
     tmp_path: Path,
 ) -> None:
-    repository = ExecutionMissionRepository()
-
-    mission = build_mission()
-
-    repository.save(
-        mission
+    case = build_case(
+        tmp_path,
+        lease_expires_at="2026-08-08T12:00:30Z",
+        delivery_attempt_count=2,
     )
 
-    store = ExecutionMissionStore()
+    result = case["processor"].process_next()
 
-    lease_registry = (
-        ExecutionMissionDeliveryLeaseRegistry()
-    )
+    assert result == case["mission"]
+    assert case["store"].size() == 1
 
-    lease_registry.acquire(
-        build_lease(
-            expires_at="2026-08-08T12:00:30Z",
-        )
-    )
-
-    lease_persistence = (
-        ExecutionMissionDeliveryLeasePersistence(
-            tmp_path / "delivery_leases.json"
-        )
-    )
-
-    lease_persistence.save(
-        lease_registry
-    )
-
-    lifecycle_service, mission_registry = (
-        build_lifecycle_service(
-            mission=mission,
-            delivery_attempt_count=2,
-        )
-    )
-
-    processor = build_processor(
-        repository=repository,
-        store=store,
-        lease_registry=lease_registry,
-        lease_persistence=lease_persistence,
-        lifecycle_service=lifecycle_service,
-        max_delivery_attempts=3,
-    )
-
-    result = processor.process_next()
-
-    assert result == mission
-
-    assert store.size() == 1
-
-    assert lease_registry.get(
+    assert case["lease_registry"].get(
         MISSION_ID
     ) is None
 
-    record = mission_registry.get(
+    record = case["mission_registry"].get(
         MISSION_ID
     )
 
     assert record is not None
-
     assert record.status == (
         ExecutionMissionStatus.DELIVERED
     )
-
     assert record.delivery_attempt_count == 2
+
+    assert_no_persisted_lease(
+        case
+    )
 
 
 def test_expired_lease_fails_when_attempts_exhausted(
     tmp_path: Path,
 ) -> None:
-    repository = ExecutionMissionRepository()
-
-    mission = build_mission()
-
-    repository.save(
-        mission
+    case = build_case(
+        tmp_path,
+        lease_expires_at="2026-08-08T12:00:30Z",
+        delivery_attempt_count=3,
     )
 
-    store = ExecutionMissionStore()
-
-    lease_registry = (
-        ExecutionMissionDeliveryLeaseRegistry()
-    )
-
-    lease_registry.acquire(
-        build_lease(
-            expires_at="2026-08-08T12:00:30Z",
-        )
-    )
-
-    lease_persistence = (
-        ExecutionMissionDeliveryLeasePersistence(
-            tmp_path / "delivery_leases.json"
-        )
-    )
-
-    lease_persistence.save(
-        lease_registry
-    )
-
-    lifecycle_service, mission_registry = (
-        build_lifecycle_service(
-            mission=mission,
-            delivery_attempt_count=3,
-        )
-    )
-
-    processor = build_processor(
-        repository=repository,
-        store=store,
-        lease_registry=lease_registry,
-        lease_persistence=lease_persistence,
-        lifecycle_service=lifecycle_service,
-        max_delivery_attempts=3,
-    )
-
-    result = processor.process_next()
+    result = case["processor"].process_next()
 
     assert result is None
+    assert case["store"].size() == 0
 
-    assert store.size() == 0
-
-    assert lease_registry.get(
+    assert case["lease_registry"].get(
         MISSION_ID
     ) is None
 
-    record = mission_registry.get(
+    record = case["mission_registry"].get(
         MISSION_ID
     )
 
     assert record is not None
-
     assert record.status == (
         ExecutionMissionStatus.FAILED
     )
-
     assert record.failed_at == (
         "2026-08-08T12:01:00Z"
     )
-
     assert record.failure_reason == (
         "Delivery attempts exhausted."
     )
-
     assert record.delivery_attempt_count == 3
 
-    restored_registry = (
-        ExecutionMissionDeliveryLeaseRegistry()
+    assert_no_persisted_lease(
+        case
     )
-
-    assert lease_persistence.restore(
-        restored_registry
-    ) == 0
 
 
 def test_active_lease_is_not_redelivered_or_failed(
     tmp_path: Path,
 ) -> None:
-    repository = ExecutionMissionRepository()
-
-    mission = build_mission()
-
-    repository.save(
-        mission
+    case = build_case(
+        tmp_path,
+        lease_expires_at="2026-08-08T12:01:30Z",
+        delivery_attempt_count=3,
     )
 
-    store = ExecutionMissionStore()
-
-    lease_registry = (
-        ExecutionMissionDeliveryLeaseRegistry()
-    )
-
-    lease = build_lease(
-        expires_at="2026-08-08T12:01:30Z",
-    )
-
-    lease_registry.acquire(
-        lease
-    )
-
-    lease_persistence = (
-        ExecutionMissionDeliveryLeasePersistence(
-            tmp_path / "delivery_leases.json"
-        )
-    )
-
-    lease_persistence.save(
-        lease_registry
-    )
-
-    lifecycle_service, mission_registry = (
-        build_lifecycle_service(
-            mission=mission,
-            delivery_attempt_count=3,
-        )
-    )
-
-    processor = build_processor(
-        repository=repository,
-        store=store,
-        lease_registry=lease_registry,
-        lease_persistence=lease_persistence,
-        lifecycle_service=lifecycle_service,
-        max_delivery_attempts=3,
-    )
-
-    result = processor.process_next()
+    result = case["processor"].process_next()
 
     assert result is None
+    assert case["store"].size() == 0
 
-    assert store.size() == 0
-
-    assert lease_registry.get(
+    assert case["lease_registry"].get(
         MISSION_ID
-    ) == lease
+    ) == case["lease"]
 
-    record = mission_registry.get(
+    record = case["mission_registry"].get(
         MISSION_ID
     )
 
     assert record is not None
-
     assert record.status == (
         ExecutionMissionStatus.DELIVERED
     )
 
 
-def test_expired_lease_without_mission_keeps_persisted_lease(
+def test_expired_orphan_lease_is_released_without_error(
     tmp_path: Path,
 ) -> None:
-    repository = ExecutionMissionRepository()
-
-    mission = build_mission()
-
-    store = ExecutionMissionStore()
-
-    lease_registry = (
-        ExecutionMissionDeliveryLeaseRegistry()
+    case = build_case(
+        tmp_path,
+        lease_expires_at="2026-08-08T12:00:30Z",
+        delivery_attempt_count=1,
+        include_mission=False,
     )
 
-    lease = build_lease(
-        expires_at="2026-08-08T12:00:30Z",
-    )
+    result = case["processor"].process_next()
 
-    lease_registry.acquire(
-        lease
-    )
+    assert result is None
+    assert case["store"].size() == 0
 
-    lease_persistence = (
-        ExecutionMissionDeliveryLeasePersistence(
-            tmp_path / "delivery_leases.json"
-        )
-    )
-
-    lease_persistence.save(
-        lease_registry
-    )
-
-    lifecycle_service, _ = (
-        build_lifecycle_service(
-            mission=mission,
-            delivery_attempt_count=1,
-        )
-    )
-
-    processor = build_processor(
-        repository=repository,
-        store=store,
-        lease_registry=lease_registry,
-        lease_persistence=lease_persistence,
-        lifecycle_service=lifecycle_service,
-        max_delivery_attempts=3,
-    )
-
-    with pytest.raises(
-        ValueError,
-        match="Execution mission not found for redelivery.",
-    ):
-        processor.process_next()
-
-    assert store.size() == 0
-
-    assert lease_registry.get(
+    assert case["lease_registry"].get(
         MISSION_ID
-    ) == lease
+    ) is None
 
-    restored_registry = (
-        ExecutionMissionDeliveryLeaseRegistry()
+    assert_no_persisted_lease(
+        case
     )
-
-    assert lease_persistence.restore(
-        restored_registry
-    ) == 1
-
-    assert restored_registry.get(
-        MISSION_ID
-    ) == lease

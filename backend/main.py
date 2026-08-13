@@ -9,6 +9,8 @@ from backend.brain.memory import memory_engine
 from backend.brain.models.experience import Experience
 from backend.brain_engine import brain_engine
 from backend.config import (
+    TODOBA_EXECUTOR_ID,
+    TODOBA_EXECUTOR_SECRET,
     TODOBA_RUNTIME_MODE,
     TODOBA_TRUSTED_AGENT_ID,
     TODOBA_TRUSTED_AGENT_SECRET,
@@ -147,6 +149,15 @@ from backend.trading.execution.execution_mission_status_api import (
 from backend.trading.execution.execution_mission_store import (
     ExecutionMissionStore,
 )
+from backend.trading.execution.broker_state_api import (
+    create_broker_state_router,
+)
+from backend.trading.execution.broker_state_store import (
+    BrokerStateStore,
+)
+from backend.trading.execution.executor_authenticator import (
+    ExecutorAuthenticator,
+)
 from backend.trading.execution.trusted_agent_authenticator import (
     TrustedAgentAuthenticator,
 )
@@ -184,13 +195,54 @@ todoba_runtime: TODOBARuntime = create_runtime(
 )
 
 
+def _process_recovered_execution_mission_evidence(
+) -> int:
+    evidence_processors = (
+        (
+            execution_mission_acknowledgement_store,
+            execution_mission_acknowledgement_processor,
+        ),
+        (
+            execution_mission_execution_started_store,
+            execution_mission_execution_started_processor,
+        ),
+        (
+            broker_execution_evidence_store,
+            broker_execution_evidence_processor,
+        ),
+        (
+            execution_mission_completed_store,
+            execution_mission_completed_processor,
+        ),
+        (
+            execution_mission_failed_store,
+            execution_mission_failed_processor,
+        ),
+    )
+
+    processed = 0
+
+    while True:
+        processed_in_cycle = False
+
+        for store, processor in evidence_processors:
+            if store.size() == 0:
+                continue
+
+            processor.process_next()
+
+            processed += 1
+            processed_in_cycle = True
+
+        if not processed_in_cycle:
+            return processed
+
+
 @asynccontextmanager
 async def lifespan(
     app: FastAPI,
 ):
     execution_mission_record_recovery.restore()
-
-    execution_mission_recovery.restore()
 
     execution_mission_delivery_lease_recovery.restore()
 
@@ -215,6 +267,10 @@ async def lifespan(
         ),
     )
 
+    _process_recovered_execution_mission_evidence()
+
+    execution_mission_recovery.restore()
+
     await todoba_runtime.start()
 
     yield
@@ -231,6 +287,12 @@ trusted_agent_authenticator = (
     TrustedAgentAuthenticator(
         agent_id=TODOBA_TRUSTED_AGENT_ID,
         agent_secret=TODOBA_TRUSTED_AGENT_SECRET,
+    )
+)
+executor_authenticator = (
+    ExecutorAuthenticator(
+        executor_id=TODOBA_EXECUTOR_ID,
+        executor_secret=TODOBA_EXECUTOR_SECRET,
     )
 )
 
@@ -253,6 +315,10 @@ execution_mission_persistence = (
 
 execution_mission_store = (
     ExecutionMissionStore()
+)
+
+broker_state_store = (
+    BrokerStateStore()
 )
 
 execution_mission_delivery_bridge = (
@@ -417,6 +483,12 @@ execution_mission_lifecycle_service = (
         execution_mission_record_persistence,
         repository=execution_mission_repository,
         mission_persistence=execution_mission_persistence,
+        lease_registry=(
+            execution_mission_delivery_lease_registry
+        ),
+        lease_persistence=(
+            execution_mission_delivery_lease_persistence
+        ),
     )
 )
 
@@ -507,6 +579,13 @@ todoba_runtime.register(
     stop=execution_mission_record_retention_scheduler.stop,
 )
 
+app.include_router(
+    create_broker_state_router(
+        store=broker_state_store,
+        authenticator=trusted_agent_authenticator,
+    )
+)
+
 
 app.include_router(
     create_execution_mission_router(
@@ -521,7 +600,8 @@ app.include_router(
 
 app.include_router(
     create_execution_mission_injection_router(
-        execution_mission_service
+        execution_mission_service,
+        executor_authenticator,
     )
 )
 

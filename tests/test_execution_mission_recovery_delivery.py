@@ -1,28 +1,17 @@
 """
 TODOBA Execution Mission Recovery Delivery Tests
 
-Proves:
+Proves that recovery:
 
-Persisted Mission
-↓
-Recovery
-↓
-Delivery Bridge
-↓
-Recovered Mission delivered
-
-Also proves:
-
-Persisted Mission
-+
-Missing Lifecycle Record
-↓
-Recovery
-↓
-Mission must not be delivered
+- restores valid persisted missions
+- rejects missions without lifecycle ownership
+- removes terminal FAILED and COMPLETED missions
+- never redelivers terminal missions
 """
 
 from pathlib import Path
+
+import pytest
 
 from backend.trading.execution.execution_mission import (
     ExecutionMission,
@@ -33,6 +22,9 @@ from backend.trading.execution.execution_mission_delivery_bridge import (
 from backend.trading.execution.execution_mission_persistence import (
     ExecutionMissionPersistence,
 )
+from backend.trading.execution.execution_mission_record import (
+    ExecutionMissionRecord,
+)
 from backend.trading.execution.execution_mission_recovery import (
     ExecutionMissionRecovery,
 )
@@ -41,6 +33,9 @@ from backend.trading.execution.execution_mission_registry import (
 )
 from backend.trading.execution.execution_mission_repository import (
     ExecutionMissionRepository,
+)
+from backend.trading.execution.execution_mission_status import (
+    ExecutionMissionStatus,
 )
 from backend.trading.execution.execution_mission_store import (
     ExecutionMissionStore,
@@ -68,6 +63,54 @@ def build_mission(
     )
 
 
+def build_recovery(
+    *,
+    persistence: ExecutionMissionPersistence,
+    registry: ExecutionMissionRegistry | None = None,
+) -> tuple[
+    ExecutionMissionRecovery,
+    ExecutionMissionRepository,
+    ExecutionMissionStore,
+]:
+    repository = ExecutionMissionRepository()
+    store = ExecutionMissionStore()
+
+    recovery = ExecutionMissionRecovery(
+        repository=repository,
+        persistence=persistence,
+        delivery_bridge=(
+            ExecutionMissionDeliveryBridge(
+                store
+            )
+        ),
+        registry=registry,
+    )
+
+    return recovery, repository, store
+
+
+def persist_mission(
+    *,
+    tmp_path: Path,
+    mission: ExecutionMission,
+) -> ExecutionMissionPersistence:
+    repository = ExecutionMissionRepository()
+
+    repository.save(
+        mission
+    )
+
+    persistence = ExecutionMissionPersistence(
+        tmp_path / "missions.json"
+    )
+
+    persistence.save(
+        repository
+    )
+
+    return persistence
+
+
 def test_execution_mission_recovery_delivery(
     tmp_path: Path,
 ) -> None:
@@ -75,101 +118,107 @@ def test_execution_mission_recovery_delivery(
         "proof060-001"
     )
 
-    repository = ExecutionMissionRepository()
-
-    repository.save(
-        mission
+    persistence = persist_mission(
+        tmp_path=tmp_path,
+        mission=mission,
     )
 
-    persistence = ExecutionMissionPersistence(
-        tmp_path / "missions.json"
-    )
-
-    persistence.save(
-        repository
-    )
-
-    restored_repository = (
-        ExecutionMissionRepository()
-    )
-
-    store = ExecutionMissionStore()
-
-    delivery_bridge = (
-        ExecutionMissionDeliveryBridge(
-            store
-        )
-    )
-
-    recovery = ExecutionMissionRecovery(
-        repository=restored_repository,
-        persistence=persistence,
-        delivery_bridge=delivery_bridge,
+    recovery, _, store = build_recovery(
+        persistence=persistence
     )
 
     restored = recovery.restore()
 
     assert restored == 1
-
     assert store.size() == 1
 
     recovered = store.pop()
 
     assert recovered is not None
-
-    assert recovered.mission_id == (
-        "proof060-001"
-    )
-
-    assert recovered.agent_id == (
-        "agent-001"
-    )
+    assert recovered.mission_id == mission.mission_id
+    assert recovered.agent_id == mission.agent_id
 
 
-def test_recovery_does_not_deliver_mission_without_lifecycle_record(
+def test_recovery_removes_mission_without_lifecycle_record(
     tmp_path: Path,
 ) -> None:
     mission = build_mission(
         "recovery-orphan-001"
     )
 
-    repository = ExecutionMissionRepository()
-
-    repository.save(
-        mission
+    persistence = persist_mission(
+        tmp_path=tmp_path,
+        mission=mission,
     )
 
-    persistence = ExecutionMissionPersistence(
-        tmp_path / "missions.json"
+    recovery, repository, store = build_recovery(
+        persistence=persistence,
+        registry=ExecutionMissionRegistry(),
     )
 
-    persistence.save(
-        repository
-    )
+    restored = recovery.restore()
 
-    restored_repository = (
+    assert restored == 0
+    assert store.size() == 0
+    assert repository.get(
+        mission.mission_id
+    ) is None
+
+    persisted_repository = (
         ExecutionMissionRepository()
+    )
+
+    assert persistence.restore(
+        persisted_repository
+    ) == 0
+
+
+@pytest.mark.parametrize(
+    "terminal_status",
+    [
+        ExecutionMissionStatus.FAILED,
+        ExecutionMissionStatus.COMPLETED,
+    ],
+)
+def test_recovery_removes_terminal_mission_without_redelivery(
+    tmp_path: Path,
+    terminal_status: ExecutionMissionStatus,
+) -> None:
+    mission = build_mission(
+        f"terminal-{terminal_status.value}"
+    )
+
+    persistence = persist_mission(
+        tmp_path=tmp_path,
+        mission=mission,
     )
 
     registry = ExecutionMissionRegistry()
 
-    store = ExecutionMissionStore()
-
-    delivery_bridge = (
-        ExecutionMissionDeliveryBridge(
-            store
+    registry.register(
+        ExecutionMissionRecord(
+            mission=mission,
+            status=terminal_status,
         )
     )
 
-    recovery = ExecutionMissionRecovery(
-        repository=restored_repository,
+    recovery, repository, store = build_recovery(
         persistence=persistence,
-        delivery_bridge=delivery_bridge,
         registry=registry,
     )
 
     restored = recovery.restore()
 
     assert restored == 0
-
     assert store.size() == 0
+    assert repository.get(
+        mission.mission_id
+    ) is None
+
+    persisted_repository = (
+        ExecutionMissionRepository()
+    )
+
+    assert persistence.restore(
+        persisted_repository
+    ) == 0

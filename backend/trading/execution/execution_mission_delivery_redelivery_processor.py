@@ -8,12 +8,12 @@ Responsibilities:
 
 - inspect active delivery leases
 - detect expired leases
+- release orphaned leases safely
 - enforce bounded delivery attempts
 - recover the original execution mission
 - redeliver the mission when attempts remain
 - fail the mission when attempts are exhausted
-- release expired delivery leases
-- persist remaining delivery leases when configured
+- persist remaining delivery leases
 
 This component does not:
 
@@ -198,9 +198,11 @@ class ExecutionMissionDeliveryRedeliveryProcessor:
             )
 
             if mission is None:
-                raise ValueError(
-                    "Execution mission not found for redelivery."
+                self._release_lease(
+                    lease.mission_id
                 )
+
+                return None
 
             if self._delivery_attempts_exhausted(
                 mission.mission_id

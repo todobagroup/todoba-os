@@ -5,4 +5,4 @@ python-dotenv
 telethon
 MetaTrader5
 pytest
-httpx2
+httpx

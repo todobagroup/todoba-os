@@ -3,16 +3,10 @@ import asyncio
 from backend import main
 
 
-def test_main_restores_evidence_before_runtime_start(
+def test_main_converges_evidence_before_mission_delivery(
     monkeypatch,
 ) -> None:
     calls: list[str] = []
-
-    def restore_missions() -> int:
-        calls.append(
-            "missions"
-        )
-        return 0
 
     def restore_records() -> int:
         calls.append(
@@ -56,6 +50,18 @@ def test_main_restores_evidence_before_runtime_start(
 
         return 0
 
+    def process_recovered_evidence() -> int:
+        calls.append(
+            "evidence_processing"
+        )
+        return 0
+
+    def restore_missions() -> int:
+        calls.append(
+            "missions"
+        )
+        return 0
+
     async def start_runtime() -> None:
         calls.append(
             "runtime_start"
@@ -65,12 +71,6 @@ def test_main_restores_evidence_before_runtime_start(
         calls.append(
             "runtime_stop"
         )
-
-    monkeypatch.setattr(
-        main.execution_mission_recovery,
-        "restore",
-        restore_missions,
-    )
 
     monkeypatch.setattr(
         main.execution_mission_record_recovery,
@@ -91,6 +91,18 @@ def test_main_restores_evidence_before_runtime_start(
     )
 
     monkeypatch.setattr(
+        main,
+        "_process_recovered_execution_mission_evidence",
+        process_recovered_evidence,
+    )
+
+    monkeypatch.setattr(
+        main.execution_mission_recovery,
+        "restore",
+        restore_missions,
+    )
+
+    monkeypatch.setattr(
         main.todoba_runtime,
         "start",
         start_runtime,
@@ -108,9 +120,10 @@ def test_main_restores_evidence_before_runtime_start(
         ):
             assert calls == [
                 "records",
-                "missions",
                 "delivery_leases",
                 "evidence",
+                "evidence_processing",
+                "missions",
                 "runtime_start",
             ]
 
@@ -120,9 +133,10 @@ def test_main_restores_evidence_before_runtime_start(
 
     assert calls == [
         "records",
-        "missions",
         "delivery_leases",
         "evidence",
+        "evidence_processing",
+        "missions",
         "runtime_start",
         "runtime_stop",
     ]

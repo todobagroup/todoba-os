@@ -1,45 +1,55 @@
+"""
+TODOBA Execution Mission Persistent Injection Tests
+
+Proof:
+
+Authenticated Executor
+->
+Execution Mission Injection API
+->
+ExecutionMissionService
+->
+Persistent Repository Storage
+"""
+
 import sys
 from pathlib import Path
-
-ROOT_DIR = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT_DIR))
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from backend.trading.execution.execution_mission_injection_api import (
-    create_execution_mission_injection_router,
-)
-
-from backend.trading.execution.execution_mission_service import (
-    ExecutionMissionService,
-)
-
-from backend.trading.execution.execution_mission_repository import (
-    ExecutionMissionRepository,
-)
-
-from backend.trading.execution.execution_mission_persistence import (
-    ExecutionMissionPersistence,
-)
+ROOT_DIR = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT_DIR))
 
 from backend.trading.execution.execution_mission_delivery_bridge import (
     ExecutionMissionDeliveryBridge,
 )
-
+from backend.trading.execution.execution_mission_injection_api import (
+    create_execution_mission_injection_router,
+)
+from backend.trading.execution.execution_mission_persistence import (
+    ExecutionMissionPersistence,
+)
+from backend.trading.execution.execution_mission_registry import (
+    ExecutionMissionRegistry,
+)
+from backend.trading.execution.execution_mission_repository import (
+    ExecutionMissionRepository,
+)
+from backend.trading.execution.execution_mission_service import (
+    ExecutionMissionService,
+)
 from backend.trading.execution.execution_mission_store import (
     ExecutionMissionStore,
 )
-
-from backend.trading.execution.execution_mission_registry import (
-    ExecutionMissionRegistry,
+from backend.trading.execution.executor_authenticator import (
+    ExecutorAuthenticator,
 )
 
 
 def test_persistent_mission_injection_saves_repository(
     tmp_path,
 ):
-
     repository = ExecutionMissionRepository()
 
     persistence = ExecutionMissionPersistence(
@@ -61,11 +71,17 @@ def test_persistent_mission_injection_saves_repository(
         registry,
     )
 
+    authenticator = ExecutorAuthenticator(
+        executor_id="telegram-executor-001",
+        executor_secret="test-secret",
+    )
+
     app = FastAPI()
 
     app.include_router(
         create_execution_mission_injection_router(
-            service
+            service,
+            authenticator,
         )
     )
 
@@ -73,6 +89,14 @@ def test_persistent_mission_injection_saves_repository(
 
     response = client.post(
         "/missions/inject",
+        headers={
+            "X-TODOBA-Executor-ID": (
+                "telegram-executor-001"
+            ),
+            "Authorization": (
+                "Bearer test-secret"
+            ),
+        },
         json={
             "mission_id": "persistent-001",
             "agent_id": "trusted-agent-001",
@@ -99,7 +123,6 @@ def test_persistent_mission_injection_saves_repository(
     }
 
     assert repository.size() == 1
-
     assert registry.size() == 1
 
     restored_repository = (

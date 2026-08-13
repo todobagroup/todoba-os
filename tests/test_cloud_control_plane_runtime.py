@@ -128,9 +128,17 @@ def test_local_trading_mode_preserves_runtime_bootstrap(
 def test_runtime_mode_defaults_to_local_trading(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    import dotenv
+
     monkeypatch.delenv(
         "TODOBA_RUNTIME_MODE",
         raising=False,
+    )
+
+    monkeypatch.setattr(
+        dotenv,
+        "load_dotenv",
+        lambda *args, **kwargs: False,
     )
 
     import backend.config as config

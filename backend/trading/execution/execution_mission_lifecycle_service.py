@@ -3,23 +3,30 @@ TODOBA Execution Mission Lifecycle Service
 
 Coordinates execution mission lifecycle updates.
 
-This component owns:
+Responsibilities:
 
-- lifecycle state transitions
-- delivery attempt tracking
-- mission record persistence after transitions
-- terminal mission repository cleanup
-- mission repository persistence after terminal cleanup
+- own lifecycle state transitions
+- track delivery attempts
+- persist mission records
+- remove terminal missions
+- release terminal delivery leases
+- persist terminal cleanup
 
 This component does not:
 
 - receive HTTP requests
-- store acknowledgement evidence
+- store execution evidence
 - execute broker orders
 """
 
 from typing import Optional
 
+from backend.trading.execution.execution_mission_delivery_lease_persistence import (
+    ExecutionMissionDeliveryLeasePersistence,
+)
+from backend.trading.execution.execution_mission_delivery_lease_registry import (
+    ExecutionMissionDeliveryLeaseRegistry,
+)
 from backend.trading.execution.execution_mission_persistence import (
     ExecutionMissionPersistence,
 )
@@ -57,6 +64,12 @@ class ExecutionMissionLifecycleService:
         ] = None,
         mission_persistence: Optional[
             ExecutionMissionPersistence
+        ] = None,
+        lease_registry: Optional[
+            ExecutionMissionDeliveryLeaseRegistry
+        ] = None,
+        lease_persistence: Optional[
+            ExecutionMissionDeliveryLeasePersistence
         ] = None,
     ) -> None:
         if not isinstance(
@@ -105,6 +118,30 @@ class ExecutionMissionLifecycleService:
             )
 
         if (
+            lease_registry is not None
+            and not isinstance(
+                lease_registry,
+                ExecutionMissionDeliveryLeaseRegistry,
+            )
+        ):
+            raise TypeError(
+                "lease_registry must be "
+                "ExecutionMissionDeliveryLeaseRegistry."
+            )
+
+        if (
+            lease_persistence is not None
+            and not isinstance(
+                lease_persistence,
+                ExecutionMissionDeliveryLeasePersistence,
+            )
+        ):
+            raise TypeError(
+                "lease_persistence must be "
+                "ExecutionMissionDeliveryLeasePersistence."
+            )
+
+        if (
             mission_persistence is not None
             and repository is None
         ):
@@ -112,10 +149,20 @@ class ExecutionMissionLifecycleService:
                 "mission_persistence requires repository."
             )
 
+        if (
+            lease_persistence is not None
+            and lease_registry is None
+        ):
+            raise ValueError(
+                "lease_persistence requires lease_registry."
+            )
+
         self.registry = registry
         self.record_persistence = record_persistence
         self.repository = repository
         self.mission_persistence = mission_persistence
+        self.lease_registry = lease_registry
+        self.lease_persistence = lease_persistence
 
     def _persist_records(
         self,
@@ -129,20 +176,31 @@ class ExecutionMissionLifecycleService:
         self,
         mission_id: str,
     ) -> None:
-        if self.repository is None:
-            return
-
-        removed = self.repository.remove(
-            mission_id
-        )
-
-        if (
-            removed
-            and self.mission_persistence is not None
-        ):
-            self.mission_persistence.save(
-                self.repository
+        if self.repository is not None:
+            removed_mission = self.repository.remove(
+                mission_id
             )
+
+            if (
+                removed_mission
+                and self.mission_persistence is not None
+            ):
+                self.mission_persistence.save(
+                    self.repository
+                )
+
+        if self.lease_registry is not None:
+            released_lease = self.lease_registry.release(
+                mission_id
+            )
+
+            if (
+                released_lease is not None
+                and self.lease_persistence is not None
+            ):
+                self.lease_persistence.save(
+                    self.lease_registry
+                )
 
     def mark_delivered(
         self,
@@ -163,7 +221,6 @@ class ExecutionMissionLifecycleService:
         )
 
         record.delivered_at = delivered_at
-
         record.delivery_attempt_count += 1
 
         self._persist_records()
@@ -266,7 +323,6 @@ class ExecutionMissionLifecycleService:
         )
 
         record.failed_at = failed_at
-
         record.failure_reason = failure_reason
 
         self._persist_records()

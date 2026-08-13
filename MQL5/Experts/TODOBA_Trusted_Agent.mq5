@@ -7,24 +7,26 @@
 #include <TODOBAExecution/ExecutionMissionSignatureVerifier.mqh>
 #include <TODOBAExecution/ExecutionMissionValidator.mqh>
 #include <TODOBAExecution/ExecutionPermissionGuard.mqh>
+#include <TODOBAExecution/ExecutionSafetyGuard.mqh>
+#include <TODOBAExecution/BrokerStateReader.mqh>
+#include <TODOBAExecution/TODOBAAgentCredentials.mqh>
 #include <TODOBAExecution/ExecutionMissionState.mqh>
 #include <TODOBAExecution/ExecutionEngine.mqh>
 #include <TODOBAExecution/ExecutionResult.mqh>
 
 #define TODOBA_AGENT_NAME "TODOBA Trusted Agent"
-#define TODOBA_AGENT_VERSION "1.6.0"
-
+#define TODOBA_AGENT_VERSION "1.6.8"
 input int PollIntervalSeconds = 5;
 
+input double MaxSpreadPoints = 100.0;
+
+input int MaxOpenTrades = 10;
+
 input string CloudBaseUrl =
-   "https://api.todobagroup.com";
+"https://api.todobagroup.com";
 
 input string AgentId =
    "trusted-agent-001";
-
-input string AgentSecret = "";
-
-input string MissionSigningSecret = "";
 
 TODOBAExecutionMissionState current_mission_state;
 
@@ -40,7 +42,7 @@ string BuildAuthenticationHeaders(
       + AgentId
       + "\r\n"
       + "Authorization: Bearer "
-      + AgentSecret
+      + TODOBA_AGENT_SECRET
       + "\r\n";
 
    if(include_content_type)
@@ -53,21 +55,174 @@ string BuildAuthenticationHeaders(
 }
 
 
-void SendAcknowledgement(
-   TODOBAExecutionMission &mission
+string UtcNowIso8601()
+{
+   MqlDateTime value;
+
+   TimeToStruct(
+      TimeGMT(),
+      value
+   );
+
+   return StringFormat(
+      "%04d-%02d-%02dT%02d:%02d:%02dZ",
+      value.year,
+      value.mon,
+      value.day,
+      value.hour,
+      value.min,
+      value.sec
+   );
+}
+
+
+string EscapeJsonString(
+   string value
+)
+{
+   StringReplace(
+      value,
+      "\\",
+      "\\\\"
+   );
+
+   StringReplace(
+      value,
+      "\"",
+      "\\\""
+   );
+
+   StringReplace(
+      value,
+      "\r",
+      "\\r"
+   );
+
+   StringReplace(
+      value,
+      "\n",
+      "\\n"
+   );
+
+   StringReplace(
+      value,
+      "\t",
+      "\\t"
+   );
+
+   return value;
+}
+
+
+bool PostJson(
+   const string endpoint,
+   const string payload
 )
 {
    string url =
       CloudBaseUrl
-      + "/missions/acknowledge";
+      + endpoint;
+
+   char request_body[];
+
+   int request_size =
+      StringToCharArray(
+         payload,
+         request_body,
+         0,
+         WHOLE_ARRAY,
+         CP_UTF8
+      );
+
+   if(request_size <= 1)
+   {
+      Print(
+         "TODOBA POST payload conversion failed: ",
+         endpoint
+      );
+
+      return false;
+   }
+
+   ArrayResize(
+      request_body,
+      request_size - 1
+   );
+
+   char response_body[];
+
+   string response_headers;
+
+   ResetLastError();
+
+   int status_code =
+      WebRequest(
+         "POST",
+         url,
+         BuildAuthenticationHeaders(
+            true
+         ),
+         3000,
+         request_body,
+         response_body,
+         response_headers
+      );
+
+   int error_code =
+      GetLastError();
+
+   string response_text =
+      CharArrayToString(
+         response_body,
+         0,
+         WHOLE_ARRAY,
+         CP_UTF8
+      );
+
+   if(status_code != 200)
+   {
+      Print(
+         "TODOBA POST failed: endpoint=",
+         endpoint,
+         " HTTP=",
+         status_code,
+         " error=",
+         error_code,
+         " response=",
+         response_text
+      );
+
+      return false;
+   }
+
+   Print(
+      "TODOBA POST succeeded: endpoint=",
+      endpoint,
+      " HTTP=",
+      status_code
+   );
+
+   return true;
+}
+
+void SendAcknowledgement(
+   TODOBAExecutionMission &mission
+)
+{
+   string acknowledged_at =
+      UtcNowIso8601();
 
    string payload =
       "{"
       "\"mission_id\":\""
-      + mission.mission_id
+      + EscapeJsonString(
+         mission.mission_id
+      )
       + "\","
       "\"agent_id\":\""
-      + mission.agent_id
+      + EscapeJsonString(
+         mission.agent_id
+      )
       + "\","
       "\"sequence\":"
       + IntegerToString(
@@ -76,31 +231,13 @@ void SendAcknowledgement(
       + ","
       "\"status\":\"ACCEPTED\","
       "\"acknowledged_at\":\""
-      "2026-08-06T00:00:00Z"
-      "\""
+      + acknowledged_at
+      + "\""
       "}";
 
-   char request_body[];
-
-   StringToCharArray(
-      payload,
-      request_body
-   );
-
-   char response_body[];
-
-   string response_headers;
-
-   WebRequest(
-      "POST",
-      url,
-      BuildAuthenticationHeaders(
-         true
-      ),
-      3000,
-      request_body,
-      response_body,
-      response_headers
+   PostJson(
+      "/missions/acknowledge",
+      payload
    );
 }
 
@@ -109,17 +246,20 @@ void SendExecutionStarted(
    TODOBAExecutionMission &mission
 )
 {
-   string url =
-      CloudBaseUrl
-      + "/missions/execution_started";
+   string started_at =
+      UtcNowIso8601();
 
    string payload =
       "{"
       "\"mission_id\":\""
-      + mission.mission_id
+      + EscapeJsonString(
+         mission.mission_id
+      )
       + "\","
       "\"agent_id\":\""
-      + mission.agent_id
+      + EscapeJsonString(
+         mission.agent_id
+      )
       + "\","
       "\"sequence\":"
       + IntegerToString(
@@ -127,50 +267,33 @@ void SendExecutionStarted(
       )
       + ","
       "\"started_at\":\""
-      "2026-08-05T00:00:00Z"
-      "\""
+      + started_at
+      + "\""
       "}";
 
-   char request_body[];
-
-   StringToCharArray(
-      payload,
-      request_body
-   );
-
-   char response_body[];
-
-   string response_headers;
-
-   WebRequest(
-      "POST",
-      url,
-      BuildAuthenticationHeaders(
-         true
-      ),
-      3000,
-      request_body,
-      response_body,
-      response_headers
+   PostJson(
+      "/missions/execution_started",
+      payload
    );
 }
-
-
 void SendCompleted(
    TODOBAExecutionMission &mission
 )
 {
-   string url =
-      CloudBaseUrl
-      + "/missions/completed";
+   string completed_at =
+      UtcNowIso8601();
 
    string payload =
       "{"
       "\"mission_id\":\""
-      + mission.mission_id
+      + EscapeJsonString(
+         mission.mission_id
+      )
       + "\","
       "\"agent_id\":\""
-      + mission.agent_id
+      + EscapeJsonString(
+         mission.agent_id
+      )
       + "\","
       "\"sequence\":"
       + IntegerToString(
@@ -178,53 +301,40 @@ void SendCompleted(
       )
       + ","
       "\"completed_at\":\""
-      "2026-08-02T00:05:00"
-      "\""
+      + completed_at
+      + "\""
       "}";
 
-   char request_body[];
-
-   StringToCharArray(
-      payload,
-      request_body
-   );
-
-   char response_body[];
-
-   string response_headers;
-
-   WebRequest(
-      "POST",
-      url,
-      BuildAuthenticationHeaders(
-         true
-      ),
-      3000,
-      request_body,
-      response_body,
-      response_headers
-   );
-
-   current_mission_state.Complete();
+   if(
+      PostJson(
+         "/missions/completed",
+         payload
+      )
+   )
+   {
+      current_mission_state.Complete();
+   }
 }
-
 
 void SendFailed(
    TODOBAExecutionMission &mission,
    string reason
 )
 {
-   string url =
-      CloudBaseUrl
-      + "/missions/failed";
+   string failed_at =
+      UtcNowIso8601();
 
    string payload =
       "{"
       "\"mission_id\":\""
-      + mission.mission_id
+      + EscapeJsonString(
+         mission.mission_id
+      )
       + "\","
       "\"agent_id\":\""
-      + mission.agent_id
+      + EscapeJsonString(
+         mission.agent_id
+      )
       + "\","
       "\"sequence\":"
       + IntegerToString(
@@ -232,55 +342,46 @@ void SendFailed(
       )
       + ","
       "\"failed_at\":\""
-      "2026-08-02T00:05:00\","
+      + failed_at
+      + "\","
       "\"failure_reason\":\""
-      + reason
+      + EscapeJsonString(
+         reason
+      )
       + "\""
       "}";
 
-   char request_body[];
-
-   StringToCharArray(
-      payload,
-      request_body
-   );
-
-   char response_body[];
-
-   string response_headers;
-
-   WebRequest(
-      "POST",
-      url,
-      BuildAuthenticationHeaders(
-         true
-      ),
-      3000,
-      request_body,
-      response_body,
-      response_headers
-   );
-
-   current_mission_state.Fail();
+   if(
+      PostJson(
+         "/missions/failed",
+         payload
+      )
+   )
+   {
+      current_mission_state.Fail();
+   }
 }
 
 
-void SendBrokerEvidence(
+bool SendBrokerEvidence(
    TODOBAExecutionMission &mission,
    TODOBAExecutionResult &result
 )
 {
-   string url =
-      CloudBaseUrl
-      + "/broker/evidence";
+   string completed_at =
+      UtcNowIso8601();
 
    string payload =
       "{"
       "\"mission_id\":\""
-      + mission.mission_id
+      + EscapeJsonString(
+         mission.mission_id
+      )
       + "\","
       "\"agent_id\":\""
-      + mission.agent_id
+      + EscapeJsonString(
+         mission.agent_id
+      )
       + "\","
       "\"success\":"
       + (
@@ -311,38 +412,102 @@ void SendBrokerEvidence(
       )
       + ","
       "\"comment\":\""
-      + result.comment
+      + EscapeJsonString(
+         result.comment
+      )
       + "\","
       "\"completed_at\":\""
-      "2026-08-04T00:00:00Z"
-      "\""
+      + completed_at
+      + "\""
       "}";
 
-   char request_body[];
-
-   StringToCharArray(
-      payload,
-      request_body
-   );
-
-   char response_body[];
-
-   string response_headers;
-
-   WebRequest(
-      "POST",
-      url,
-      BuildAuthenticationHeaders(
-         true
-      ),
-      3000,
-      request_body,
-      response_body,
-      response_headers
+      return PostJson(
+      "/broker/evidence",
+      payload
    );
 }
 
 
+void SendBrokerState()
+{
+   TODOBABrokerState state;
+
+   if(
+      !TODOBABrokerStateReader::Read(
+         "XAUUSD",
+         state
+      )
+   )
+   {
+      Print(
+         "TODOBA Broker State: read failed."
+      );
+
+      return;
+   }
+
+   string payload =
+      "{"
+      "\"account_fingerprint\":\""
+      + EscapeJsonString(
+         state.account_fingerprint
+      )
+      + "\","
+      "\"equity\":"
+      + DoubleToString(
+         state.equity,
+         2
+      )
+      + ","
+      "\"open_position_count\":"
+      + IntegerToString(
+         state.open_position_count
+      )
+      + ","
+      "\"symbol\":\""
+      + EscapeJsonString(
+         state.symbol
+      )
+      + "\","
+      "\"bid\":"
+      + DoubleToString(
+         state.bid,
+         8
+      )
+      + ","
+      "\"ask\":"
+      + DoubleToString(
+         state.ask,
+         8
+      )
+      + ","
+      "\"spread_points\":"
+      + DoubleToString(
+         state.spread_points,
+         2
+      )
+      + "}";
+
+   bool published =
+      PostJson(
+         "/broker/state",
+         payload
+      );
+
+   if(!published)
+      return;
+
+   Print(
+      "TODOBA Broker State published: ",
+      state.account_fingerprint,
+      " equity=",
+      state.equity,
+      " positions=",
+      state.open_position_count,
+      " spread=",
+      state.spread_points
+   );
+}
 void PollCloud()
 {
    string url =
@@ -410,7 +575,7 @@ void PollCloud()
       !TODOBAExecutionMissionSignatureVerifier::Verify(
          mission,
          mission_signature,
-         MissionSigningSecret
+         TODOBA_MISSION_SIGNING_SECRET
       )
    )
    {
@@ -450,20 +615,44 @@ void PollCloud()
    }
 
    current_mission_state.Initialize(
-      mission.mission_id,
-      mission.agent_id,
-      mission.sequence
+   mission.mission_id,
+   mission.agent_id,
+   mission.sequence
+);
+
+string safety_reason = "";
+
+if(
+   !TODOBAExecutionSafetyGuard::Allow(
+      mission.symbol,
+      MaxSpreadPoints,
+      MaxOpenTrades,
+      safety_reason
+   )
+)
+{
+   Print(
+      "TODOBA SAFETY REJECTED: ",
+      safety_reason
    );
 
-   SendAcknowledgement(
-      mission
+   SendFailed(
+      mission,
+      safety_reason
    );
 
-   current_mission_state.Start();
+   return;
+}
 
-   SendExecutionStarted(
-      mission
-   );
+SendAcknowledgement(
+   mission
+);
+
+current_mission_state.Start();
+
+SendExecutionStarted(
+   mission
+);
 
    Print(
       "TODOBA RECEIVED SYMBOL=[",
@@ -498,16 +687,27 @@ void PollCloud()
       execution_result.comment
    );
 
-   if(execution_result.success)
+      if(execution_result.success)
    {
-      SendBrokerEvidence(
-         mission,
-         execution_result
-      );
+      bool evidence_stored =
+         SendBrokerEvidence(
+            mission,
+            execution_result
+         );
 
-      SendCompleted(
-         mission
-      );
+      if(evidence_stored)
+      {
+         SendCompleted(
+            mission
+         );
+      }
+      else
+      {
+         Print(
+            "TODOBA CRITICAL: broker execution succeeded "
+            "but evidence was not stored."
+         );
+      }
    }
    else
    {
@@ -536,12 +736,18 @@ int OnInit()
    if(StringLen(AgentId) == 0)
       return INIT_PARAMETERS_INCORRECT;
 
-   if(StringLen(AgentSecret) == 0)
+      if(StringLen(TODOBA_AGENT_SECRET) == 0)
       return INIT_PARAMETERS_INCORRECT;
 
-   if(StringLen(MissionSigningSecret) == 0)
+   if(StringLen(TODOBA_MISSION_SIGNING_SECRET) == 0)
       return INIT_PARAMETERS_INCORRECT;
 
+   Print(
+      "TODOBA Agent Credential DEBUG: AgentId=",
+      AgentId,
+      " AgentSecretLength=",
+      StringLen(TODOBA_AGENT_SECRET)
+   );
    EventSetTimer(
       PollIntervalSeconds
    );
@@ -567,5 +773,7 @@ void OnDeinit(
 
 void OnTimer()
 {
+   SendBrokerState();
+
    PollCloud();
 }

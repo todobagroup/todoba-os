@@ -18,7 +18,6 @@ import asyncio
 import json
 from dataclasses import asdict, is_dataclass
 
-import MetaTrader5 as mt5
 from telethon import events
 
 from backend.config import (
@@ -34,7 +33,9 @@ from backend.integrations.telegram_client import (
 from backend.integrations.telegram_trading_pipeline import (
     TelegramTradingPipeline,
 )
-from backend.runtime.runtime_bootstrap import RuntimeBootstrap
+from backend.trading.signal.incoming_signal import (
+    IncomingSignal,
+)
 from backend.workers.telegram.telegram_receiver import (
     TelegramReceiver,
 )
@@ -44,23 +45,42 @@ telegram_receiver = TelegramReceiver()
 
 client = None
 
-runtime_bootstrap = RuntimeBootstrap()
-runtime = runtime_bootstrap.create_runtime()
+runtime_bootstrap = None
+runtime = None
+trading_profile = None
+task_execution_bridge = None
+mt5 = None
 
-trading_profile = runtime_bootstrap.profile
 
-task_execution_bridge = (
-    runtime_bootstrap.task_execution_bridge
-)
+if TELEGRAM_EXECUTION_MODE != "REMOTE_VPS":
+    import MetaTrader5 as mt5_module
 
-dry_run_pipeline = TelegramTradingPipeline(
-    trading_profile
-)
+    from backend.runtime.runtime_bootstrap import (
+        RuntimeBootstrap,
+    )
+
+    runtime_bootstrap = RuntimeBootstrap()
+    runtime = runtime_bootstrap.create_runtime()
+
+    trading_profile = runtime_bootstrap.profile
+
+    task_execution_bridge = (
+        runtime_bootstrap.task_execution_bridge
+    )
+
+    mt5 = mt5_module
+
+    dry_run_pipeline = TelegramTradingPipeline(
+        trading_profile
+    )
+
+else:
+    dry_run_pipeline = None
+
 
 processed_message_keys: set[
     tuple[int, int]
-] = set()
-
+ ] = set()
 
 def to_serializable(value):
     if is_dataclass(value):

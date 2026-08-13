@@ -583,6 +583,9 @@ app.include_router(
     create_broker_state_router(
         store=broker_state_store,
         authenticator=trusted_agent_authenticator,
+        executor_authenticator=(
+            executor_authenticator
+        ),
     )
 )
 

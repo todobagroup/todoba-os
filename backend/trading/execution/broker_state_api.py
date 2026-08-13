@@ -1,8 +1,10 @@
 """
 TODOBA Broker State API
 
-Provides the authenticated HTTP boundary used by
-Trusted Agents to publish current broker/account state.
+Provides authenticated HTTP boundaries used by:
+
+- Trusted Agents to publish current broker state
+- trusted Executors to read the latest Agent state
 
 This component does not:
 
@@ -14,6 +16,7 @@ This component does not:
 
 from fastapi import APIRouter
 from fastapi import Depends
+from fastapi import HTTPException
 from pydantic import BaseModel
 
 from backend.trading.execution.broker_state import (
@@ -21,6 +24,12 @@ from backend.trading.execution.broker_state import (
 )
 from backend.trading.execution.broker_state_store import (
     BrokerStateStore,
+)
+from backend.trading.execution.executor_authentication_dependency import (
+    create_executor_authentication_dependency,
+)
+from backend.trading.execution.executor_authenticator import (
+    ExecutorAuthenticator,
 )
 from backend.trading.execution.trusted_agent_authentication_dependency import (
     create_trusted_agent_authentication_dependency,
@@ -47,6 +56,7 @@ def create_broker_state_router(
     *,
     store: BrokerStateStore,
     authenticator: TrustedAgentAuthenticator,
+    executor_authenticator: ExecutorAuthenticator,
 ) -> APIRouter:
     if not isinstance(
         store,
@@ -66,9 +76,24 @@ def create_broker_state_router(
             "TrustedAgentAuthenticator."
         )
 
+    if not isinstance(
+        executor_authenticator,
+        ExecutorAuthenticator,
+    ):
+        raise TypeError(
+            "create_broker_state_router requires "
+            "ExecutorAuthenticator."
+        )
+
     require_trusted_agent = (
         create_trusted_agent_authentication_dependency(
             authenticator
+        )
+    )
+
+    require_executor = (
+        create_executor_authentication_dependency(
+            executor_authenticator
         )
     )
 
@@ -98,7 +123,8 @@ def create_broker_state_router(
         )
 
         store.save(
-            state
+            state,
+            agent_id=agent_id,
         )
 
         return {
@@ -107,6 +133,43 @@ def create_broker_state_router(
                 state.account_fingerprint
             ),
             "symbol": state.symbol,
+        }
+
+    @router.get(
+        "/broker/state/latest"
+    )
+    def read_latest_broker_state(
+        agent_id: str,
+        executor_id: str = Depends(
+            require_executor
+        ),
+    ):
+        state = store.get_for_agent(
+            agent_id=agent_id,
+        )
+
+        if state is None:
+            raise HTTPException(
+                status_code=404,
+                detail="Broker state not found.",
+            )
+
+        return {
+            "status": "available",
+            "agent_id": agent_id,
+            "account_fingerprint": (
+                state.account_fingerprint
+            ),
+            "equity": state.equity,
+            "open_position_count": (
+                state.open_position_count
+            ),
+            "symbol": state.symbol,
+            "bid": state.bid,
+            "ask": state.ask,
+            "spread_points": (
+                state.spread_points
+            ),
         }
 
     return router

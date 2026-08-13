@@ -62,6 +62,11 @@ TODOBA_API_PORT = _read_int(
     8000,
 )
 
+TODOBA_CLOUD_BASE_URL = os.getenv(
+    "TODOBA_CLOUD_BASE_URL",
+    "https://api.todobagroup.com",
+).strip().rstrip("/")
+
 TODOBA_RUNTIME_MODE = os.getenv(
     "TODOBA_RUNTIME_MODE",
     "LOCAL_TRADING",
@@ -176,6 +181,30 @@ def validate_telegram_config() -> None:
             "TELEGRAM_EXECUTION_MODE must be "
             "DRY_RUN, LIVE_DEMO, or REMOTE_VPS."
         )
+    if TELEGRAM_EXECUTION_MODE == "REMOTE_VPS":
+        if not TODOBA_CLOUD_BASE_URL:
+            errors.append(
+                "TODOBA_CLOUD_BASE_URL is required "
+                "for REMOTE_VPS."
+            )
+
+        if not TODOBA_TRUSTED_AGENT_ID:
+            errors.append(
+                "TODOBA_TRUSTED_AGENT_ID is required "
+                "for REMOTE_VPS."
+            )
+
+        if not TODOBA_EXECUTOR_ID:
+            errors.append(
+                "TODOBA_EXECUTOR_ID is required "
+                "for REMOTE_VPS."
+            )
+
+        if not TODOBA_EXECUTOR_SECRET:
+            errors.append(
+                "TODOBA_EXECUTOR_SECRET is required "
+                "for REMOTE_VPS."
+            )
 
     if (
         TELEGRAM_EXECUTION_MODE == "LIVE_DEMO"

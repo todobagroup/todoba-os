@@ -58,7 +58,9 @@ private:
    {
       return (
          order_type == "BUY" ||
+         order_type == "BUY NOW" ||
          order_type == "SELL" ||
+         order_type == "SELL NOW" ||
          order_type == "BUY LIMIT" ||
          order_type == "SELL LIMIT" ||
          order_type == "BUY STOP" ||

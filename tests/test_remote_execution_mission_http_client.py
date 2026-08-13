@@ -5,9 +5,15 @@ Proof:
 
 ExecutionMission
 ->
-Authenticated HTTP POST /missions/inject
+authenticated POST /missions/inject
 ->
 TODOBA Cloud
+
+Authenticated Executor
+->
+GET /broker/state/latest
+->
+latest Trusted Agent broker state
 """
 
 import sys
@@ -26,7 +32,20 @@ from backend.trading.execution.remote_execution_mission_http_client import (
 )
 
 
-def test_execution_mission_is_posted_to_cloud_with_executor_auth():
+def build_client() -> RemoteExecutionMissionHttpClient:
+    return RemoteExecutionMissionHttpClient(
+        cloud_base_url=(
+            "https://api.todobagroup.com"
+        ),
+        executor_id="telegram-executor-001",
+        executor_secret="proof090-secret",
+        timeout_seconds=5.0,
+    )
+
+
+def test_execution_mission_is_posted_to_cloud_with_executor_auth(
+    monkeypatch,
+):
     captured = {}
 
     class FakeResponse:
@@ -53,40 +72,32 @@ def test_execution_mission_is_posted_to_cloud_with_executor_auth():
 
         return FakeResponse()
 
-    original_post = httpx.post
-    httpx.post = fake_post
+    monkeypatch.setattr(
+        httpx,
+        "post",
+        fake_post,
+    )
 
-    try:
-        client = RemoteExecutionMissionHttpClient(
-            cloud_base_url="https://api.todobagroup.com",
-            executor_id="telegram-executor-001",
-            executor_secret="proof090-secret",
-            timeout_seconds=5.0,
-        )
+    mission = ExecutionMission(
+        mission_id="proof090-001",
+        agent_id="trusted-agent-001",
+        account_fingerprint="demo-account",
+        symbol="XAUUSD",
+        order_type="SELL NOW",
+        volume=0.01,
+        entry=None,
+        sl=4334.0,
+        tp=4303.0,
+        magic_number=10001,
+        comment="TODOBA proof090",
+        created_at="2026-08-10T00:00:00Z",
+        expires_at="2026-08-10T00:02:00Z",
+        sequence=90,
+    )
 
-        mission = ExecutionMission(
-            mission_id="proof090-001",
-            agent_id="trusted-agent-001",
-            account_fingerprint="demo-account",
-            symbol="XAUUSD",
-            order_type="SELL NOW",
-            volume=0.01,
-            entry=None,
-            sl=4334.0,
-            tp=4303.0,
-            magic_number=10001,
-            comment="TODOBA proof090",
-            created_at="2026-08-10T00:00:00Z",
-            expires_at="2026-08-10T00:02:00Z",
-            sequence=90,
-        )
-
-        result = client.send(
-            mission
-        )
-
-    finally:
-        httpx.post = original_post
+    result = build_client().send(
+        mission
+    )
 
     assert captured["url"] == (
         "https://api.todobagroup.com/missions/inject"
@@ -120,3 +131,83 @@ def test_execution_mission_is_posted_to_cloud_with_executor_auth():
         "status": "persisted",
         "mission_id": "proof090-001",
     }
+
+
+def test_latest_agent_broker_state_is_read_with_executor_auth(
+    monkeypatch,
+):
+    captured = {}
+
+    class FakeResponse:
+        def raise_for_status(self):
+            return None
+
+        def json(self):
+            return {
+                "status": "available",
+                "agent_id": "trusted-agent-001",
+                "account_fingerprint": (
+                    "demo-account"
+                ),
+                "equity": 2491.52,
+                "open_position_count": 0,
+                "symbol": "XAUUSD",
+                "bid": 4397.96,
+                "ask": 4398.22,
+                "spread_points": 26.0,
+            }
+
+    def fake_get(
+        url,
+        *,
+        params,
+        headers,
+        timeout,
+    ):
+        captured["url"] = url
+        captured["params"] = params
+        captured["headers"] = headers
+        captured["timeout"] = timeout
+
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        httpx,
+        "get",
+        fake_get,
+    )
+
+    result = build_client().read_latest_broker_state(
+        agent_id="trusted-agent-001",
+    )
+
+    assert captured["url"] == (
+        "https://api.todobagroup.com"
+        "/broker/state/latest"
+    )
+
+    assert captured["params"] == {
+        "agent_id": "trusted-agent-001",
+    }
+
+    assert captured["headers"] == {
+        "X-TODOBA-Executor-ID": (
+            "telegram-executor-001"
+        ),
+        "Authorization": (
+            "Bearer proof090-secret"
+        ),
+    }
+
+    assert captured["timeout"] == 5.0
+
+    assert result["status"] == "available"
+    assert result["agent_id"] == (
+        "trusted-agent-001"
+    )
+    assert result["account_fingerprint"] == (
+        "demo-account"
+    )
+    assert result["symbol"] == "XAUUSD"
+    assert result["open_position_count"] == 0
+    assert result["spread_points"] == 26.0

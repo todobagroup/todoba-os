@@ -1,22 +1,28 @@
 """
 TODOBA Telegram Listener
 
-Supports two explicit execution modes:
+Supports three explicit execution modes:
 
 DRY_RUN
     Understand, validate, and plan only.
 
 LIVE_DEMO
-    Produce an organizational Task and dispatch it through
-    the Trading Department to MT5 Demo.
+    Dispatch approved Tasks directly to local MT5 Demo.
+
+REMOTE_VPS
+    Submit approved execution missions to TODOBA Cloud.
+    Trusted MQL5 Agents execute them remotely.
 
 Telegram never calls MT5Sender directly.
-Telegram does not construct or manage Trading lifecycle.
+Telegram does not manage broker execution lifecycle.
 """
 
 import asyncio
 import json
 from dataclasses import asdict, is_dataclass
+from datetime import UTC
+from datetime import datetime
+from datetime import timedelta
 
 from telethon import events
 
@@ -25,13 +31,32 @@ from backend.config import (
     MT5_MAX_SPREAD_POINTS,
     TELEGRAM_EXECUTION_MODE,
     TELEGRAM_SIGNAL_GROUP_ID,
+    TODOBA_CLOUD_BASE_URL,
+    TODOBA_EXECUTOR_ID,
+    TODOBA_EXECUTOR_SECRET,
+    TODOBA_TRUSTED_AGENT_ID,
     validate_telegram_config,
 )
 from backend.integrations.telegram_client import (
     create_telegram_client,
 )
+from backend.integrations.telegram_task_producer import (
+    TelegramTaskProducer,
+)
 from backend.integrations.telegram_trading_pipeline import (
     TelegramTradingPipeline,
+)
+from backend.trading.execution.execution_planner import (
+    create_plan,
+)
+from backend.trading.execution.remote_execution_mission_http_client import (
+    RemoteExecutionMissionHttpClient,
+)
+from backend.trading.execution.trade_task_execution_mission_adapter import (
+    TradeTaskExecutionMissionAdapter,
+)
+from backend.trading.profile.trading_profile import (
+    TradingProfile,
 )
 from backend.trading.signal.incoming_signal import (
     IncomingSignal,
@@ -50,6 +75,11 @@ runtime = None
 trading_profile = None
 task_execution_bridge = None
 mt5 = None
+
+remote_profile = None
+remote_task_producer = None
+remote_mission_adapter = None
+remote_http_client = None
 
 
 if TELEGRAM_EXECUTION_MODE != "REMOTE_VPS":
@@ -77,6 +107,29 @@ if TELEGRAM_EXECUTION_MODE != "REMOTE_VPS":
 else:
     dry_run_pipeline = None
 
+    remote_profile = TradingProfile(
+        profile_name="telegram_demo_gold",
+        risk_percent=1.0,
+        max_open_trades=10,
+        allowed_symbols=("XAUUSD",),
+        lot_policy_name="FIXED_001",
+    )
+
+    remote_task_producer = TelegramTaskProducer(
+        remote_profile
+    )
+
+    remote_mission_adapter = (
+        TradeTaskExecutionMissionAdapter()
+    )
+
+    remote_http_client = (
+        RemoteExecutionMissionHttpClient(
+            cloud_base_url=TODOBA_CLOUD_BASE_URL,
+            executor_id=TODOBA_EXECUTOR_ID,
+            executor_secret=TODOBA_EXECUTOR_SECRET,
+        )
+    )
 
 processed_message_keys: set[
     tuple[int, int]
@@ -124,7 +177,145 @@ def print_result(
 
     print("===================================")
 
+def _to_utc_iso8601(
+    value: datetime,
+) -> str:
+    return (
+        value.astimezone(UTC)
+        .replace(microsecond=0)
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
 
+
+def process_remote_vps_signal(
+    incoming_signal: IncomingSignal,
+) -> dict:
+    if not isinstance(
+        incoming_signal,
+        IncomingSignal,
+    ):
+        raise TypeError(
+            "process_remote_vps_signal requires "
+            "IncomingSignal."
+        )
+
+    source_key = incoming_signal.source_key()
+
+    if source_key is None:
+        raise ValueError(
+            "REMOTE_VPS signal requires "
+            "chat_id and message_id."
+        )
+
+    if source_key in processed_message_keys:
+        return {
+            "status": "duplicate",
+            "source_key": source_key,
+        }
+
+    if (
+        remote_profile is None
+        or remote_task_producer is None
+        or remote_mission_adapter is None
+        or remote_http_client is None
+    ):
+        raise RuntimeError(
+            "REMOTE_VPS composition is not available."
+        )
+
+    broker_state = (
+        remote_http_client.read_latest_broker_state(
+            agent_id=TODOBA_TRUSTED_AGENT_ID
+        )
+    )
+
+    production = remote_task_producer.produce(
+        incoming_signal,
+        open_position_count=int(
+            broker_state["open_position_count"]
+        ),
+        spread_ok=(
+            float(broker_state["spread_points"])
+            <= MT5_MAX_SPREAD_POINTS
+        ),
+        market_open=(
+            float(broker_state["bid"]) > 0
+            and float(broker_state["ask"]) > 0
+        ),
+        risk_ok=True,
+    )
+
+    if production.task is None:
+        return {
+            "status": production.status,
+            "production": production,
+            "broker_state": broker_state,
+        }
+
+    if production.signal is None:
+        raise RuntimeError(
+            "Approved Telegram production "
+            "does not contain a signal."
+        )
+
+    execution_plan = create_plan(
+        production.signal,
+        remote_profile,
+    )
+
+    created_at = datetime.now(
+        UTC
+    )
+
+    expires_at = (
+        created_at
+        + timedelta(minutes=2)
+    )
+
+    chat_id, message_id = source_key
+
+    if message_id <= 0:
+        raise ValueError(
+            "Telegram message_id must be positive."
+        )
+
+    mission = remote_mission_adapter.to_mission(
+        production.task,
+        mission_id=(
+            f"telegram-{abs(chat_id)}-{message_id}"
+        ),
+        agent_id=TODOBA_TRUSTED_AGENT_ID,
+        account_fingerprint=str(
+            broker_state["account_fingerprint"]
+        ),
+        volume=execution_plan.lot,
+        magic_number=execution_plan.magic_number,
+        comment=execution_plan.comment,
+        created_at=_to_utc_iso8601(
+            created_at
+        ),
+        expires_at=_to_utc_iso8601(
+            expires_at
+        ),
+        sequence=message_id,
+    )
+
+    cloud_response = remote_http_client.send(
+        mission
+    )
+
+    processed_message_keys.add(
+        source_key
+    )
+
+    return {
+        "status": "submitted",
+        "production": production,
+        "broker_state": broker_state,
+        "mission": mission,
+        "cloud_response": cloud_response,
+    }
 def read_demo_decision_context() -> dict:
     mt5.symbol_select(
         MT5_BROKER_GOLD_SYMBOL,
@@ -217,10 +408,8 @@ async def register_handlers() -> None:
             )
 
             if TELEGRAM_EXECUTION_MODE == "DRY_RUN":
-                result = (
-                    dry_run_pipeline.process(
-                        incoming_signal
-                    )
+                result = dry_run_pipeline.process(
+                    incoming_signal
                 )
 
                 print_result(
@@ -230,18 +419,31 @@ async def register_handlers() -> None:
 
                 return
 
+            if TELEGRAM_EXECUTION_MODE == "REMOTE_VPS":
+                result = process_remote_vps_signal(
+                    incoming_signal
+                )
+
+                print_result(
+                    "TODOBA TELEGRAM REMOTE VPS",
+                    {
+                        "mode": "REMOTE_VPS",
+                        "result": result,
+                    },
+                )
+
+                return
+
             context = read_demo_decision_context()
 
-            result = (
-                task_execution_bridge.execute(
-                    incoming_signal,
-                    open_position_count=(
-                        context["open_position_count"]
-                    ),
-                    spread_ok=context["spread_ok"],
-                    market_open=context["market_open"],
-                    risk_ok=context["risk_ok"],
-                )
+            result = task_execution_bridge.execute(
+                incoming_signal,
+                open_position_count=(
+                    context["open_position_count"]
+                ),
+                spread_ok=context["spread_ok"],
+                market_open=context["market_open"],
+                risk_ok=context["risk_ok"],
             )
 
             print_result(
@@ -289,9 +491,12 @@ async def main() -> None:
                 "to the currently connected MT5 account."
             )
 
+        elif TELEGRAM_EXECUTION_MODE == "REMOTE_VPS":
+            print("Local MT5 Orders: DISABLED")
+            print("Remote VPS Execution: ENABLED")
+
         else:
             print("Live MT5 Orders: DISABLED")
-
         client = create_telegram_client()
 
         await register_handlers()

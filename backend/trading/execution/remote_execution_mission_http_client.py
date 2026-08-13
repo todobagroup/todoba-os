@@ -1,8 +1,11 @@
 """
 TODOBA Remote Execution Mission HTTP Client
 
-Sends ExecutionMission objects to the
-TODOBA Cloud mission injection boundary.
+Provides the authenticated HTTP connection used by
+the Telegram remote executor to:
+
+- read the latest Trusted Agent broker state
+- submit ExecutionMission objects to TODOBA Cloud
 
 This component does not:
 
@@ -23,7 +26,7 @@ from backend.trading.execution.execution_mission import (
 
 class RemoteExecutionMissionHttpClient:
     """
-    Send ExecutionMission objects to TODOBA Cloud.
+    Connect the remote Telegram executor to TODOBA Cloud.
     """
 
     def __init__(
@@ -36,7 +39,9 @@ class RemoteExecutionMissionHttpClient:
     ) -> None:
         normalized_url = cloud_base_url.rstrip("/")
         normalized_executor_id = executor_id.strip()
-        normalized_executor_secret = executor_secret.strip()
+        normalized_executor_secret = (
+            executor_secret.strip()
+        )
 
         if not normalized_url:
             raise ValueError(
@@ -65,6 +70,54 @@ class RemoteExecutionMissionHttpClient:
         )
         self.timeout_seconds = timeout_seconds
 
+    def _authentication_headers(
+        self,
+    ) -> dict[str, str]:
+        return {
+            "X-TODOBA-Executor-ID": (
+                self.executor_id
+            ),
+            "Authorization": (
+                f"Bearer {self.executor_secret}"
+            ),
+        }
+
+    def read_latest_broker_state(
+        self,
+        *,
+        agent_id: str,
+    ) -> dict:
+        if not isinstance(
+            agent_id,
+            str,
+        ):
+            raise TypeError(
+                "agent_id must be str."
+            )
+
+        normalized_agent_id = agent_id.strip()
+
+        if not normalized_agent_id:
+            raise ValueError(
+                "agent_id is required."
+            )
+
+        response = httpx.get(
+            (
+                f"{self.cloud_base_url}"
+                "/broker/state/latest"
+            ),
+            params={
+                "agent_id": normalized_agent_id,
+            },
+            headers=self._authentication_headers(),
+            timeout=self.timeout_seconds,
+        )
+
+        response.raise_for_status()
+
+        return response.json()
+
     def send(
         self,
         mission: ExecutionMission,
@@ -80,14 +133,7 @@ class RemoteExecutionMissionHttpClient:
 
         response = httpx.post(
             f"{self.cloud_base_url}/missions/inject",
-            headers={
-                "X-TODOBA-Executor-ID": (
-                    self.executor_id
-                ),
-                "Authorization": (
-                    f"Bearer {self.executor_secret}"
-                ),
-            },
+            headers=self._authentication_headers(),
             json={
                 "mission_id": mission.mission_id,
                 "agent_id": mission.agent_id,

@@ -3,12 +3,15 @@ TODOBA Executor Runtime Configuration Tests
 
 Proof:
 
-TODOBA_EXECUTOR_ID
-TODOBA_EXECUTOR_SECRET
+REMOTE_VPS
 ->
-backend.config
+Cloud endpoint
++
+Trusted Agent identity
++
+Executor authentication
 ->
-Executor authentication configuration
+validated remote Telegram runtime configuration
 """
 
 import importlib
@@ -22,18 +25,40 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
 
 
-def reload_config(
+def reload_remote_config(
     monkeypatch: pytest.MonkeyPatch,
+    **overrides: str,
 ):
-    monkeypatch.setenv(
-        "TODOBA_EXECUTOR_ID",
-        "telegram-executor-proof091",
+    values = {
+        "TELEGRAM_API_ID": "1",
+        "TELEGRAM_API_HASH": "test-hash",
+        "TELEGRAM_SESSION": "test-session",
+        "TELEGRAM_SIGNAL_GROUP_ID": "-1001",
+        "TELEGRAM_EXECUTION_MODE": "REMOTE_VPS",
+        "MT5_MAX_SPREAD_POINTS": "100",
+        "TODOBA_CLOUD_BASE_URL": (
+            "https://api.todobagroup.com"
+        ),
+        "TODOBA_TRUSTED_AGENT_ID": (
+            "trusted-agent-001"
+        ),
+        "TODOBA_EXECUTOR_ID": (
+            "telegram-executor-proof091"
+        ),
+        "TODOBA_EXECUTOR_SECRET": (
+            "proof091-executor-secret"
+        ),
+    }
+
+    values.update(
+        overrides
     )
 
-    monkeypatch.setenv(
-        "TODOBA_EXECUTOR_SECRET",
-        "proof091-executor-secret",
-    )
+    for name, value in values.items():
+        monkeypatch.setenv(
+            name,
+            value,
+        )
 
     import backend.config as config
 
@@ -42,25 +67,78 @@ def reload_config(
     )
 
 
-def test_executor_runtime_config_loads_executor_id(
+def test_executor_runtime_config_loads_remote_values(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    loaded = reload_config(
+    loaded = reload_remote_config(
         monkeypatch
+    )
+
+    assert loaded.TODOBA_CLOUD_BASE_URL == (
+        "https://api.todobagroup.com"
+    )
+
+    assert loaded.TODOBA_TRUSTED_AGENT_ID == (
+        "trusted-agent-001"
     )
 
     assert loaded.TODOBA_EXECUTOR_ID == (
         "telegram-executor-proof091"
     )
 
-
-def test_executor_runtime_config_loads_executor_secret(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    loaded = reload_config(
-        monkeypatch
-    )
-
     assert loaded.TODOBA_EXECUTOR_SECRET == (
         "proof091-executor-secret"
     )
+
+
+def test_valid_remote_vps_config_is_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loaded = reload_remote_config(
+        monkeypatch
+    )
+
+    loaded.validate_telegram_config()
+
+
+@pytest.mark.parametrize(
+    (
+        "missing_name",
+        "expected_message",
+    ),
+    [
+        (
+            "TODOBA_CLOUD_BASE_URL",
+            "TODOBA_CLOUD_BASE_URL is required",
+        ),
+        (
+            "TODOBA_TRUSTED_AGENT_ID",
+            "TODOBA_TRUSTED_AGENT_ID is required",
+        ),
+        (
+            "TODOBA_EXECUTOR_ID",
+            "TODOBA_EXECUTOR_ID is required",
+        ),
+        (
+            "TODOBA_EXECUTOR_SECRET",
+            "TODOBA_EXECUTOR_SECRET is required",
+        ),
+    ],
+)
+def test_remote_vps_config_rejects_missing_values(
+    monkeypatch: pytest.MonkeyPatch,
+    missing_name: str,
+    expected_message: str,
+) -> None:
+    loaded = reload_remote_config(
+        monkeypatch,
+        **{
+            missing_name: "",
+        },
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=expected_message,
+    ):
+        loaded.validate_telegram_config()

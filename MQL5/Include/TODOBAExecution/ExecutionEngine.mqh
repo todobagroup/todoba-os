@@ -85,9 +85,9 @@ Print(
    order_type,
    "]"
 );
-
       if(
-         order_type == "BUY"
+         order_type == "BUY" ||
+         order_type == "BUY NOW"
       )
       {Print(
    "TODOBA Engine: ENTER BUY BLOCK"
@@ -122,8 +122,9 @@ Print(
       }
 
 
-      if(
-         order_type == "SELL"
+            if(
+         order_type == "SELL" ||
+         order_type == "SELL NOW"
       )
       {
          Print(

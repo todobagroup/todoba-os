@@ -43,5 +43,5 @@ def create_plan(
         tp=signal.tp,
         lot=lot,
         magic_number=10001,
-        comment=f"TODOBA:{profile.profile_name}",
+        comment="TODOBA",
     )

@@ -196,6 +196,7 @@ def test_remote_vps_listener_submits_each_telegram_message_once(
     assert mission.sl == 4380.0
     assert mission.tp == 4340.0
     assert mission.magic_number == 10001
+    assert mission.comment == "TODOBA"
     assert mission.sequence == 168001
 
     assert first_result["cloud_response"] == {

@@ -75,7 +75,7 @@ def test_valid_telegram_signal_creates_dry_run_plan():
 
     assert (
         result["execution_plan"]["comment"]
-        == "TODOBA:telegram_test"
+        == "TODOBA"
     )
 
 

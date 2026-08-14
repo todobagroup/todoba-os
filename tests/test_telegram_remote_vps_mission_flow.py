@@ -203,3 +203,108 @@ def test_remote_vps_listener_submits_each_telegram_message_once(
         "status": "persisted",
         "mission_id": "telegram-1001-168001",
     }
+
+
+@pytest.mark.parametrize(
+    (
+        "message",
+        "expected_order_type",
+        "expected_entry",
+        "expected_sl",
+        "expected_tp",
+    ),
+    [
+        (
+            "BUY GOLD LIMIT\n"
+            "ENTRY: 4350\n"
+            "SL: 4330\n"
+            "TP: 4390",
+            "BUY LIMIT",
+            4350.0,
+            4330.0,
+            4390.0,
+        ),
+        (
+            "SELL GOLD LIMIT\n"
+            "ENTRY: 4380\n"
+            "SL: 4400\n"
+            "TP: 4340",
+            "SELL LIMIT",
+            4380.0,
+            4400.0,
+            4340.0,
+        ),
+        (
+            "BUY GOLD STOP\n"
+            "ENTRY: 4380\n"
+            "SL: 4360\n"
+            "TP: 4420",
+            "BUY STOP",
+            4380.0,
+            4360.0,
+            4420.0,
+        ),
+        (
+            "SELL GOLD STOP\n"
+            "ENTRY: 4350\n"
+            "SL: 4370\n"
+            "TP: 4310",
+            "SELL STOP",
+            4350.0,
+            4370.0,
+            4310.0,
+        ),
+    ],
+)
+def test_remote_vps_listener_preserves_pending_order(
+    monkeypatch: pytest.MonkeyPatch,
+    message,
+    expected_order_type,
+    expected_entry,
+    expected_sl,
+    expected_tp,
+) -> None:
+    listener = load_remote_listener(
+        monkeypatch
+    )
+
+    fake_http_client = FakeRemoteHttpClient()
+
+    monkeypatch.setattr(
+        listener,
+        "remote_http_client",
+        fake_http_client,
+        raising=False,
+    )
+
+    listener.processed_message_keys.clear()
+
+    incoming_signal = IncomingSignal(
+        source="telegram",
+        message=message,
+        sender="proof174",
+        sender_id=1,
+        chat_id=-1001,
+        message_id=174001,
+        received_at=datetime.now(
+            UTC
+        ),
+    )
+
+    result = listener.process_remote_vps_signal(
+        incoming_signal
+    )
+
+    assert result["status"] == "submitted"
+    assert len(fake_http_client.sent_missions) == 1
+
+    mission = fake_http_client.sent_missions[0]
+
+    assert mission.symbol == "XAUUSD"
+    assert mission.order_type == expected_order_type
+    assert mission.entry == expected_entry
+    assert mission.sl == expected_sl
+    assert mission.tp == expected_tp
+    assert mission.volume == 0.03
+    assert mission.magic_number == 10001
+    assert mission.comment == "TODOBA"

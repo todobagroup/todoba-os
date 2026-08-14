@@ -15,7 +15,7 @@
 #include <TODOBAExecution/ExecutionResult.mqh>
 
 #define TODOBA_AGENT_NAME "TODOBA Trusted Agent"
-#define TODOBA_AGENT_VERSION "1.6.8"
+#define TODOBA_AGENT_VERSION "1.6.9"
 input int PollIntervalSeconds = 5;
 
 input double MaxSpreadPoints = 100.0;
@@ -746,8 +746,22 @@ int OnInit()
       if(StringLen(TODOBA_AGENT_SECRET) == 0)
       return INIT_PARAMETERS_INCORRECT;
 
-   if(StringLen(TODOBA_MISSION_SIGNING_SECRET) == 0)
+      if(StringLen(TODOBA_MISSION_SIGNING_SECRET) == 0)
       return INIT_PARAMETERS_INCORRECT;
+
+   if(
+      !TerminalInfoInteger(
+         TERMINAL_VPS
+      )
+   )
+   {
+      Print(
+         TODOBA_AGENT_NAME,
+         " local standby: MetaTrader VPS required."
+      );
+
+      return INIT_SUCCEEDED;
+   }
 
    Print(
       "TODOBA Agent Credential DEBUG: AgentId=",

@@ -2,7 +2,12 @@
 TODOBA Trading Decision Engine
 
 Approves valid trading opportunities while enforcing
-the configured maximum number of open positions.
+the configured maximum number of active trades.
+
+An active trade is either:
+
+- an open broker position
+- an active pending broker order
 """
 
 from backend.trading.decision.decision_result import (
@@ -19,6 +24,7 @@ class TradingDecisionEngine:
         self,
         *,
         open_position_count: int,
+        pending_order_count: int,
         max_open_trades: int,
         spread_ok: bool,
         market_open: bool,
@@ -36,6 +42,19 @@ class TradingDecisionEngine:
         if open_position_count < 0:
             raise ValueError(
                 "open_position_count cannot be negative."
+            )
+
+        if not isinstance(
+            pending_order_count,
+            int,
+        ):
+            raise TypeError(
+                "pending_order_count must be int."
+            )
+
+        if pending_order_count < 0:
+            raise ValueError(
+                "pending_order_count cannot be negative."
             )
 
         if not isinstance(
@@ -69,16 +88,23 @@ class TradingDecisionEngine:
                 "Risk rejected.",
             )
 
-        if (
+        active_trade_count = (
             open_position_count
+            + pending_order_count
+        )
+
+        if (
+            active_trade_count
             >= max_open_trades
         ):
             return DecisionResult(
                 False,
                 (
-                    "Maximum open trade limit reached: "
-                    f"{open_position_count}/"
-                    f"{max_open_trades}."
+                    "Maximum active trade limit reached: "
+                    f"{active_trade_count}/"
+                    f"{max_open_trades} "
+                    f"(positions={open_position_count}, "
+                    f"pending={pending_order_count})."
                 ),
             )
 

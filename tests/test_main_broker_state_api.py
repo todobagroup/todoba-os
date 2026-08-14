@@ -54,6 +54,7 @@ def test_main_app_contains_broker_state_api():
             "account_fingerprint": "demo-account",
             "equity": 2491.52,
             "open_position_count": 5,
+            "pending_order_count": 3,
             "symbol": "XAUUSD",
             "bid": 4397.96,
             "ask": 4398.22,
@@ -77,3 +78,4 @@ def test_main_app_contains_broker_state_api():
     assert stored is not None
     assert stored.equity == 2491.52
     assert stored.open_position_count == 5
+    assert stored.pending_order_count == 3

@@ -238,6 +238,9 @@ def process_remote_vps_signal(
         open_position_count=int(
             broker_state["open_position_count"]
         ),
+        pending_order_count=int(
+            broker_state["pending_order_count"]
+        ),
         spread_ok=(
             float(broker_state["spread_points"])
             <= MT5_MAX_SPREAD_POINTS
@@ -372,9 +375,21 @@ def read_demo_decision_context() -> dict:
             "Cannot read MT5 positions."
         )
 
+    pending_orders = mt5.orders_get(
+        symbol=MT5_BROKER_GOLD_SYMBOL
+    )
+
+    if pending_orders is None:
+        raise RuntimeError(
+            "Cannot read MT5 pending orders."
+        )
+
     return {
         "open_position_count": len(
             positions
+        ),
+        "pending_order_count": len(
+            pending_orders
         ),
         "max_open_trades": (
             trading_profile.max_open_trades

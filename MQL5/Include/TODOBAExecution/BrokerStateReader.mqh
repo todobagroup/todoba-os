@@ -11,6 +11,7 @@ struct TODOBABrokerState
 
    double equity;
    int open_position_count;
+   int pending_order_count;
 
    string symbol;
 
@@ -102,6 +103,36 @@ public:
          }
       }
 
+      int pending_order_count = 0;
+
+      int total_orders = OrdersTotal();
+
+      for(
+         int index = 0;
+         index < total_orders;
+         index++
+      )
+      {
+         ulong order_ticket = OrderGetTicket(
+            index
+         );
+
+         if(order_ticket == 0)
+            continue;
+
+         string order_symbol = OrderGetString(
+            ORDER_SYMBOL
+         );
+
+         if(
+            order_symbol
+            == symbol
+         )
+         {
+            pending_order_count++;
+         }
+      }
+
       state.account_fingerprint =
          account_fingerprint;
 
@@ -109,6 +140,9 @@ public:
 
       state.open_position_count =
          open_position_count;
+
+      state.pending_order_count =
+         pending_order_count;
 
       state.symbol = symbol;
 

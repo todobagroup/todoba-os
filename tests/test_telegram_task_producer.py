@@ -8,6 +8,8 @@ These tests do not send orders.
 
 from datetime import datetime, timezone
 
+import pytest
+
 from backend.integrations.telegram_task_producer import (
     TelegramTaskProducer,
 )
@@ -61,6 +63,7 @@ def test_approved_signal_creates_trade_task():
             "TP 4125"
         ),
         open_position_count=0,
+        pending_order_count=0,
         spread_ok=True,
         market_open=True,
         risk_ok=True,
@@ -76,7 +79,7 @@ def test_approved_signal_creates_trade_task():
     assert result.task.payload == result.intent
 
 
-def test_existing_positions_below_limit_are_allowed():
+def test_active_trades_below_limit_are_allowed():
     producer = TelegramTaskProducer(
         create_profile(
             max_open_trades=3
@@ -89,7 +92,8 @@ def test_existing_positions_below_limit_are_allowed():
             "SL 4125\n"
             "TP 4095"
         ),
-        open_position_count=2,
+        open_position_count=1,
+        pending_order_count=1,
         spread_ok=True,
         market_open=True,
         risk_ok=True,
@@ -101,7 +105,7 @@ def test_existing_positions_below_limit_are_allowed():
     assert result.decision.approved is True
 
 
-def test_position_limit_rejection_creates_no_task():
+def test_active_trade_limit_rejection_creates_no_task():
     producer = TelegramTaskProducer(
         create_profile(
             max_open_trades=3
@@ -114,7 +118,8 @@ def test_position_limit_rejection_creates_no_task():
             "SL 4095\n"
             "TP 4125"
         ),
-        open_position_count=3,
+        open_position_count=2,
+        pending_order_count=1,
         spread_ok=True,
         market_open=True,
         risk_ok=True,
@@ -124,8 +129,9 @@ def test_position_limit_rejection_creates_no_task():
     assert result.task is None
     assert result.decision is not None
     assert result.decision.approved is False
+
     assert (
-        "Maximum open trade limit reached"
+        "Maximum active trade limit reached"
         in result.decision.reason
     )
 
@@ -150,6 +156,7 @@ def test_profile_rejection_creates_no_task():
             "TP 4125"
         ),
         open_position_count=0,
+        pending_order_count=0,
         spread_ok=True,
         market_open=True,
         risk_ok=True,
@@ -170,6 +177,7 @@ def test_invalid_message_creates_no_task():
             "HELLO TODOBA"
         ),
         open_position_count=0,
+        pending_order_count=0,
         spread_ok=True,
         market_open=True,
         risk_ok=True,
@@ -178,3 +186,28 @@ def test_invalid_message_creates_no_task():
     assert result.status == "invalid_signal"
     assert result.task is None
     assert result.errors
+
+
+def test_negative_pending_order_count_is_rejected():
+    producer = TelegramTaskProducer(
+        create_profile()
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "pending_order_count cannot be negative."
+        ),
+    ):
+        producer.produce(
+            create_incoming_signal(
+                "BUY GOLD NOW\n"
+                "SL 4095\n"
+                "TP 4125"
+            ),
+            open_position_count=0,
+            pending_order_count=-1,
+            spread_ok=True,
+            market_open=True,
+            risk_ok=True,
+        )

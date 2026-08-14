@@ -44,6 +44,7 @@ class BrokerStateRequest(BaseModel):
 
     equity: float
     open_position_count: int
+    pending_order_count: int
 
     symbol: str
 
@@ -116,6 +117,9 @@ def create_broker_state_router(
             open_position_count=(
                 request.open_position_count
             ),
+            pending_order_count=(
+                request.pending_order_count
+            ),
             symbol=request.symbol,
             bid=request.bid,
             ask=request.ask,
@@ -163,6 +167,9 @@ def create_broker_state_router(
             "equity": state.equity,
             "open_position_count": (
                 state.open_position_count
+            ),
+            "pending_order_count": (
+                state.pending_order_count
             ),
             "symbol": state.symbol,
             "bid": state.bid,

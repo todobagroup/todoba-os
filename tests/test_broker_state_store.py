@@ -31,6 +31,7 @@ def build_state(
     *,
     equity: float = 2491.52,
     open_position_count: int = 5,
+    pending_order_count: int = 2,
     bid: float = 4397.96,
     ask: float = 4398.22,
     spread_points: float = 26.0,
@@ -39,6 +40,7 @@ def build_state(
         account_fingerprint="demo-account",
         equity=equity,
         open_position_count=open_position_count,
+        pending_order_count=pending_order_count,
         symbol="XAUUSD",
         bid=bid,
         ask=ask,
@@ -61,6 +63,7 @@ def test_store_saves_and_returns_broker_state():
     )
 
     assert loaded == state
+    assert loaded.pending_order_count == 2
 
 
 def test_store_replaces_previous_state_for_same_account_and_symbol():
@@ -71,6 +74,7 @@ def test_store_replaces_previous_state_for_same_account_and_symbol():
     second = build_state(
         equity=2600.00,
         open_position_count=4,
+        pending_order_count=3,
         bid=4400.00,
         ask=4400.20,
         spread_points=20.0,
@@ -85,6 +89,7 @@ def test_store_replaces_previous_state_for_same_account_and_symbol():
     )
 
     assert loaded == second
+    assert loaded.pending_order_count == 3
 
 
 def test_store_returns_none_for_unknown_state():
@@ -106,6 +111,7 @@ def test_store_returns_latest_state_for_authenticated_agent():
     second = build_state(
         equity=2700.00,
         open_position_count=3,
+        pending_order_count=4,
         bid=4401.00,
         ask=4401.25,
         spread_points=25.0,
@@ -126,6 +132,7 @@ def test_store_returns_latest_state_for_authenticated_agent():
     )
 
     assert loaded == second
+    assert loaded.pending_order_count == 4
 
 
 def test_store_returns_none_for_unknown_agent():

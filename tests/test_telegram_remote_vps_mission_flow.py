@@ -101,6 +101,7 @@ class FakeRemoteHttpClient:
             ),
             "equity": 2622.34,
             "open_position_count": 0,
+            "pending_order_count": 0,
             "symbol": "XAUUSD",
             "bid": 4365.83,
             "ask": 4366.08,
@@ -308,3 +309,66 @@ def test_remote_vps_listener_preserves_pending_order(
     assert mission.volume == 0.03
     assert mission.magic_number == 10001
     assert mission.comment == "TODOBA"
+def test_remote_vps_rejects_at_active_trade_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    listener = load_remote_listener(
+        monkeypatch
+    )
+
+    class FullRemoteHttpClient(
+        FakeRemoteHttpClient
+    ):
+        def read_latest_broker_state(
+            self,
+            *,
+            agent_id: str,
+        ) -> dict:
+            state = super().read_latest_broker_state(
+                agent_id=agent_id
+            )
+
+            return {
+                **state,
+                "open_position_count": 6,
+                "pending_order_count": 4,
+            }
+
+    fake_http_client = FullRemoteHttpClient()
+
+    monkeypatch.setattr(
+        listener,
+        "remote_http_client",
+        fake_http_client,
+        raising=False,
+    )
+
+    listener.processed_message_keys.clear()
+
+    incoming_signal = IncomingSignal(
+        source="telegram",
+        message=(
+            "BUY GOLD NOW\n"
+            "SL: 4330\n"
+            "TP: 4370"
+        ),
+        sender="proof175",
+        sender_id=1,
+        chat_id=-1001,
+        message_id=175001,
+        received_at=datetime.now(
+            UTC
+        ),
+    )
+
+    result = listener.process_remote_vps_signal(
+        incoming_signal
+    )
+
+    assert result["status"] == "decision_rejected"
+    assert len(fake_http_client.sent_missions) == 0
+
+    assert result["production"].decision.reason == (
+        "Maximum active trade limit reached: "
+        "10/10 (positions=6, pending=4)."
+    )

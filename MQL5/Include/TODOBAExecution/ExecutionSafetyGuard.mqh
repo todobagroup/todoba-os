@@ -28,7 +28,7 @@ public:
       if(max_open_trades <= 0)
       {
          reason =
-            "Maximum open trades must be greater than zero.";
+            "Maximum active trades must be greater than zero.";
 
          return false;
       }
@@ -133,13 +133,48 @@ public:
          }
       }
 
-      if(
+      int pending_order_count = 0;
+
+      int total_orders = OrdersTotal();
+
+      for(
+         int index = 0;
+         index < total_orders;
+         index++
+      )
+      {
+         ulong order_ticket = OrderGetTicket(
+            index
+         );
+
+         if(order_ticket == 0)
+            continue;
+
+         string order_symbol = OrderGetString(
+            ORDER_SYMBOL
+         );
+
+         if(
+            order_symbol
+            == symbol
+         )
+         {
+            pending_order_count++;
+         }
+      }
+
+      int active_trade_count = (
          open_position_count
+         + pending_order_count
+      );
+
+      if(
+         active_trade_count
          >= max_open_trades
       )
       {
          reason =
-            "Maximum open trade limit reached.";
+            "Maximum active trade limit reached.";
 
          return false;
       }

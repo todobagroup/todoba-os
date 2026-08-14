@@ -90,6 +90,7 @@ def publish_state(
             "account_fingerprint": "demo-account",
             "equity": 2491.52,
             "open_position_count": 5,
+            "pending_order_count": 3,
             "symbol": "XAUUSD",
             "bid": 4397.96,
             "ask": 4398.22,
@@ -124,6 +125,7 @@ def test_authenticated_agent_can_publish_broker_state():
     assert stored is not None
     assert stored.equity == 2491.52
     assert stored.open_position_count == 5
+    assert stored.pending_order_count == 3
     assert stored.bid == 4397.96
     assert stored.ask == 4398.22
     assert stored.spread_points == 26.0
@@ -158,11 +160,37 @@ def test_authenticated_executor_can_read_latest_agent_state():
         "account_fingerprint": "demo-account",
         "equity": 2491.52,
         "open_position_count": 5,
+        "pending_order_count": 3,
         "symbol": "XAUUSD",
         "bid": 4397.96,
         "ask": 4398.22,
         "spread_points": 26.0,
     }
+
+
+def test_publish_requires_pending_order_count():
+    client, _ = build_client()
+
+    response = client.post(
+        "/broker/state",
+        headers={
+            "X-TODOBA-Agent-ID": AGENT_ID,
+            "Authorization": (
+                f"Bearer {AGENT_SECRET}"
+            ),
+        },
+        json={
+            "account_fingerprint": "demo-account",
+            "equity": 2491.52,
+            "open_position_count": 5,
+            "symbol": "XAUUSD",
+            "bid": 4397.96,
+            "ask": 4398.22,
+            "spread_points": 26.0,
+        },
+    )
+
+    assert response.status_code == 422
 
 
 def test_unknown_agent_state_returns_not_found():

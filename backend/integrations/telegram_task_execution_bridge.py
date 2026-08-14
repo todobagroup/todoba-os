@@ -154,6 +154,7 @@ class TelegramTaskExecutionBridge:
         incoming_signal: IncomingSignal,
         *,
         open_position_count: int,
+        pending_order_count: int,
         spread_ok: bool,
         market_open: bool,
         risk_ok: bool,
@@ -171,6 +172,9 @@ class TelegramTaskExecutionBridge:
             incoming_signal,
             open_position_count=(
                 open_position_count
+            ),
+            pending_order_count=(
+                pending_order_count
             ),
             spread_ok=spread_ok,
             market_open=market_open,

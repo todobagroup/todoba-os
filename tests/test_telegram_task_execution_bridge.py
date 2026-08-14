@@ -123,6 +123,7 @@ def test_approved_signal_runs_through_runtime():
     result = bridge.execute(
         create_signal(),
         open_position_count=0,
+        pending_order_count=0,
         spread_ok=True,
         market_open=True,
         risk_ok=True,
@@ -154,7 +155,7 @@ def test_approved_signal_runs_through_runtime():
     assert runtime.stop() is True
 
 
-def test_existing_positions_below_limit_are_dispatched():
+def test_active_trades_below_limit_are_dispatched():
     bridge, runtime, execution_pipeline = (
         create_bridge(
             max_open_trades=3
@@ -165,7 +166,8 @@ def test_existing_positions_below_limit_are_dispatched():
 
     result = bridge.execute(
         create_signal(),
-        open_position_count=2,
+        open_position_count=1,
+        pending_order_count=1,
         spread_ok=True,
         market_open=True,
         risk_ok=True,
@@ -181,7 +183,7 @@ def test_existing_positions_below_limit_are_dispatched():
     runtime.stop()
 
 
-def test_position_limit_rejection_is_not_dispatched():
+def test_active_trade_limit_rejection_is_not_dispatched():
     bridge, runtime, execution_pipeline = (
         create_bridge(
             max_open_trades=3
@@ -192,7 +194,8 @@ def test_position_limit_rejection_is_not_dispatched():
 
     result = bridge.execute(
         create_signal(),
-        open_position_count=3,
+        open_position_count=2,
+        pending_order_count=1,
         spread_ok=True,
         market_open=True,
         risk_ok=True,
@@ -221,6 +224,7 @@ def test_bridge_requires_runtime_start():
         bridge.execute(
             create_signal(),
             open_position_count=0,
+            pending_order_count=0,
             spread_ok=True,
             market_open=True,
             risk_ok=True,
@@ -254,6 +258,7 @@ def test_execution_failure_is_recorded():
     result = bridge.execute(
         create_signal(),
         open_position_count=0,
+        pending_order_count=0,
         spread_ok=True,
         market_open=True,
         risk_ok=True,

@@ -27,6 +27,7 @@ class BrokerState:
 
     equity: float
     open_position_count: int
+    pending_order_count: int
 
     symbol: str
 
@@ -48,6 +49,11 @@ class BrokerState:
         if self.open_position_count < 0:
             raise ValueError(
                 "open_position_count cannot be negative."
+            )
+
+        if self.pending_order_count < 0:
+            raise ValueError(
+                "pending_order_count cannot be negative."
             )
 
         if not self.symbol:

@@ -107,6 +107,7 @@ class TelegramTaskProducer:
         incoming_signal: IncomingSignal,
         *,
         open_position_count: int,
+        pending_order_count: int,
         spread_ok: bool,
         market_open: bool,
         risk_ok: bool,
@@ -114,8 +115,9 @@ class TelegramTaskProducer:
         """
         Produce one approved organizational trading Task.
 
-        Existing trades are allowed while their count remains
-        below the profile's maximum open-trade limit.
+        Active trades are allowed while the combined number
+        of open positions and pending orders remains below
+        the profile's configured limit.
         """
 
         if not isinstance(
@@ -138,6 +140,19 @@ class TelegramTaskProducer:
         if open_position_count < 0:
             raise ValueError(
                 "open_position_count cannot be negative."
+            )
+
+        if not isinstance(
+            pending_order_count,
+            int,
+        ):
+            raise TypeError(
+                "pending_order_count must be int."
+            )
+
+        if pending_order_count < 0:
+            raise ValueError(
+                "pending_order_count cannot be negative."
             )
 
         try:
@@ -172,6 +187,9 @@ class TelegramTaskProducer:
                     intent=intent,
                     open_position_count=(
                         open_position_count
+                    ),
+                    pending_order_count=(
+                        pending_order_count
                     ),
                     max_open_trades=(
                         self.profile.max_open_trades

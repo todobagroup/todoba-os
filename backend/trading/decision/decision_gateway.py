@@ -26,6 +26,7 @@ class DecisionGateway:
         *,
         intent,
         open_position_count: int,
+        pending_order_count: int,
         max_open_trades: int,
         spread_ok: bool,
         market_open: bool,
@@ -33,6 +34,7 @@ class DecisionGateway:
     ):
         decision = self.engine.decide(
             open_position_count=open_position_count,
+            pending_order_count=pending_order_count,
             max_open_trades=max_open_trades,
             spread_ok=spread_ok,
             market_open=market_open,

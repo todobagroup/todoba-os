@@ -459,9 +459,14 @@ void SendBrokerState()
          2
       )
       + ","
-      "\"open_position_count\":"
+            "\"open_position_count\":"
       + IntegerToString(
          state.open_position_count
+      )
+      + ","
+      "\"pending_order_count\":"
+      + IntegerToString(
+         state.pending_order_count
       )
       + ","
       "\"symbol\":\""
@@ -502,8 +507,10 @@ void SendBrokerState()
       state.account_fingerprint,
       " equity=",
       state.equity,
-      " positions=",
+            " positions=",
       state.open_position_count,
+      " pending=",
+      state.pending_order_count,
       " spread=",
       state.spread_points
    );

@@ -137,3 +137,90 @@ def test_store_rejects_wrong_contract() -> None:
         store.push(
             "not-a-control-mission"
         )
+
+
+def test_redeliver_requeues_mission_after_pop() -> None:
+    store = ControlMissionStore()
+    mission = build_mission()
+    store.push(
+        mission
+    )
+    assert store.pop() == mission
+    assert store.size() == 0
+
+    redelivered = store.redeliver(
+        mission
+    )
+
+    assert redelivered == mission
+    assert store.size() == 1
+    assert store.pop_for_agent(
+        "agent-demo-001"
+    ) == mission
+
+
+def test_redeliver_does_not_duplicate_queued_mission() -> None:
+    store = ControlMissionStore()
+    mission = build_mission()
+    store.push(
+        mission
+    )
+
+    first = store.redeliver(
+        mission
+    )
+    second = store.redeliver(
+        mission
+    )
+
+    assert first == mission
+    assert second == mission
+    assert store.size() == 1
+
+
+def test_redeliver_registers_unknown_mission() -> None:
+    store = ControlMissionStore()
+    mission = build_mission()
+
+    result = store.redeliver(
+        mission
+    )
+
+    assert result == mission
+    assert store.get(
+        mission.mission_id
+    ) == mission
+    assert store.size() == 1
+
+
+def test_redeliver_rejects_conflicting_payload() -> None:
+    store = ControlMissionStore()
+    mission = build_mission()
+    store.push(
+        mission
+    )
+    store.pop()
+    tampered = replace(
+        mission,
+        action=ControlAction.CLOSE_RED,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="different payload",
+    ):
+        store.redeliver(
+            tampered
+        )
+
+
+def test_redeliver_rejects_wrong_contract() -> None:
+    store = ControlMissionStore()
+
+    with pytest.raises(
+        TypeError,
+        match="redeliver requires ControlMission",
+    ):
+        store.redeliver(
+            "not-a-control-mission"
+        )

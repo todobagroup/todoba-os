@@ -2,7 +2,8 @@
 TODOBA Control Mission Delivery Bridge
 
 Moves control missions into the delivery queue
-consumed by Trusted Agents.
+consumed by Trusted Agents and supports explicit
+redelivery after an incomplete delivery attempt.
 
 This component does not:
 - create control missions
@@ -52,5 +53,21 @@ class ControlMissionDeliveryBridge:
             )
 
         return self.store.push(
+            mission
+        )
+
+    def redeliver(
+        self,
+        mission: ControlMission,
+    ) -> ControlMission:
+        if not isinstance(
+            mission,
+            ControlMission,
+        ):
+            raise TypeError(
+                "redeliver requires ControlMission."
+            )
+
+        return self.store.redeliver(
             mission
         )

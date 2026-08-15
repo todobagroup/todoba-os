@@ -113,3 +113,61 @@ def test_bridge_rejects_invalid_mission() -> None:
         bridge.deliver(
             "not-a-mission"
         )
+
+
+def test_bridge_redelivers_mission_after_delivery_attempt() -> None:
+    store = ControlMissionStore()
+    bridge = ControlMissionDeliveryBridge(
+        store
+    )
+    mission = build_mission()
+    bridge.deliver(
+        mission
+    )
+    assert store.pop_for_agent(
+        "trusted-agent-001"
+    ) == mission
+
+    redelivered = bridge.redeliver(
+        mission
+    )
+
+    assert redelivered == mission
+    assert store.size() == 1
+    assert store.pop_for_agent(
+        "trusted-agent-001"
+    ) == mission
+
+
+def test_bridge_redelivery_does_not_duplicate_queue() -> None:
+    store = ControlMissionStore()
+    bridge = ControlMissionDeliveryBridge(
+        store
+    )
+    mission = build_mission()
+    bridge.deliver(
+        mission
+    )
+
+    bridge.redeliver(
+        mission
+    )
+    bridge.redeliver(
+        mission
+    )
+
+    assert store.size() == 1
+
+
+def test_bridge_rejects_invalid_redelivery_mission() -> None:
+    bridge = ControlMissionDeliveryBridge(
+        ControlMissionStore()
+    )
+
+    with pytest.raises(
+        TypeError,
+        match="redeliver requires ControlMission",
+    ):
+        bridge.redeliver(
+            "not-a-mission"
+        )

@@ -20,6 +20,7 @@ import importlib
 import sys
 from datetime import UTC
 from datetime import datetime
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -95,6 +96,16 @@ class FakeRemoteHttpClient:
 
         return {
             "status": "available",
+            "received_at": (
+                datetime.now(
+                    UTC
+                )
+                .isoformat()
+                .replace(
+                    "+00:00",
+                    "Z",
+                )
+            ),
             "agent_id": agent_id,
             "account_fingerprint": (
                 "XMGlobal-MT5 9:336627882"
@@ -309,6 +320,8 @@ def test_remote_vps_listener_preserves_pending_order(
     assert mission.volume == 0.03
     assert mission.magic_number == 10001
     assert mission.comment == "TODOBA"
+
+
 def test_remote_vps_rejects_at_active_trade_limit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -372,3 +385,118 @@ def test_remote_vps_rejects_at_active_trade_limit(
         "Maximum active trade limit reached: "
         "10/10 (positions=6, pending=4)."
     )
+
+
+@pytest.mark.parametrize(
+    (
+        "received_at",
+        "expected_reason",
+    ),
+    [
+        (
+            (
+                datetime.now(
+                    UTC
+                )
+                - timedelta(
+                    seconds=31
+                )
+            )
+            .isoformat()
+            .replace(
+                "+00:00",
+                "Z",
+            ),
+            "Broker state is stale.",
+        ),
+        (
+            None,
+            (
+                "Broker state received_at "
+                "is required."
+            ),
+        ),
+        (
+            "not-a-timestamp",
+            (
+                "Broker state received_at "
+                "is invalid."
+            ),
+        ),
+    ],
+)
+def test_remote_vps_rejects_untrusted_broker_state(
+    monkeypatch: pytest.MonkeyPatch,
+    received_at,
+    expected_reason,
+) -> None:
+    listener = load_remote_listener(
+        monkeypatch
+    )
+
+    class UntrustedRemoteHttpClient(
+        FakeRemoteHttpClient
+    ):
+        def read_latest_broker_state(
+            self,
+            *,
+            agent_id: str,
+        ) -> dict:
+            state = super().read_latest_broker_state(
+                agent_id=agent_id
+            )
+
+            if received_at is None:
+                state.pop(
+                    "received_at"
+                )
+            else:
+                state["received_at"] = (
+                    received_at
+                )
+
+            return state
+
+    fake_http_client = (
+        UntrustedRemoteHttpClient()
+    )
+
+    monkeypatch.setattr(
+        listener,
+        "remote_http_client",
+        fake_http_client,
+        raising=False,
+    )
+
+    listener.processed_message_keys.clear()
+
+    incoming_signal = IncomingSignal(
+        source="telegram",
+        message=(
+            "SELL GOLD NOW\n"
+            "SL: 4400\n"
+            "TP: 4370"
+        ),
+        sender="proof177",
+        sender_id=1,
+        chat_id=-1001,
+        message_id=177001,
+        received_at=datetime.now(
+            UTC
+        ),
+    )
+
+    result = (
+        listener.process_remote_vps_signal(
+            incoming_signal
+        )
+    )
+
+    assert (
+        result["status"]
+        == "broker_state_rejected"
+    )
+    assert result["reason"] == expected_reason
+    assert len(
+        fake_http_client.sent_missions
+    ) == 0

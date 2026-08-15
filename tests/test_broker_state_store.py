@@ -9,11 +9,12 @@ BrokerState
 ->
 BrokerStateStore
 ->
-latest broker state by account + symbol
-and by authenticated agent identity
+latest broker state and Cloud receive time
 """
 
 import sys
+from datetime import UTC
+from datetime import datetime
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -143,3 +144,41 @@ def test_store_returns_none_for_unknown_agent():
     )
 
     assert loaded is None
+
+
+def test_store_records_cloud_receive_time_for_agent():
+    received_at = datetime(
+        2026,
+        8,
+        15,
+        1,
+        30,
+        tzinfo=UTC,
+    )
+
+    store = BrokerStateStore(
+        clock=lambda: received_at
+    )
+
+    store.save(
+        build_state(),
+        agent_id="trusted-agent-001",
+    )
+
+    assert (
+        store.get_received_at_for_agent(
+            agent_id="trusted-agent-001",
+        )
+        == received_at
+    )
+
+
+def test_store_returns_no_receive_time_for_unknown_agent():
+    store = BrokerStateStore()
+
+    assert (
+        store.get_received_at_for_agent(
+            agent_id="missing-agent",
+        )
+        is None
+    )

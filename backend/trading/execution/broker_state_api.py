@@ -14,6 +14,8 @@ This component does not:
 - own broker-state persistence
 """
 
+from datetime import UTC
+
 from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import HTTPException
@@ -158,6 +160,21 @@ def create_broker_state_router(
                 detail="Broker state not found.",
             )
 
+        received_at = (
+            store.get_received_at_for_agent(
+                agent_id=agent_id,
+            )
+        )
+
+        if received_at is None:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    "Broker state receive time "
+                    "not found."
+                ),
+            )
+
         return {
             "status": "available",
             "agent_id": agent_id,
@@ -176,6 +193,16 @@ def create_broker_state_router(
             "ask": state.ask,
             "spread_points": (
                 state.spread_points
+            ),
+            "received_at": (
+                received_at.astimezone(
+                    UTC
+                )
+                .isoformat()
+                .replace(
+                    "+00:00",
+                    "Z",
+                )
             ),
         }
 

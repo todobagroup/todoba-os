@@ -12,9 +12,13 @@ BrokerStateStore
 authenticated Executor
 ->
 GET /broker/state/latest
+->
+Cloud receive time
 """
 
 import sys
+from datetime import UTC
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI
@@ -43,12 +47,23 @@ AGENT_SECRET = "proof-broker-state-secret"
 EXECUTOR_ID = "telegram-executor-001"
 EXECUTOR_SECRET = "proof-executor-secret"
 
+RECEIVED_AT = datetime(
+    2026,
+    8,
+    15,
+    1,
+    30,
+    tzinfo=UTC,
+)
+
 
 def build_client() -> tuple[
     TestClient,
     BrokerStateStore,
 ]:
-    store = BrokerStateStore()
+    store = BrokerStateStore(
+        clock=lambda: RECEIVED_AT
+    )
 
     agent_authenticator = TrustedAgentAuthenticator(
         agent_id=AGENT_ID,
@@ -165,6 +180,7 @@ def test_authenticated_executor_can_read_latest_agent_state():
         "bid": 4397.96,
         "ask": 4398.22,
         "spread_points": 26.0,
+        "received_at": "2026-08-15T01:30:00Z",
     }
 
 

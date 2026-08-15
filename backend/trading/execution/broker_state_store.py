@@ -4,12 +4,23 @@ TODOBA Broker State Store
 Stores the latest BrokerState observed for each
 account, symbol, and authenticated Trusted Agent.
 
-This component owns in-memory broker-state lookup only.
+The Store also records when TODOBA Cloud received
+the latest state from each Agent.
 """
+
+from datetime import UTC
+from datetime import datetime
+from typing import Callable
 
 from backend.trading.execution.broker_state import (
     BrokerState,
 )
+
+
+def _utc_now() -> datetime:
+    return datetime.now(
+        UTC
+    )
 
 
 class BrokerStateStore:
@@ -17,7 +28,20 @@ class BrokerStateStore:
     Store the latest broker state by account and agent.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        *,
+        clock: Callable[[], datetime] = _utc_now,
+    ) -> None:
+        if not callable(
+            clock
+        ):
+            raise TypeError(
+                "clock must be callable."
+            )
+
+        self._clock = clock
+
         self._states: dict[
             tuple[str, str],
             BrokerState,
@@ -27,6 +51,32 @@ class BrokerStateStore:
             str,
             BrokerState,
         ] = {}
+
+        self._agent_received_at: dict[
+            str,
+            datetime,
+        ] = {}
+
+    @staticmethod
+    def _normalize_agent_id(
+        agent_id: str,
+    ) -> str:
+        if not isinstance(
+            agent_id,
+            str,
+        ):
+            raise TypeError(
+                "agent_id must be str."
+            )
+
+        normalized_agent_id = agent_id.strip()
+
+        if not normalized_agent_id:
+            raise ValueError(
+                "agent_id is required."
+            )
+
+        return normalized_agent_id
 
     def save(
         self,
@@ -52,24 +102,36 @@ class BrokerStateStore:
         if agent_id is None:
             return
 
+        normalized_agent_id = (
+            self._normalize_agent_id(
+                agent_id
+            )
+        )
+
+        received_at = self._clock()
+
         if not isinstance(
-            agent_id,
-            str,
+            received_at,
+            datetime,
         ):
             raise TypeError(
-                "agent_id must be str."
+                "clock must return datetime."
             )
 
-        normalized_agent_id = agent_id.strip()
-
-        if not normalized_agent_id:
+        if received_at.tzinfo is None:
             raise ValueError(
-                "agent_id is required."
+                "clock must return timezone-aware datetime."
             )
 
         self._agent_states[
             normalized_agent_id
         ] = state
+
+        self._agent_received_at[
+            normalized_agent_id
+        ] = received_at.astimezone(
+            UTC
+        )
 
     def get(
         self,
@@ -91,21 +153,27 @@ class BrokerStateStore:
         *,
         agent_id: str,
     ) -> BrokerState | None:
-        if not isinstance(
-            agent_id,
-            str,
-        ):
-            raise TypeError(
-                "agent_id must be str."
+        normalized_agent_id = (
+            self._normalize_agent_id(
+                agent_id
             )
-
-        normalized_agent_id = agent_id.strip()
-
-        if not normalized_agent_id:
-            raise ValueError(
-                "agent_id is required."
-            )
+        )
 
         return self._agent_states.get(
+            normalized_agent_id
+        )
+
+    def get_received_at_for_agent(
+        self,
+        *,
+        agent_id: str,
+    ) -> datetime | None:
+        normalized_agent_id = (
+            self._normalize_agent_id(
+                agent_id
+            )
+        )
+
+        return self._agent_received_at.get(
             normalized_agent_id
         )

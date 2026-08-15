@@ -84,6 +84,8 @@ remote_task_producer = None
 remote_mission_adapter = None
 remote_http_client = None
 
+BROKER_STATE_MAX_AGE_SECONDS = 30.0
+
 
 if TELEGRAM_EXECUTION_MODE != "REMOTE_VPS":
     import MetaTrader5 as mt5_module
@@ -136,7 +138,8 @@ else:
 
 processed_message_keys: set[
     tuple[int, int]
- ] = set()
+] = set()
+
 
 def to_serializable(value):
     if is_dataclass(value):
@@ -180,6 +183,7 @@ def print_result(
 
     print("===================================")
 
+
 def _to_utc_iso8601(
     value: datetime,
 ) -> str:
@@ -189,6 +193,90 @@ def _to_utc_iso8601(
         .isoformat()
         .replace("+00:00", "Z")
     )
+
+
+def _broker_state_rejection_reason(
+    broker_state: dict,
+    *,
+    now: datetime | None = None,
+) -> str | None:
+    received_at_value = broker_state.get(
+        "received_at"
+    )
+
+    if received_at_value is None:
+        return (
+            "Broker state received_at "
+            "is required."
+        )
+
+    if not isinstance(
+        received_at_value,
+        str,
+    ):
+        return (
+            "Broker state received_at "
+            "is invalid."
+        )
+
+    normalized_received_at = (
+        received_at_value.strip()
+    )
+
+    if not normalized_received_at:
+        return (
+            "Broker state received_at "
+            "is invalid."
+        )
+
+    if normalized_received_at.endswith(
+        "Z"
+    ):
+        normalized_received_at = (
+            normalized_received_at[:-1]
+            + "+00:00"
+        )
+
+    try:
+        received_at = datetime.fromisoformat(
+            normalized_received_at
+        )
+    except ValueError:
+        return (
+            "Broker state received_at "
+            "is invalid."
+        )
+
+    if received_at.tzinfo is None:
+        return (
+            "Broker state received_at "
+            "is invalid."
+        )
+
+    current_time = (
+        datetime.now(
+            UTC
+        )
+        if now is None
+        else now.astimezone(
+            UTC
+        )
+    )
+
+    state_age_seconds = (
+        current_time
+        - received_at.astimezone(
+            UTC
+        )
+    ).total_seconds()
+
+    if (
+        state_age_seconds
+        > BROKER_STATE_MAX_AGE_SECONDS
+    ):
+        return "Broker state is stale."
+
+    return None
 
 
 def process_remote_vps_signal(
@@ -232,6 +320,19 @@ def process_remote_vps_signal(
             agent_id=TODOBA_TRUSTED_AGENT_ID
         )
     )
+
+    rejection_reason = (
+        _broker_state_rejection_reason(
+            broker_state
+        )
+    )
+
+    if rejection_reason is not None:
+        return {
+            "status": "broker_state_rejected",
+            "reason": rejection_reason,
+            "broker_state": broker_state,
+        }
 
     production = remote_task_producer.produce(
         incoming_signal,
@@ -336,6 +437,8 @@ def process_remote_vps_signal(
         "mission": mission,
         "cloud_response": cloud_response,
     }
+
+
 def read_demo_decision_context() -> dict:
     mt5.symbol_select(
         MT5_BROKER_GOLD_SYMBOL,

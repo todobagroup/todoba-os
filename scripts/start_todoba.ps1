@@ -50,6 +50,8 @@ $repoRoot `
 
 $env:TODOBA_RUNTIME_MODE = "CLOUD"
 $env:TELEGRAM_EXECUTION_MODE = "REMOTE_VPS"
+$env:PYTHONUTF8 = "1"
+$env:PYTHONIOENCODING = "utf-8"
 
 
 $requiredPaths = [ordered]@{
@@ -281,9 +283,9 @@ try {
             $component.Process = $existingProcess
             $component.Owned = $false
 
-           Write-TodobaRuntimeLog (
-    "Adopted existing $($component.Name) process pid=$($existingProcess.Id)"
- )
+            Write-TodobaRuntimeLog (
+                "Adopted existing $($component.Name) process pid=$($existingProcess.Id)"
+            )
         }
         else {
             $component.Process = (
@@ -318,7 +320,8 @@ try {
             if ($shouldRestart) {
                 Write-TodobaRuntimeLog (
                     "$($component.Name) stopped. Restarting after $RestartDelaySeconds seconds."
-  )
+                )
+
                 Start-Sleep `
                 -Seconds $RestartDelaySeconds
 
@@ -342,7 +345,7 @@ finally {
         if (
             $component.Owned -and
             $null -ne $component.Process
-   ) {
+        ) {
             try {
                 $component.Process.Refresh()
 

@@ -29,6 +29,7 @@ from telethon import events
 from backend.config import (
     MT5_BROKER_GOLD_SYMBOL,
     MT5_MAX_SPREAD_POINTS,
+    TELEGRAM_AUTHORIZED_SENDER_IDS,
     TELEGRAM_EXECUTION_MODE,
     TELEGRAM_SIGNAL_GROUP_ID,
     TODOBA_CLOUD_BASE_URL,
@@ -39,6 +40,9 @@ from backend.config import (
 )
 from backend.integrations.telegram_client import (
     create_telegram_client,
+)
+from backend.integrations.telegram_sender_authorizer import (
+    TelegramSenderAuthorizer,
 )
 from backend.integrations.telegram_task_producer import (
     TelegramTaskProducer,
@@ -70,6 +74,14 @@ from backend.workers.telegram.telegram_receiver import (
 
 
 telegram_receiver = TelegramReceiver()
+
+telegram_sender_authorizer = (
+    TelegramSenderAuthorizer(
+        authorized_sender_ids=(
+            TELEGRAM_AUTHORIZED_SENDER_IDS
+        ),
+    )
+)
 
 client = None
 
@@ -290,6 +302,14 @@ def process_remote_vps_signal(
             "process_remote_vps_signal requires "
             "IncomingSignal."
         )
+
+    if not telegram_sender_authorizer.is_authorized(
+        incoming_signal.sender_id
+    ):
+        return {
+            "status": "unauthorized_sender",
+            "sender_id": incoming_signal.sender_id,
+        }
 
     source_key = incoming_signal.source_key()
 
@@ -541,6 +561,21 @@ async def register_handlers() -> None:
                     message_id=event.id,
                 )
             )
+
+            if not telegram_sender_authorizer.is_authorized(
+                incoming_signal.sender_id
+            ):
+                print_result(
+                    "TODOBA TELEGRAM UNAUTHORIZED",
+                    {
+                        "status": "unauthorized_sender",
+                        "sender_id": (
+                            incoming_signal.sender_id
+                        ),
+                    },
+                )
+
+                return
 
             if TELEGRAM_EXECUTION_MODE == "DRY_RUN":
                 result = dry_run_pipeline.process(

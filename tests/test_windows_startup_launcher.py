@@ -62,6 +62,20 @@ def test_launcher_owns_api_and_remote_executor() -> None:
     assert "cloudflared" not in launcher.lower()
 
 
+def test_launcher_forces_python_utf8() -> None:
+    launcher = read_launcher()
+
+    assert (
+        '$env:PYTHONUTF8 = "1"'
+        in launcher
+    )
+
+    assert (
+        '$env:PYTHONIOENCODING = "utf-8"'
+        in launcher
+    )
+
+
 def test_launcher_prevents_duplicates_and_recovers() -> None:
     launcher = read_launcher()
 

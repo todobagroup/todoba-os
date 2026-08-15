@@ -10,6 +10,8 @@ Cloud endpoint
 Trusted Agent identity
 +
 Executor authentication
++
+authorized Telegram technicians
 ->
 validated remote Telegram runtime configuration
 """
@@ -35,6 +37,9 @@ def reload_remote_config(
         "TELEGRAM_SESSION": "test-session",
         "TELEGRAM_SIGNAL_GROUP_ID": "-1001",
         "TELEGRAM_EXECUTION_MODE": "REMOTE_VPS",
+        "TELEGRAM_AUTHORIZED_SENDER_IDS": (
+            "101, 202"
+        ),
         "MT5_MAX_SPREAD_POINTS": "100",
         "TODOBA_CLOUD_BASE_URL": (
             "https://api.todobagroup.com"
@@ -90,6 +95,14 @@ def test_executor_runtime_config_loads_remote_values(
         "proof091-executor-secret"
     )
 
+    assert (
+        loaded.TELEGRAM_AUTHORIZED_SENDER_IDS
+        == (
+            101,
+            202,
+        )
+    )
+
 
 def test_valid_remote_vps_config_is_accepted(
     monkeypatch: pytest.MonkeyPatch,
@@ -123,6 +136,13 @@ def test_valid_remote_vps_config_is_accepted(
             "TODOBA_EXECUTOR_SECRET",
             "TODOBA_EXECUTOR_SECRET is required",
         ),
+        (
+            "TELEGRAM_AUTHORIZED_SENDER_IDS",
+            (
+                "TELEGRAM_AUTHORIZED_SENDER_IDS "
+                "is required"
+            ),
+        ),
     ],
 )
 def test_remote_vps_config_rejects_missing_values(
@@ -142,3 +162,21 @@ def test_remote_vps_config_rejects_missing_values(
         match=expected_message,
     ):
         loaded.validate_telegram_config()
+
+
+def test_config_rejects_invalid_authorized_sender_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match=(
+            "TELEGRAM_AUTHORIZED_SENDER_IDS "
+            "must contain positive integers"
+        ),
+    ):
+        reload_remote_config(
+            monkeypatch,
+            TELEGRAM_AUTHORIZED_SENDER_IDS=(
+                "101,invalid"
+            ),
+        )

@@ -43,6 +43,7 @@ def load_remote_listener(
         "TELEGRAM_SESSION": "test-session",
         "TELEGRAM_SIGNAL_GROUP_ID": "-1001",
         "TELEGRAM_EXECUTION_MODE": "REMOTE_VPS",
+        "TELEGRAM_AUTHORIZED_SENDER_IDS": "1",
         "MT5_MAX_SPREAD_POINTS": "100",
         "TODOBA_CLOUD_BASE_URL": (
             "https://api.todobagroup.com"
@@ -385,6 +386,55 @@ def test_remote_vps_rejects_at_active_trade_limit(
         "Maximum active trade limit reached: "
         "10/10 (positions=6, pending=4)."
     )
+
+
+def test_remote_vps_rejects_unauthorized_sender(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    listener = load_remote_listener(
+        monkeypatch
+    )
+
+    fake_http_client = FakeRemoteHttpClient()
+
+    monkeypatch.setattr(
+        listener,
+        "remote_http_client",
+        fake_http_client,
+        raising=False,
+    )
+
+    listener.processed_message_keys.clear()
+
+    incoming_signal = IncomingSignal(
+        source="telegram",
+        message=(
+            "SELL GOLD NOW\n"
+            "SL: 4400\n"
+            "TP: 4370"
+        ),
+        sender="unauthorized",
+        sender_id=999,
+        chat_id=-1001,
+        message_id=178001,
+        received_at=datetime.now(
+            UTC
+        ),
+    )
+
+    result = (
+        listener.process_remote_vps_signal(
+            incoming_signal
+        )
+    )
+
+    assert result == {
+        "status": "unauthorized_sender",
+        "sender_id": 999,
+    }
+
+    assert fake_http_client.read_agent_ids == []
+    assert fake_http_client.sent_missions == []
 
 
 @pytest.mark.parametrize(

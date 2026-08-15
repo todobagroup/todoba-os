@@ -52,6 +52,48 @@ def _read_float(
         ) from error
 
 
+def _read_positive_int_tuple(
+    name: str,
+) -> tuple[int, ...]:
+    raw_value = os.getenv(
+        name,
+        "",
+    ).strip()
+
+    if not raw_value:
+        return ()
+
+    values: list[int] = []
+
+    for item in raw_value.split(","):
+        normalized_item = item.strip()
+
+        try:
+            value = int(
+                normalized_item
+            )
+        except ValueError as error:
+            raise ValueError(
+                f"{name} must contain positive "
+                "integers separated by commas."
+            ) from error
+
+        if value <= 0:
+            raise ValueError(
+                f"{name} must contain positive "
+                "integers separated by commas."
+            )
+
+        if value not in values:
+            values.append(
+                value
+            )
+
+    return tuple(
+        values
+    )
+
+
 TODOBA_API_HOST = os.getenv(
     "TODOBA_API_HOST",
     "127.0.0.1",
@@ -100,6 +142,12 @@ TELEGRAM_EXECUTION_MODE = os.getenv(
     "TELEGRAM_EXECUTION_MODE",
     "DRY_RUN",
 ).strip().upper()
+
+TELEGRAM_AUTHORIZED_SENDER_IDS = (
+    _read_positive_int_tuple(
+        "TELEGRAM_AUTHORIZED_SENDER_IDS"
+    )
+)
 
 MT5_BROKER_GOLD_SYMBOL = os.getenv(
     "MT5_BROKER_GOLD_SYMBOL",
@@ -170,6 +218,12 @@ def validate_telegram_config() -> None:
             "TELEGRAM_SIGNAL_GROUP_ID is required."
         )
 
+    if not TELEGRAM_AUTHORIZED_SENDER_IDS:
+        errors.append(
+            "TELEGRAM_AUTHORIZED_SENDER_IDS "
+            "is required."
+        )
+
     allowed_modes = {
         "DRY_RUN",
         "LIVE_DEMO",
@@ -181,6 +235,7 @@ def validate_telegram_config() -> None:
             "TELEGRAM_EXECUTION_MODE must be "
             "DRY_RUN, LIVE_DEMO, or REMOTE_VPS."
         )
+
     if TELEGRAM_EXECUTION_MODE == "REMOTE_VPS":
         if not TODOBA_CLOUD_BASE_URL:
             errors.append(

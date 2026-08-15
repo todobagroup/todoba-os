@@ -10,6 +10,7 @@ Responsibilities:
 - persist control records
 - record broker control result counts
 - remove terminal missions from active persistence
+- release acknowledged or terminal delivery leases
 
 This component does not receive HTTP requests, deliver
 missions, or control broker trades.
@@ -17,6 +18,12 @@ missions, or control broker trades.
 
 from typing import Optional
 
+from backend.trading.control.control_mission_delivery_lease_persistence import (
+    ControlMissionDeliveryLeasePersistence,
+)
+from backend.trading.control.control_mission_delivery_lease_registry import (
+    ControlMissionDeliveryLeaseRegistry,
+)
 from backend.trading.control.control_mission_persistence import (
     ControlMissionPersistence,
 )
@@ -40,7 +47,7 @@ from backend.trading.control.control_mission_status import (
 class ControlMissionLifecycleService:
     """
     Service responsible for control mission lifecycle
-    coordination.
+    coordination and delivery lease release.
     """
 
     def __init__(
@@ -55,6 +62,12 @@ class ControlMissionLifecycleService:
         ] = None,
         mission_persistence: Optional[
             ControlMissionPersistence
+        ] = None,
+        lease_registry: Optional[
+            ControlMissionDeliveryLeaseRegistry
+        ] = None,
+        lease_persistence: Optional[
+            ControlMissionDeliveryLeasePersistence
         ] = None,
     ) -> None:
         if not isinstance(
@@ -110,10 +123,44 @@ class ControlMissionLifecycleService:
                 "mission_persistence requires repository."
             )
 
+        if (
+            lease_registry is not None
+            and not isinstance(
+                lease_registry,
+                ControlMissionDeliveryLeaseRegistry,
+            )
+        ):
+            raise TypeError(
+                "lease_registry must be "
+                "ControlMissionDeliveryLeaseRegistry."
+            )
+
+        if (
+            lease_persistence is not None
+            and not isinstance(
+                lease_persistence,
+                ControlMissionDeliveryLeasePersistence,
+            )
+        ):
+            raise TypeError(
+                "lease_persistence must be "
+                "ControlMissionDeliveryLeasePersistence."
+            )
+
+        if (
+            lease_persistence is not None
+            and lease_registry is None
+        ):
+            raise ValueError(
+                "lease_persistence requires lease_registry."
+            )
+
         self.registry = registry
         self.record_persistence = record_persistence
         self.repository = repository
         self.mission_persistence = mission_persistence
+        self.lease_registry = lease_registry
+        self.lease_persistence = lease_persistence
 
     def _get_record(
         self,
@@ -140,20 +187,49 @@ class ControlMissionLifecycleService:
         self,
         mission_id: str,
     ) -> None:
-        if self.repository is None:
+        if self.repository is not None:
+            removed = self.repository.remove(
+                mission_id
+            )
+
+            if (
+                removed
+                and self.mission_persistence is not None
+            ):
+                self.mission_persistence.save(
+                    self.repository
+                )
+
+        self._release_delivery_lease(
+            mission_id
+        )
+
+    def _release_delivery_lease(
+        self,
+        mission_id: str,
+    ) -> None:
+        if self.lease_registry is None:
             return
 
-        removed = self.repository.remove(
+        released = self.lease_registry.release(
             mission_id
         )
 
         if (
-            removed
-            and self.mission_persistence is not None
+            released is None
+            or self.lease_persistence is None
         ):
-            self.mission_persistence.save(
-                self.repository
+            return
+
+        try:
+            self.lease_persistence.save(
+                self.lease_registry
             )
+        except Exception:
+            self.lease_registry.acquire(
+                released
+            )
+            raise
 
     @staticmethod
     def _require_transition(
@@ -322,6 +398,9 @@ class ControlMissionLifecycleService:
         )
 
         if record.status is ControlMissionStatus.ACKNOWLEDGED:
+            self._release_delivery_lease(
+                mission_id
+            )
             return record
 
         self._require_transition(
@@ -334,6 +413,9 @@ class ControlMissionLifecycleService:
         record.acknowledged_at = acknowledged_at
 
         self._persist_records()
+        self._release_delivery_lease(
+            mission_id
+        )
 
         return record
 
@@ -416,6 +498,9 @@ class ControlMissionLifecycleService:
                 == canceled_pending_order_count
                 and record.failed_item_count == 0
             ):
+                self._release_delivery_lease(
+                    mission_id
+                )
                 return record
 
             raise ValueError(
@@ -510,6 +595,9 @@ class ControlMissionLifecycleService:
                 and record.failed_item_count
                 == failed_item_count
             ):
+                self._release_delivery_lease(
+                    mission_id
+                )
                 return record
 
             raise ValueError(

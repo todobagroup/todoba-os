@@ -8,6 +8,15 @@ from backend.trading.control.control_action import (
 from backend.trading.control.control_mission import (
     ControlMission,
 )
+from backend.trading.control.control_mission_delivery_lease import (
+    ControlMissionDeliveryLease,
+)
+from backend.trading.control.control_mission_delivery_lease_persistence import (
+    ControlMissionDeliveryLeasePersistence,
+)
+from backend.trading.control.control_mission_delivery_lease_registry import (
+    ControlMissionDeliveryLeaseRegistry,
+)
 from backend.trading.control.control_mission_lifecycle_service import (
     ControlMissionLifecycleService,
 )
@@ -85,11 +94,19 @@ def build_service(
         / "control_mission_records.json"
     )
 
+    lease_registry = ControlMissionDeliveryLeaseRegistry()
+    lease_persistence = ControlMissionDeliveryLeasePersistence(
+        tmp_path
+        / "control_mission_delivery_leases.json"
+    )
+
     service = ControlMissionLifecycleService(
         registry,
         record_persistence,
         repository=repository,
         mission_persistence=mission_persistence,
+        lease_registry=lease_registry,
+        lease_persistence=lease_persistence,
     )
 
     return (
@@ -386,4 +403,146 @@ def test_unknown_mission_is_rejected(
     ):
         service.queue(
             "missing-control"
+        )
+
+
+def test_acknowledgement_releases_and_persists_lease(
+    tmp_path: Path,
+) -> None:
+    service, _, _, _, _ = build_service(
+        tmp_path
+    )
+    lease_registry = service.lease_registry
+    lease_persistence = service.lease_persistence
+    assert lease_registry is not None
+    assert lease_persistence is not None
+
+    service.queue(
+        MISSION_ID
+    )
+    service.mark_delivered(
+        MISSION_ID,
+        "2026-08-15T00:00:01Z",
+    )
+    lease_registry.acquire(
+        ControlMissionDeliveryLease(
+            mission_id=MISSION_ID,
+            agent_id="trusted-agent-001",
+            leased_at="2026-08-15T00:00:01Z",
+            expires_at="2026-08-15T00:00:31Z",
+        )
+    )
+    lease_persistence.save(
+        lease_registry
+    )
+
+    service.acknowledge(
+        MISSION_ID,
+        "2026-08-15T00:00:02Z",
+    )
+
+    assert lease_registry.size() == 0
+    restored = ControlMissionDeliveryLeaseRegistry()
+    assert lease_persistence.restore(
+        restored
+    ) == 0
+
+
+def test_terminal_failure_releases_lease_as_fallback(
+    tmp_path: Path,
+) -> None:
+    service, _, _, _, _ = build_service(
+        tmp_path
+    )
+    lease_registry = service.lease_registry
+    assert lease_registry is not None
+
+    service.queue(
+        MISSION_ID
+    )
+    service.mark_delivered(
+        MISSION_ID,
+        "2026-08-15T00:00:01Z",
+    )
+    lease_registry.acquire(
+        ControlMissionDeliveryLease(
+            mission_id=MISSION_ID,
+            agent_id="trusted-agent-001",
+            leased_at="2026-08-15T00:00:01Z",
+            expires_at="2026-08-15T00:00:31Z",
+        )
+    )
+
+    service.fail_execution(
+        MISSION_ID,
+        "2026-08-15T00:00:02Z",
+        "Agent failed before acknowledgement.",
+        failed_item_count=1,
+    )
+
+    assert lease_registry.size() == 0
+
+
+def test_lease_persistence_failure_restores_released_lease(
+    tmp_path: Path,
+) -> None:
+    class FailingLeasePersistence(
+        ControlMissionDeliveryLeasePersistence
+    ):
+        def save(self, registry) -> None:
+            raise RuntimeError(
+                "proof lease persistence failure"
+            )
+
+    service, _, _, _, _ = build_service(
+        tmp_path
+    )
+    lease_registry = service.lease_registry
+    assert lease_registry is not None
+
+    service.queue(
+        MISSION_ID
+    )
+    service.mark_delivered(
+        MISSION_ID,
+        "2026-08-15T00:00:01Z",
+    )
+    lease_registry.acquire(
+        ControlMissionDeliveryLease(
+            mission_id=MISSION_ID,
+            agent_id="trusted-agent-001",
+            leased_at="2026-08-15T00:00:01Z",
+            expires_at="2026-08-15T00:00:31Z",
+        )
+    )
+    service.lease_persistence = FailingLeasePersistence(
+        tmp_path / "failing_leases.json"
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="proof lease persistence failure",
+    ):
+        service.acknowledge(
+            MISSION_ID,
+            "2026-08-15T00:00:02Z",
+        )
+
+    assert lease_registry.size() == 1
+
+
+def test_lease_persistence_requires_lease_registry(
+    tmp_path: Path,
+) -> None:
+    lease_persistence = ControlMissionDeliveryLeasePersistence(
+        tmp_path / "control_leases.json"
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="lease_persistence requires lease_registry",
+    ):
+        ControlMissionLifecycleService(
+            ControlMissionRegistry(),
+            lease_persistence=lease_persistence,
         )

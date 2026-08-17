@@ -6,6 +6,7 @@
 #include <TODOBAExecution/ExecutionResult.mqh>
 #include <TODOBAExecution/SymbolMapper.mqh>
 
+
 class TODOBAExecutionEngine
 {
 
@@ -14,13 +15,55 @@ private:
    CTrade trade;
 
 
-   TODOBAExecutionResult BuildResult()
+   static bool IsPendingOrderType(
+      const string order_type
+   )
+   {
+      return (
+         order_type == "BUY LIMIT" ||
+         order_type == "SELL LIMIT" ||
+         order_type == "BUY STOP" ||
+         order_type == "SELL STOP"
+      );
+   }
+
+
+   void ConfigureFilling(
+      const bool is_pending
+   )
+   {
+      if(is_pending)
+      {
+         trade.SetTypeFilling(
+            ORDER_FILLING_RETURN
+         );
+
+         return;
+      }
+
+      trade.SetTypeFilling(
+         ORDER_FILLING_IOC
+      );
+   }
+
+
+   TODOBAExecutionResult BuildResult(
+      const bool is_pending
+   )
    {
       TODOBAExecutionResult result;
 
-      result.success =
+      result.success = (
          trade.ResultRetcode()
-         == TRADE_RETCODE_DONE;
+         == TRADE_RETCODE_DONE
+         ||
+         (
+            is_pending
+            &&
+            trade.ResultRetcode()
+            == TRADE_RETCODE_PLACED
+         )
+      );
 
 
       result.order_ticket =
@@ -60,38 +103,50 @@ public:
       string comment
    )
    {
+      trade.SetExpertMagicNumber(
+         magic_number
+      );
 
-     trade.SetExpertMagicNumber(
-   magic_number
-);
-symbol = TODOBA_SymbolMapper::Resolve(
-   symbol
-);
+      symbol =
+         TODOBA_SymbolMapper::Resolve(
+            symbol
+         );
 
-Print(
-   "AFTER MAPPER SYMBOL=[",
-   symbol,
-   "]"
-);
 
-trade.SetTypeFilling(
-   ORDER_FILLING_IOC
-);
-      trade.SetTypeFilling(
-   ORDER_FILLING_IOC
-);
-Print(
-   "TODOBA Engine order_type=[",
-   order_type,
-   "]"
-);
+      Print(
+         "AFTER MAPPER SYMBOL=[",
+         symbol,
+         "]"
+      );
+
+
+      bool is_pending =
+         IsPendingOrderType(
+            order_type
+         );
+
+
+      ConfigureFilling(
+         is_pending
+      );
+
+
+      Print(
+         "TODOBA Engine order_type=[",
+         order_type,
+         "]"
+      );
+
+
       if(
          order_type == "BUY" ||
          order_type == "BUY NOW"
       )
-      {Print(
-   "TODOBA Engine: ENTER BUY BLOCK"
-);
+      {
+         Print(
+            "TODOBA Engine: ENTER BUY BLOCK"
+         );
+
          Print(
             "TODOBA Engine: sending BUY ",
             symbol,
@@ -118,11 +173,13 @@ Print(
          );
 
 
-         return BuildResult();
+         return BuildResult(
+            is_pending
+         );
       }
 
 
-            if(
+      if(
          order_type == "SELL" ||
          order_type == "SELL NOW"
       )
@@ -153,7 +210,9 @@ Print(
          );
 
 
-         return BuildResult();
+         return BuildResult(
+            is_pending
+         );
       }
 
 
@@ -172,7 +231,10 @@ Print(
             comment
          );
 
-         return BuildResult();
+
+         return BuildResult(
+            is_pending
+         );
       }
 
 
@@ -191,7 +253,10 @@ Print(
             comment
          );
 
-         return BuildResult();
+
+         return BuildResult(
+            is_pending
+         );
       }
 
 
@@ -210,7 +275,10 @@ Print(
             comment
          );
 
-         return BuildResult();
+
+         return BuildResult(
+            is_pending
+         );
       }
 
 
@@ -229,7 +297,10 @@ Print(
             comment
          );
 
-         return BuildResult();
+
+         return BuildResult(
+            is_pending
+         );
       }
 
 
@@ -240,7 +311,8 @@ Print(
       failed.deal_ticket = 0;
       failed.retcode = 0;
       failed.price = 0;
-      failed.comment = "Unsupported order type.";
+      failed.comment =
+         "Unsupported order type.";
 
       return failed;
    }

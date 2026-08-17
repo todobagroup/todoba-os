@@ -31,6 +31,17 @@ public:
       if(!IsSupportedOrderType(mission.order_type))
          return false;
 
+      if(
+         IsPendingOrderType(
+            mission.order_type
+         )
+         &&
+         !mission.has_entry
+      )
+      {
+         return false;
+      }
+
       if(mission.volume <= 0.0)
          return false;
 
@@ -51,6 +62,19 @@ public:
 
 
 private:
+
+   static bool IsPendingOrderType(
+      const string order_type
+   )
+   {
+      return (
+         order_type == "BUY LIMIT" ||
+         order_type == "SELL LIMIT" ||
+         order_type == "BUY STOP" ||
+         order_type == "SELL STOP"
+      );
+   }
+
 
    static bool IsSupportedOrderType(
       const string order_type

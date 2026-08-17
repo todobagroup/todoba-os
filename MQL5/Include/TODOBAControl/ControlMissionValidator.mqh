@@ -4,6 +4,7 @@
 
 #include <TODOBAControl/ControlMissionParser.mqh>
 #include <TODOBAExecution/AccountFingerprint.mqh>
+#include <TODOBAExecution/MissionFreshnessGuard.mqh>
 
 
 class TODOBAControlMissionValidator
@@ -88,11 +89,17 @@ public:
       if(mission.requested_by_sender_id <= 0)
          return false;
 
-      if(StringLen(mission.created_at) == 0)
-         return false;
 
-      if(StringLen(mission.expires_at) == 0)
+      if(
+         !TODOBAMissionFreshnessGuard::Validate(
+            mission.created_at,
+            mission.expires_at
+         )
+      )
+      {
          return false;
+      }
+
 
       if(mission.sequence <= 0)
          return false;

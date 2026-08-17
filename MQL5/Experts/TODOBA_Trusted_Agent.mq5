@@ -20,7 +20,7 @@
 #include <TODOBAControl/ControlEngine.mqh>
 #include <TODOBAControl/ControlResult.mqh>
 #define TODOBA_AGENT_NAME "TODOBA Trusted Agent"
-#define TODOBA_AGENT_VERSION "1.8.0"
+#define TODOBA_AGENT_VERSION "1.8.1"
 const long TODOBA_MAGIC_NUMBER = 10001;
 
 input int PollIntervalSeconds = 5;

@@ -2,6 +2,7 @@
 #define TODOBA_EXECUTION_MISSION_VALIDATOR_MQH
 
 #include <TODOBAExecution/ExecutionMissionParser.mqh>
+#include <TODOBAExecution/MissionFreshnessGuard.mqh>
 
 
 class TODOBAExecutionMissionValidator
@@ -24,6 +25,16 @@ public:
 
       if(StringLen(mission.account_fingerprint) == 0)
          return false;
+
+      if(
+         !TODOBAMissionFreshnessGuard::Validate(
+            mission.created_at,
+            mission.expires_at
+         )
+      )
+      {
+         return false;
+      }
 
       if(StringLen(mission.symbol) == 0)
          return false;

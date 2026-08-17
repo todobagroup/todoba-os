@@ -15,6 +15,7 @@ from backend.config import (
     TODOBA_TRUSTED_AGENT_ID,
     TODOBA_TRUSTED_AGENT_SECRET,
     TODOBA_EXECUTION_MISSION_SIGNING_SECRET,
+    TODOBA_CONTROL_MISSION_SIGNING_SECRET,
 )
 from backend.runtime.runtime_mode import (
     RuntimeMode,
@@ -22,6 +23,70 @@ from backend.runtime.runtime_mode import (
 )
 from backend.runtime.todoba_runtime import (
     TODOBARuntime,
+)
+
+from backend.trading.control.control_mission_api import (
+    create_control_mission_router,
+)
+from backend.trading.control.control_mission_delivery_bridge import (
+    ControlMissionDeliveryBridge,
+)
+from backend.trading.control.control_mission_delivery_expiration_policy import (
+    ControlMissionDeliveryExpirationPolicy,
+)
+from backend.trading.control.control_mission_delivery_lease_persistence import (
+    ControlMissionDeliveryLeasePersistence,
+)
+from backend.trading.control.control_mission_delivery_lease_recovery import (
+    ControlMissionDeliveryLeaseRecovery,
+)
+from backend.trading.control.control_mission_delivery_lease_registry import (
+    ControlMissionDeliveryLeaseRegistry,
+)
+from backend.trading.control.control_mission_delivery_lease_service import (
+    ControlMissionDeliveryLeaseService,
+)
+from backend.trading.control.control_mission_delivery_redelivery_processor import (
+    ControlMissionDeliveryRedeliveryProcessor,
+)
+from backend.trading.control.control_mission_injection_api import (
+    create_control_mission_injection_router,
+)
+from backend.trading.control.control_mission_lifecycle_api import (
+    create_control_mission_lifecycle_router,
+)
+from backend.trading.control.control_mission_lifecycle_scheduler import (
+    ControlMissionLifecycleScheduler,
+)
+from backend.trading.control.control_mission_lifecycle_service import (
+    ControlMissionLifecycleService,
+)
+from backend.trading.control.control_mission_persistence import (
+    ControlMissionPersistence,
+)
+from backend.trading.control.control_mission_record_persistence import (
+    ControlMissionRecordPersistence,
+)
+from backend.trading.control.control_mission_record_recovery import (
+    ControlMissionRecordRecovery,
+)
+from backend.trading.control.control_mission_recovery import (
+    ControlMissionRecovery,
+)
+from backend.trading.control.control_mission_registry import (
+    ControlMissionRegistry,
+)
+from backend.trading.control.control_mission_repository import (
+    ControlMissionRepository,
+)
+from backend.trading.control.control_mission_service import (
+    ControlMissionService,
+)
+from backend.trading.control.control_mission_signer import (
+    ControlMissionSigner,
+)
+from backend.trading.control.control_mission_store import (
+    ControlMissionStore,
 )
 from backend.trading.execution.broker_execution_evidence_api import (
     create_broker_execution_evidence_router,
@@ -187,6 +252,24 @@ MISSION_DELIVERY_LEASE_STORAGE_PATH = (
     / "execution_mission_delivery_leases.json"
 )
 
+CONTROL_MISSION_STORAGE_PATH = (
+    Path("data")
+    / "trading"
+    / "control_missions.json"
+)
+
+CONTROL_MISSION_RECORD_STORAGE_PATH = (
+    Path("data")
+    / "trading"
+    / "control_mission_records.json"
+)
+
+CONTROL_MISSION_DELIVERY_LEASE_STORAGE_PATH = (
+    Path("data")
+    / "trading"
+    / "control_mission_delivery_leases.json"
+)
+
 
 todoba_runtime: TODOBARuntime = create_runtime(
     RuntimeMode(
@@ -271,6 +354,12 @@ async def lifespan(
 
     execution_mission_recovery.restore()
 
+    control_mission_record_recovery.restore()
+
+    control_mission_delivery_lease_recovery.restore()
+
+    control_mission_recovery.restore()
+
     await todoba_runtime.start()
 
     yield
@@ -293,6 +382,151 @@ executor_authenticator = (
     ExecutorAuthenticator(
         executor_id=TODOBA_EXECUTOR_ID,
         executor_secret=TODOBA_EXECUTOR_SECRET,
+    )
+)
+
+
+control_mission_repository = (
+    ControlMissionRepository()
+)
+
+control_mission_signer = (
+    ControlMissionSigner(
+        TODOBA_CONTROL_MISSION_SIGNING_SECRET
+    )
+)
+
+control_mission_persistence = (
+    ControlMissionPersistence(
+        CONTROL_MISSION_STORAGE_PATH
+    )
+)
+
+control_mission_store = (
+    ControlMissionStore()
+)
+
+control_mission_delivery_bridge = (
+    ControlMissionDeliveryBridge(
+        control_mission_store
+    )
+)
+
+control_mission_delivery_lease_registry = (
+    ControlMissionDeliveryLeaseRegistry()
+)
+
+control_mission_delivery_lease_persistence = (
+    ControlMissionDeliveryLeasePersistence(
+        CONTROL_MISSION_DELIVERY_LEASE_STORAGE_PATH
+    )
+)
+
+control_mission_delivery_lease_recovery = (
+    ControlMissionDeliveryLeaseRecovery(
+        persistence=(
+            control_mission_delivery_lease_persistence
+        ),
+        registry=(
+            control_mission_delivery_lease_registry
+        ),
+    )
+)
+
+control_mission_delivery_expiration_policy = (
+    ControlMissionDeliveryExpirationPolicy()
+)
+
+control_mission_delivery_lease_service = (
+    ControlMissionDeliveryLeaseService(
+        registry=(
+            control_mission_delivery_lease_registry
+        ),
+        lease_seconds=30.0,
+        persistence=(
+            control_mission_delivery_lease_persistence
+        ),
+    )
+)
+
+control_mission_registry = (
+    ControlMissionRegistry()
+)
+
+control_mission_record_persistence = (
+    ControlMissionRecordPersistence(
+        CONTROL_MISSION_RECORD_STORAGE_PATH
+    )
+)
+
+control_mission_lifecycle_service = (
+    ControlMissionLifecycleService(
+        control_mission_registry,
+        control_mission_record_persistence,
+        repository=control_mission_repository,
+        mission_persistence=control_mission_persistence,
+        lease_registry=(
+            control_mission_delivery_lease_registry
+        ),
+        lease_persistence=(
+            control_mission_delivery_lease_persistence
+        ),
+    )
+)
+
+control_mission_service = (
+    ControlMissionService(
+        control_mission_repository,
+        control_mission_persistence,
+        control_mission_delivery_bridge,
+        control_mission_registry,
+        control_mission_lifecycle_service,
+    )
+)
+
+control_mission_recovery = (
+    ControlMissionRecovery(
+        repository=control_mission_repository,
+        persistence=control_mission_persistence,
+        delivery_bridge=control_mission_delivery_bridge,
+        registry=control_mission_registry,
+        lifecycle_service=control_mission_lifecycle_service,
+        lease_registry=(
+            control_mission_delivery_lease_registry
+        ),
+    )
+)
+
+control_mission_record_recovery = (
+    ControlMissionRecordRecovery(
+        persistence=control_mission_record_persistence,
+        registry=control_mission_registry,
+    )
+)
+
+control_mission_delivery_redelivery_processor = (
+    ControlMissionDeliveryRedeliveryProcessor(
+        repository=control_mission_repository,
+        delivery_bridge=control_mission_delivery_bridge,
+        lease_registry=(
+            control_mission_delivery_lease_registry
+        ),
+        lease_persistence=(
+            control_mission_delivery_lease_persistence
+        ),
+        lifecycle_service=(
+            control_mission_lifecycle_service
+        ),
+        max_delivery_attempts=3,
+    )
+)
+
+control_mission_lifecycle_scheduler = (
+    ControlMissionLifecycleScheduler(
+        processor=(
+            control_mission_delivery_redelivery_processor
+        ),
+        interval_seconds=5.0,
     )
 )
 
@@ -579,6 +813,11 @@ todoba_runtime.register(
     stop=execution_mission_record_retention_scheduler.stop,
 )
 
+todoba_runtime.register(
+    start=control_mission_lifecycle_scheduler.start,
+    stop=control_mission_lifecycle_scheduler.stop,
+)
+
 app.include_router(
     create_broker_state_router(
         store=broker_state_store,
@@ -645,6 +884,31 @@ app.include_router(
 app.include_router(
     create_execution_mission_failed_router(
         execution_mission_evidence_intake,
+        trusted_agent_authenticator,
+    )
+)
+
+app.include_router(
+    create_control_mission_router(
+        control_mission_store,
+        trusted_agent_authenticator,
+        control_mission_delivery_lease_service,
+        control_mission_lifecycle_service,
+        control_mission_delivery_expiration_policy,
+        control_mission_signer,
+    )
+)
+
+app.include_router(
+    create_control_mission_injection_router(
+        control_mission_service,
+        executor_authenticator,
+    )
+)
+
+app.include_router(
+    create_control_mission_lifecycle_router(
+        control_mission_lifecycle_service,
         trusted_agent_authenticator,
     )
 )

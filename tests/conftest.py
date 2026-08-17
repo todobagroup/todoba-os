@@ -31,6 +31,11 @@ os.environ.setdefault(
     "test-execution-mission-signing-secret",
 )
 
+os.environ.setdefault(
+    "TODOBA_CONTROL_MISSION_SIGNING_SECRET",
+    "test-control-mission-signing-secret",
+)
+
 
 @pytest.fixture
 def isolated_main_execution_mission_evidence(

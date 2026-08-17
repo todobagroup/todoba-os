@@ -174,6 +174,11 @@ TODOBA_EXECUTION_MISSION_SIGNING_SECRET = os.getenv(
     "",
 ).strip()
 
+TODOBA_CONTROL_MISSION_SIGNING_SECRET = os.getenv(
+    "TODOBA_CONTROL_MISSION_SIGNING_SECRET",
+    "",
+).strip()
+
 TODOBA_EXECUTOR_ID = os.getenv(
     "TODOBA_EXECUTOR_ID",
     "telegram-executor-001",
@@ -294,6 +299,11 @@ def validate_trusted_agent_config() -> None:
         errors.append(
             "TODOBA_TRUSTED_AGENT_ID is required."
         )
+    if not TODOBA_CONTROL_MISSION_SIGNING_SECRET:
+        errors.append(
+            "TODOBA_CONTROL_MISSION_SIGNING_SECRET "
+            "is required."
+    )
 
     if not TODOBA_TRUSTED_AGENT_SECRET:
         errors.append(

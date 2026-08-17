@@ -13,9 +13,16 @@
 #include <TODOBAExecution/ExecutionMissionState.mqh>
 #include <TODOBAExecution/ExecutionEngine.mqh>
 #include <TODOBAExecution/ExecutionResult.mqh>
-
+#include <TODOBAControl/ControlMissionParser.mqh>
+#include <TODOBAControl/ControlMissionSignatureVerifier.mqh>
+#include <TODOBAControl/ControlMissionValidator.mqh>
+#include <TODOBAControl/ControlPermissionGuard.mqh>
+#include <TODOBAControl/ControlEngine.mqh>
+#include <TODOBAControl/ControlResult.mqh>
 #define TODOBA_AGENT_NAME "TODOBA Trusted Agent"
 #define TODOBA_AGENT_VERSION "1.6.9"
+const long TODOBA_MAGIC_NUMBER = 10001;
+
 input int PollIntervalSeconds = 5;
 
 input double MaxSpreadPoints = 100.0;
@@ -31,6 +38,15 @@ input string AgentId =
 TODOBAExecutionMissionState current_mission_state;
 
 TODOBAExecutionEngine execution_engine;
+TODOBAControlEngine control_engine;
+bool IsControlReady()
+{
+   return (
+      StringLen(
+         TODOBA_CONTROL_MISSION_SIGNING_SECRET
+      ) > 0
+   );
+}
 
 
 string BuildAuthenticationHeaders(
@@ -360,6 +376,188 @@ void SendFailed(
    {
       current_mission_state.Fail();
    }
+}
+
+bool SendControlAcknowledgement(
+   TODOBAControlMission &mission
+)
+{
+   string acknowledged_at =
+      UtcNowIso8601();
+
+   string payload =
+      "{"
+      "\"mission_id\":\""
+      + EscapeJsonString(
+         mission.mission_id
+      )
+      + "\","
+      "\"agent_id\":\""
+      + EscapeJsonString(
+         mission.agent_id
+      )
+      + "\","
+      "\"acknowledged_at\":\""
+      + acknowledged_at
+      + "\""
+      "}";
+
+   return PostJson(
+      "/control/missions/acknowledge",
+      payload
+   );
+}
+
+
+bool SendControlExecutionStarted(
+   TODOBAControlMission &mission
+)
+{
+   string started_at =
+      UtcNowIso8601();
+
+   string payload =
+      "{"
+      "\"mission_id\":\""
+      + EscapeJsonString(
+         mission.mission_id
+      )
+      + "\","
+      "\"agent_id\":\""
+      + EscapeJsonString(
+         mission.agent_id
+      )
+      + "\","
+      "\"started_at\":\""
+      + started_at
+      + "\""
+      "}";
+
+   return PostJson(
+      "/control/missions/execution-started",
+      payload
+   );
+}
+
+
+bool SendControlCompleted(
+   TODOBAControlMission &mission,
+   TODOBAControlResult &result
+)
+{
+   string completed_at =
+      UtcNowIso8601();
+
+   string payload =
+      "{"
+      "\"mission_id\":\""
+      + EscapeJsonString(
+         mission.mission_id
+      )
+      + "\","
+      "\"agent_id\":\""
+      + EscapeJsonString(
+         mission.agent_id
+      )
+      + "\","
+      "\"completed_at\":\""
+      + completed_at
+      + "\","
+      "\"matched_position_count\":"
+      + IntegerToString(
+         result.matched_position_count
+      )
+      + ","
+      "\"closed_position_count\":"
+      + IntegerToString(
+         result.closed_position_count
+      )
+      + ","
+      "\"matched_pending_order_count\":"
+      + IntegerToString(
+         result.matched_pending_order_count
+      )
+      + ","
+      "\"canceled_pending_order_count\":"
+      + IntegerToString(
+         result.canceled_pending_order_count
+      )
+      + "}";
+
+   return PostJson(
+      "/control/missions/completed",
+      payload
+   );
+}
+
+
+bool SendControlFailed(
+   TODOBAControlMission &mission,
+   TODOBAControlResult &result
+)
+{
+   string failed_at =
+      UtcNowIso8601();
+
+   string failure_reason =
+      result.failure_reason;
+
+   if(StringLen(failure_reason) == 0)
+   {
+      failure_reason =
+         "Control execution failed.";
+   }
+
+   string payload =
+      "{"
+      "\"mission_id\":\""
+      + EscapeJsonString(
+         mission.mission_id
+      )
+      + "\","
+      "\"agent_id\":\""
+      + EscapeJsonString(
+         mission.agent_id
+      )
+      + "\","
+      "\"failed_at\":\""
+      + failed_at
+      + "\","
+      "\"failure_reason\":\""
+      + EscapeJsonString(
+         failure_reason
+      )
+      + "\","
+      "\"matched_position_count\":"
+      + IntegerToString(
+         result.matched_position_count
+      )
+      + ","
+      "\"closed_position_count\":"
+      + IntegerToString(
+         result.closed_position_count
+      )
+      + ","
+      "\"matched_pending_order_count\":"
+      + IntegerToString(
+         result.matched_pending_order_count
+      )
+      + ","
+      "\"canceled_pending_order_count\":"
+      + IntegerToString(
+         result.canceled_pending_order_count
+      )
+      + ","
+      "\"failed_item_count\":"
+      + IntegerToString(
+         result.failed_item_count
+      )
+      + "}";
+
+   return PostJson(
+      "/control/missions/failed",
+      payload
+   );
 }
 
 
@@ -731,6 +929,265 @@ SendExecutionStarted(
    );
 }
 
+void PollControlCloud()
+{
+   if(
+      !IsControlReady()
+   )
+   {
+      return;
+   }
+
+
+   string url =
+      CloudBaseUrl
+      + "/control/missions/next";
+
+   char request_body[];
+   char response_body[];
+
+   string response_headers;
+
+
+   long status_code =
+      WebRequest(
+         "GET",
+         url,
+         BuildAuthenticationHeaders(
+            false
+         ),
+         3000,
+         request_body,
+         response_body,
+         response_headers
+      );
+
+
+   if(status_code != 200)
+      return;
+
+
+   string response =
+      CharArrayToString(
+         response_body
+      );
+
+
+   TODOBAControlMission mission;
+
+
+   if(
+      !TODOBAControlMissionParser::Parse(
+         response,
+         mission
+      )
+   )
+   {
+      return;
+   }
+
+
+   string mission_signature = "";
+
+
+   if(
+      !TODOBAControlMissionParser::ExtractSignature(
+         response,
+         mission_signature
+      )
+   )
+   {
+      Print(
+         TODOBA_AGENT_NAME,
+         " rejected control mission=",
+         mission.mission_id,
+         " reason=missing signature"
+      );
+
+      return;
+   }
+
+
+   if(
+      !TODOBAControlMissionSignatureVerifier::Verify(
+         mission,
+         mission_signature,
+         TODOBA_CONTROL_MISSION_SIGNING_SECRET
+      )
+   )
+   {
+      Print(
+         TODOBA_AGENT_NAME,
+         " rejected control mission=",
+         mission.mission_id,
+         " reason=invalid signature"
+      );
+
+      return;
+   }
+
+
+   if(
+      !TODOBAControlMissionValidator::Validate(
+         mission,
+         AgentId,
+         TODOBA_MAGIC_NUMBER
+      )
+   )
+   {
+      Print(
+         TODOBA_AGENT_NAME,
+         " rejected control mission=",
+         mission.mission_id,
+         " reason=validation failed"
+      );
+
+      return;
+   }
+
+
+   if(
+      !TODOBAControlPermissionGuard::Check(
+         mission.sequence
+      )
+   )
+   {
+      Print(
+         TODOBA_AGENT_NAME,
+         " rejected control mission=",
+         mission.mission_id,
+         " reason=sequence rejected"
+      );
+
+      return;
+   }
+
+
+   if(
+      !SendControlAcknowledgement(
+         mission
+      )
+   )
+   {
+      Print(
+         TODOBA_AGENT_NAME,
+         " control mission ACK failed=",
+         mission.mission_id
+      );
+
+      return;
+   }
+
+
+   if(
+      !TODOBAControlPermissionGuard::Commit(
+         mission.sequence
+      )
+   )
+   {
+      Print(
+         TODOBA_AGENT_NAME,
+         " control mission sequence commit failed=",
+         mission.mission_id
+      );
+
+      return;
+   }
+
+
+   if(
+      !SendControlExecutionStarted(
+         mission
+      )
+   )
+   {
+      Print(
+         TODOBA_AGENT_NAME,
+         " control mission start evidence failed=",
+         mission.mission_id
+      );
+
+      return;
+   }
+
+
+   Print(
+      TODOBA_AGENT_NAME,
+      " executing control mission=",
+      mission.mission_id,
+      " action=",
+      mission.action,
+      " symbol=",
+      mission.symbol,
+      " magic=",
+      mission.magic_number
+   );
+
+
+   TODOBAControlResult control_result =
+      control_engine.Execute(
+         mission
+      );
+
+
+   Print(
+      "TODOBA Control Result: success=",
+      control_result.success,
+      " matched_positions=",
+      control_result.matched_position_count,
+      " closed_positions=",
+      control_result.closed_position_count,
+      " matched_pending=",
+      control_result.matched_pending_order_count,
+      " canceled_pending=",
+      control_result.canceled_pending_order_count,
+      " failed_items=",
+      control_result.failed_item_count,
+      " reason=",
+      control_result.failure_reason
+   );
+
+
+   if(control_result.success)
+   {
+      if(
+         !SendControlCompleted(
+            mission,
+            control_result
+         )
+      )
+      {
+         Print(
+            "TODOBA CRITICAL: control broker action succeeded "
+            "but completion evidence was not stored. mission=",
+            mission.mission_id
+         );
+      }
+   }
+   else
+   {
+      if(
+         !SendControlFailed(
+            mission,
+            control_result
+         )
+      )
+      {
+         Print(
+            "TODOBA CRITICAL: control execution failed "
+            "but failure evidence was not stored. mission=",
+            mission.mission_id
+         );
+      }
+   }
+
+
+   Print(
+      TODOBA_AGENT_NAME,
+      " finished control mission=",
+      mission.mission_id
+   );
+}
 
 int OnInit()
 {
@@ -748,6 +1205,16 @@ int OnInit()
 
       if(StringLen(TODOBA_MISSION_SIGNING_SECRET) == 0)
       return INIT_PARAMETERS_INCORRECT;
+      
+   if(
+      !IsControlReady()
+)
+{
+      Print(
+         TODOBA_AGENT_NAME,
+          " control standby: signing secret not configured."
+   );
+}
 
    if(
       !TerminalInfoInteger(

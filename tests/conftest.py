@@ -27,6 +27,11 @@ os.environ.setdefault(
 )
 
 os.environ.setdefault(
+    "TODOBA_TRUSTED_AGENT_ACCOUNT_FINGERPRINT",
+    "test-account",
+)
+
+os.environ.setdefault(
     "TODOBA_EXECUTION_MISSION_SIGNING_SECRET",
     "test-execution-mission-signing-secret",
 )

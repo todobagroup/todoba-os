@@ -220,7 +220,7 @@ class ExecutionMissionDeliveryRedeliveryProcessor:
 
                 return None
 
-            result = self.delivery_bridge.deliver(
+            result = self.delivery_bridge.redeliver(
                 mission
             )
 

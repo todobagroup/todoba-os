@@ -8,11 +8,13 @@ This component owns:
 - mission persistence
 - lifecycle registration
 - mission record persistence
-- delivery to Trusted Agent queue
+- initial delivery to Trusted Agent queue
+- producer retry safety
 
 It does not:
 - receive HTTP requests
 - execute broker orders
+- own lease-based redelivery policy
 """
 
 from typing import Optional
@@ -38,12 +40,20 @@ from backend.trading.execution.execution_mission_registry import (
 from backend.trading.execution.execution_mission_repository import (
     ExecutionMissionRepository,
 )
+from backend.trading.execution.execution_mission_status import (
+    ExecutionMissionStatus,
+)
 
 
 class ExecutionMissionService:
     """
     Application service for execution mission creation.
     """
+
+    _TERMINAL_STATUSES = {
+        ExecutionMissionStatus.COMPLETED,
+        ExecutionMissionStatus.FAILED,
+    }
 
     def __init__(
         self,
@@ -121,7 +131,46 @@ class ExecutionMissionService:
                 "create_mission requires ExecutionMission."
             )
 
-        self.repository.save(
+        existing_record = self.registry.get(
+            mission.mission_id
+        )
+
+        if (
+            existing_record is not None
+            and existing_record.mission != mission
+        ):
+            raise ValueError(
+                "Execution mission ID conflict."
+            )
+
+        if existing_record is not None:
+            if (
+                existing_record.status
+                in self._TERMINAL_STATUSES
+            ):
+                return existing_record.mission
+
+            if (
+                existing_record.status
+                != ExecutionMissionStatus.CREATED
+            ):
+                return existing_record.mission
+
+            stored_mission = self.repository.save(
+                mission
+            )
+
+            self.persistence.save(
+                self.repository
+            )
+
+            self.delivery_bridge.redeliver(
+                stored_mission
+            )
+
+            return stored_mission
+
+        stored_mission = self.repository.save(
             mission
         )
 
@@ -129,12 +178,10 @@ class ExecutionMissionService:
             self.repository
         )
 
-        record = ExecutionMissionRecord(
-            mission=mission
-        )
-
-        self.registry.register(
-            record
+        record = self.registry.register(
+            ExecutionMissionRecord(
+                mission=stored_mission
+            )
         )
 
         if self.record_persistence is not None:
@@ -143,7 +190,7 @@ class ExecutionMissionService:
             )
 
         self.delivery_bridge.deliver(
-            mission
+            stored_mission
         )
 
-        return mission
+        return record.mission

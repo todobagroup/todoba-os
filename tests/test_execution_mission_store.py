@@ -1,3 +1,7 @@
+from dataclasses import replace
+
+import pytest
+
 from backend.trading.execution.execution_mission import (
     ExecutionMission,
 )
@@ -71,13 +75,95 @@ def test_store_returns_none_when_empty():
 def test_store_rejects_invalid_mission():
     store = ExecutionMissionStore()
 
-    try:
+    with pytest.raises(
+        TypeError,
+        match="push requires ExecutionMission",
+    ):
         store.push(
             {"mission_id": "invalid"}
         )
-    except TypeError:
-        pass
-    else:
-        raise AssertionError(
-            "store must reject non-ExecutionMission."
+
+
+def test_store_push_is_idempotent_for_identical_mission():
+    store = ExecutionMissionStore()
+    mission = build_mission()
+
+    first = store.push(
+        mission
+    )
+
+    second = store.push(
+        mission
+    )
+
+    assert first is mission
+    assert second is mission
+    assert store.size() == 1
+
+
+def test_store_rejects_same_mission_id_with_different_payload():
+    store = ExecutionMissionStore()
+    mission = build_mission()
+
+    store.push(
+        mission
+    )
+
+    conflicting = replace(
+        mission,
+        sequence=2,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "mission_id already exists with "
+            "different payload"
+        ),
+    ):
+        store.push(
+            conflicting
         )
+
+    assert store.size() == 1
+
+
+def test_store_redelivers_after_previous_pop():
+    store = ExecutionMissionStore()
+    mission = build_mission()
+
+    store.push(
+        mission
+    )
+
+    assert store.pop() is mission
+    assert store.size() == 0
+
+    redelivered = store.redeliver(
+        mission
+    )
+
+    assert redelivered is mission
+    assert store.size() == 1
+    assert store.pop() is mission
+
+
+def test_store_redelivery_does_not_duplicate_queued_mission():
+    store = ExecutionMissionStore()
+    mission = build_mission()
+
+    store.push(
+        mission
+    )
+
+    first = store.redeliver(
+        mission
+    )
+
+    second = store.redeliver(
+        mission
+    )
+
+    assert first is mission
+    assert second is mission
+    assert store.size() == 1

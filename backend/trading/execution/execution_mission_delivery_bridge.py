@@ -2,7 +2,8 @@
 TODOBA Execution Mission Delivery Bridge
 
 Moves execution missions into the delivery queue
-consumed by Trusted Agents.
+consumed by Trusted Agents and supports explicit
+redelivery after an incomplete delivery attempt.
 
 This component does not:
 - create missions
@@ -13,7 +14,6 @@ This component does not:
 from backend.trading.execution.execution_mission import (
     ExecutionMission,
 )
-
 from backend.trading.execution.execution_mission_store import (
     ExecutionMissionStore,
 )
@@ -29,7 +29,6 @@ class ExecutionMissionDeliveryBridge:
         self,
         store: ExecutionMissionStore,
     ) -> None:
-
         if not isinstance(
             store,
             ExecutionMissionStore,
@@ -45,7 +44,6 @@ class ExecutionMissionDeliveryBridge:
         self,
         mission: ExecutionMission,
     ) -> ExecutionMission:
-
         if not isinstance(
             mission,
             ExecutionMission,
@@ -54,8 +52,22 @@ class ExecutionMissionDeliveryBridge:
                 "deliver requires ExecutionMission."
             )
 
-        self.store.push(
+        return self.store.push(
             mission
         )
 
-        return mission
+    def redeliver(
+        self,
+        mission: ExecutionMission,
+    ) -> ExecutionMission:
+        if not isinstance(
+            mission,
+            ExecutionMission,
+        ):
+            raise TypeError(
+                "redeliver requires ExecutionMission."
+            )
+
+        return self.store.redeliver(
+            mission
+        )

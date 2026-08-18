@@ -2,6 +2,7 @@
 #define TODOBA_EXECUTION_MISSION_VALIDATOR_MQH
 
 #include <TODOBAExecution/ExecutionMissionParser.mqh>
+#include <TODOBAExecution/AccountFingerprint.mqh>
 #include <TODOBAExecution/MissionFreshnessGuard.mqh>
 
 
@@ -23,8 +24,36 @@ public:
       if(mission.agent_id != expected_agent_id)
          return false;
 
-      if(StringLen(mission.account_fingerprint) == 0)
+
+      string current_account_fingerprint =
+         TODOBAAccountFingerprint::Build();
+
+      if(
+         StringLen(
+            current_account_fingerprint
+         ) == 0
+      )
+      {
          return false;
+      }
+
+      if(
+         StringLen(
+            mission.account_fingerprint
+         ) == 0
+      )
+      {
+         return false;
+      }
+
+      if(
+         mission.account_fingerprint
+         != current_account_fingerprint
+      )
+      {
+         return false;
+      }
+
 
       if(
          !TODOBAMissionFreshnessGuard::Validate(

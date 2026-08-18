@@ -9,6 +9,7 @@ This component:
 - provides mission lookup
 - removes mission records
 - supports persistence layer
+- protects mission identity from payload conflicts
 
 It does not:
 
@@ -46,6 +47,19 @@ class ExecutionMissionRepository:
             raise TypeError(
                 "save requires ExecutionMission."
             )
+
+        existing = self._missions.get(
+            mission.mission_id
+        )
+
+        if existing is not None:
+            if existing != mission:
+                raise ValueError(
+                    "mission_id already exists with "
+                    "different payload."
+                )
+
+            return existing
 
         self._missions[
             mission.mission_id

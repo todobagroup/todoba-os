@@ -1,8 +1,13 @@
 import sys
+from dataclasses import replace
 from pathlib import Path
+
+import pytest
+
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
+
 
 from backend.trading.execution.execution_mission import (
     ExecutionMission,
@@ -51,6 +56,58 @@ def test_execution_mission_repository_stores_and_reads():
     assert repository.all() == [
         mission
     ]
+
+
+def test_execution_mission_repository_reuses_identical_mission():
+    mission = build_mission()
+
+    repository = ExecutionMissionRepository()
+
+    first = repository.save(
+        mission
+    )
+
+    second = repository.save(
+        mission
+    )
+
+    assert first == mission
+    assert second == mission
+    assert repository.size() == 1
+    assert repository.get(
+        mission.mission_id
+    ) == mission
+
+
+def test_execution_mission_repository_rejects_mission_id_conflict():
+    mission = build_mission()
+
+    conflicting_mission = replace(
+        mission,
+        tp=4130.0,
+    )
+
+    repository = ExecutionMissionRepository()
+
+    repository.save(
+        mission
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "mission_id already exists with "
+            "different payload"
+        ),
+    ):
+        repository.save(
+            conflicting_mission
+        )
+
+    assert repository.size() == 1
+    assert repository.get(
+        mission.mission_id
+    ) == mission
 
 
 def test_execution_mission_repository_removes_existing_mission():

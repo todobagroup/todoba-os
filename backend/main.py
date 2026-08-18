@@ -13,6 +13,7 @@ from backend.config import (
     TODOBA_EXECUTOR_SECRET,
     TODOBA_RUNTIME_MODE,
     TODOBA_TRUSTED_AGENT_ID,
+    TODOBA_TRUSTED_AGENT_ACCOUNT_FINGERPRINT,
     TODOBA_TRUSTED_AGENT_SECRET,
     TODOBA_EXECUTION_MISSION_SIGNING_SECRET,
     TODOBA_CONTROL_MISSION_SIGNING_SECRET,
@@ -232,6 +233,12 @@ from backend.trading.execution.executor_authenticator import (
 from backend.trading.execution.trusted_agent_authenticator import (
     TrustedAgentAuthenticator,
 )
+from backend.trading.execution.trusted_agent_account_binding_guard import (
+    TrustedAgentAccountBindingGuard,
+)
+from backend.trading.execution.trusted_agent_account_binding_store import (
+    TrustedAgentAccountBindingStore,
+)
 from backend.trading.execution.persistent_security_sequence_allocator import (
     PersistentSecuritySequenceAllocator,
 )
@@ -309,6 +316,25 @@ CONTROL_SECURITY_SEQUENCE_BINDING_STORAGE_PATH = (
     / "control_security_sequence_bindings.json"
 )
 
+TRUSTED_AGENT_ACCOUNT_BINDING_STORAGE_PATH = (
+    Path("data")
+    / "trading"
+    / "trusted_agent_account_bindings.json"
+)
+
+
+trusted_agent_account_binding_store = (
+    TrustedAgentAccountBindingStore(
+        TRUSTED_AGENT_ACCOUNT_BINDING_STORAGE_PATH
+    )
+)
+
+trusted_agent_account_binding_guard = (
+    TrustedAgentAccountBindingGuard(
+        trusted_agent_account_binding_store
+    )
+)
+
 
 todoba_runtime: TODOBARuntime = create_runtime(
     RuntimeMode(
@@ -360,10 +386,24 @@ def _process_recovered_execution_mission_evidence(
             return processed
 
 
+def _require_trusted_agent_account_binding(
+) -> str:
+    return (
+        trusted_agent_account_binding_guard.require_binding(
+            agent_id=TODOBA_TRUSTED_AGENT_ID,
+            account_fingerprint=(
+                TODOBA_TRUSTED_AGENT_ACCOUNT_FINGERPRINT
+            ),
+        )
+    )
+
+
 @asynccontextmanager
 async def lifespan(
     app: FastAPI,
 ):
+    _require_trusted_agent_account_binding()
+
     execution_mission_record_recovery.restore()
 
     execution_mission_delivery_lease_recovery.restore()

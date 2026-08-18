@@ -40,3 +40,4 @@ class ControlMission:
     expires_at: str
 
     sequence: int
+    security_sequence: int = 0

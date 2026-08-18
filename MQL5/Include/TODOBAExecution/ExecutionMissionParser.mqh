@@ -24,6 +24,7 @@ struct TODOBAExecutionMission
    string expires_at;
 
    long sequence;
+   long security_sequence;
 };
 
 

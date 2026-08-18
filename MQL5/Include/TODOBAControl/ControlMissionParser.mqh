@@ -18,6 +18,7 @@ struct TODOBAControlMission
    string expires_at;
 
    long sequence;
+   long security_sequence;
 };
 
 

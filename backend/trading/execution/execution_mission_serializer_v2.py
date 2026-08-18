@@ -1,13 +1,13 @@
 """
-TODOBA Execution Mission Serializer
+TODOBA Execution Mission Serializer V2
 
 Owns serialization and deserialization of the
-ExecutionMission V1 network contract.
+ExecutionMission V2 network contract.
 
-The V1 wire contract intentionally excludes
-security_sequence.
+V2 adds the Cloud-owned security sequence used for
+replay protection.
 
-Transport and security belong to separate capabilities.
+The legacy V1 serializer remains unchanged.
 """
 
 from typing import Any
@@ -17,10 +17,10 @@ from backend.trading.execution.execution_mission import (
 )
 
 
-class ExecutionMissionSerializer:
+class ExecutionMissionSerializerV2:
     """
-    Convert ExecutionMission objects to and from the
-    legacy V1 JSON-safe payload contract.
+    Convert ExecutionMission V2 objects to and from
+    JSON-safe payloads.
     """
 
     @staticmethod
@@ -34,6 +34,10 @@ class ExecutionMissionSerializer:
             raise TypeError(
                 "serialize requires ExecutionMission."
             )
+
+        ExecutionMissionSerializerV2._validate_security_sequence(
+            mission.security_sequence
+        )
 
         return {
             "mission_id": mission.mission_id,
@@ -52,6 +56,9 @@ class ExecutionMissionSerializer:
             "created_at": mission.created_at,
             "expires_at": mission.expires_at,
             "sequence": mission.sequence,
+            "security_sequence": (
+                mission.security_sequence
+            ),
         }
 
     @staticmethod
@@ -66,6 +73,14 @@ class ExecutionMissionSerializer:
                 "deserialize requires dict."
             )
 
+        security_sequence = payload[
+            "security_sequence"
+        ]
+
+        ExecutionMissionSerializerV2._validate_security_sequence(
+            security_sequence
+        )
+
         return ExecutionMission(
             mission_id=payload["mission_id"],
             agent_id=payload["agent_id"],
@@ -78,9 +93,32 @@ class ExecutionMissionSerializer:
             entry=payload["entry"],
             sl=payload["sl"],
             tp=payload["tp"],
-            magic_number=payload["magic_number"],
+            magic_number=payload[
+                "magic_number"
+            ],
             comment=payload["comment"],
             created_at=payload["created_at"],
             expires_at=payload["expires_at"],
             sequence=payload["sequence"],
+            security_sequence=security_sequence,
         )
+
+    @staticmethod
+    def _validate_security_sequence(
+        security_sequence: int,
+    ) -> None:
+        if (
+            not isinstance(
+                security_sequence,
+                int,
+            )
+            or isinstance(
+                security_sequence,
+                bool,
+            )
+            or security_sequence <= 0
+        ):
+            raise ValueError(
+                "security_sequence must be "
+                "a positive integer."
+            )

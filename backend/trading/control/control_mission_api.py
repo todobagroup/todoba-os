@@ -6,8 +6,8 @@ boundary consumed by Trusted Agents.
 
 This module owns HTTP transport only. Mission storage,
 delivery leasing, lifecycle tracking, expiration policy,
-serialization, signing, and authentication remain separate
-capabilities.
+serialization, signing, protocol negotiation, and
+authentication remain separate capabilities.
 """
 
 from datetime import datetime
@@ -15,6 +15,8 @@ from datetime import timezone
 
 from fastapi import APIRouter
 from fastapi import Depends
+from fastapi import HTTPException
+from fastapi import status
 
 from backend.trading.control.control_mission_delivery_expiration_policy import (
     ControlMissionDeliveryExpirationPolicy,
@@ -28,17 +30,24 @@ from backend.trading.control.control_mission_lifecycle_service import (
 from backend.trading.control.control_mission_serializer import (
     ControlMissionSerializer,
 )
+from backend.trading.control.control_mission_serializer_v2 import (
+    ControlMissionSerializerV2,
+)
 from backend.trading.control.control_mission_signer import (
     ControlMissionSigner,
+)
+from backend.trading.control.control_mission_signer_v2 import (
+    ControlMissionSignerV2,
 )
 from backend.trading.control.control_mission_store import (
     ControlMissionStore,
 )
-from backend.trading.execution.trusted_agent_authentication_dependency import (
-    create_trusted_agent_authentication_dependency,
-)
 from backend.trading.execution.trusted_agent_authenticator import (
     TrustedAgentAuthenticator,
+)
+from backend.trading.execution.trusted_agent_protocol_dependency import (
+    TrustedAgentProtocolContext,
+    create_trusted_agent_protocol_dependency,
 )
 
 
@@ -80,6 +89,8 @@ def create_control_mission_router(
     lifecycle_service: ControlMissionLifecycleService,
     expiration_policy: ControlMissionDeliveryExpirationPolicy,
     signer: ControlMissionSigner,
+    *,
+    signer_v2: ControlMissionSignerV2 | None = None,
 ) -> APIRouter:
     if not isinstance(
         store,
@@ -134,8 +145,19 @@ def create_control_mission_router(
             "signer must be ControlMissionSigner."
         )
 
-    require_trusted_agent = (
-        create_trusted_agent_authentication_dependency(
+    if (
+        signer_v2 is not None
+        and not isinstance(
+            signer_v2,
+            ControlMissionSignerV2,
+        )
+    ):
+        raise TypeError(
+            "signer_v2 must be ControlMissionSignerV2."
+        )
+
+    require_trusted_agent_protocol = (
+        create_trusted_agent_protocol_dependency(
             authenticator
         )
     )
@@ -146,10 +168,32 @@ def create_control_mission_router(
         "/control/missions/next"
     )
     def next_control_mission(
-        authenticated_agent_id: str = Depends(
-            require_trusted_agent
+        agent_context: TrustedAgentProtocolContext = Depends(
+            require_trusted_agent_protocol
         ),
     ):
+        authenticated_agent_id = (
+            agent_context.agent_id
+        )
+
+        mission_protocol = (
+            agent_context.mission_protocol
+        )
+
+        if (
+            mission_protocol == "V2"
+            and signer_v2 is None
+        ):
+            raise HTTPException(
+                status_code=(
+                    status.HTTP_503_SERVICE_UNAVAILABLE
+                ),
+                detail=(
+                    "TODOBA mission protocol V2 "
+                    "is not enabled."
+                ),
+            )
+
         mission = store.pop_for_agent(
             authenticated_agent_id
         )
@@ -198,17 +242,34 @@ def create_control_mission_router(
                 delivered_at=lease.leased_at,
             )
 
-            payload = ControlMissionSerializer.serialize(
-                mission
-            )
+            if mission_protocol == "V2":
+                payload = (
+                    ControlMissionSerializerV2.serialize(
+                        mission
+                    )
+                )
+
+                mission_signature = signer_v2.sign(
+                    mission
+                )
+            else:
+                payload = (
+                    ControlMissionSerializer.serialize(
+                        mission
+                    )
+                )
+
+                mission_signature = signer.sign(
+                    mission
+                )
 
             response = {
                 "status": "available",
                 "mission": payload,
                 "agent_id": authenticated_agent_id,
                 **payload,
-                "mission_signature": signer.sign(
-                    mission
+                "mission_signature": (
+                    mission_signature
                 ),
                 "delivery_lease": {
                     "mission_id": lease.mission_id,

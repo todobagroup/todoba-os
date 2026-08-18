@@ -85,6 +85,9 @@ from backend.trading.control.control_mission_service import (
 from backend.trading.control.control_mission_signer import (
     ControlMissionSigner,
 )
+from backend.trading.control.control_mission_signer_v2 import (
+    ControlMissionSignerV2,
+)
 from backend.trading.control.control_mission_store import (
     ControlMissionStore,
 )
@@ -135,6 +138,9 @@ from backend.trading.execution.execution_mission_delivery_lease_service import (
 )
 from backend.trading.execution.execution_mission_signer import (
     ExecutionMissionSigner,
+)
+from backend.trading.execution.execution_mission_signer_v2 import (
+    ExecutionMissionSignerV2,
 )
 from backend.trading.execution.execution_mission_delivery_redelivery_processor import (
     ExecutionMissionDeliveryRedeliveryProcessor,
@@ -451,6 +457,12 @@ control_mission_signer = (
     )
 )
 
+control_mission_signer_v2 = (
+    ControlMissionSignerV2(
+        TODOBA_CONTROL_MISSION_SIGNING_SECRET
+    )
+)
+
 control_mission_persistence = (
     ControlMissionPersistence(
         CONTROL_MISSION_STORAGE_PATH
@@ -617,6 +629,12 @@ execution_mission_repository = (
 
 execution_mission_signer = (
     ExecutionMissionSigner(
+        TODOBA_EXECUTION_MISSION_SIGNING_SECRET
+    )
+)
+
+execution_mission_signer_v2 = (
+    ExecutionMissionSignerV2(
         TODOBA_EXECUTION_MISSION_SIGNING_SECRET
     )
 )
@@ -920,6 +938,7 @@ app.include_router(
         execution_mission_lifecycle_service,
         execution_mission_delivery_expiration_policy,
         execution_mission_signer,
+        signer_v2=execution_mission_signer_v2,
     )
 )
 
@@ -979,6 +998,7 @@ app.include_router(
         control_mission_lifecycle_service,
         control_mission_delivery_expiration_policy,
         control_mission_signer,
+        signer_v2=control_mission_signer_v2,
     )
 )
 

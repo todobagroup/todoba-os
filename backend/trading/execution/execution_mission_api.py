@@ -6,13 +6,16 @@ Exposes the remote mission polling boundary.
 This module owns HTTP transport only.
 Mission storage, delivery leasing, lifecycle tracking,
 delivery expiration policy, serialization, signing,
-and authentication policy belong to separate capabilities.
+protocol negotiation, and authentication policy belong
+to separate capabilities.
 """
 
 from typing import Optional
 
 from fastapi import APIRouter
 from fastapi import Depends
+from fastapi import HTTPException
+from fastapi import status
 
 from backend.trading.execution.execution_mission_delivery_expiration_policy import (
     ExecutionMissionDeliveryExpirationPolicy,
@@ -26,17 +29,24 @@ from backend.trading.execution.execution_mission_lifecycle_service import (
 from backend.trading.execution.execution_mission_serializer import (
     ExecutionMissionSerializer,
 )
+from backend.trading.execution.execution_mission_serializer_v2 import (
+    ExecutionMissionSerializerV2,
+)
 from backend.trading.execution.execution_mission_signer import (
     ExecutionMissionSigner,
+)
+from backend.trading.execution.execution_mission_signer_v2 import (
+    ExecutionMissionSignerV2,
 )
 from backend.trading.execution.execution_mission_store import (
     ExecutionMissionStore,
 )
-from backend.trading.execution.trusted_agent_authentication_dependency import (
-    create_trusted_agent_authentication_dependency,
-)
 from backend.trading.execution.trusted_agent_authenticator import (
     TrustedAgentAuthenticator,
+)
+from backend.trading.execution.trusted_agent_protocol_dependency import (
+    TrustedAgentProtocolContext,
+    create_trusted_agent_protocol_dependency,
 )
 
 
@@ -54,6 +64,10 @@ def create_execution_mission_router(
     ] = None,
     signer: Optional[
         ExecutionMissionSigner
+    ] = None,
+    *,
+    signer_v2: Optional[
+        ExecutionMissionSignerV2
     ] = None,
 ) -> APIRouter:
     if not isinstance(
@@ -121,8 +135,19 @@ def create_execution_mission_router(
             "signer must be ExecutionMissionSigner."
         )
 
-    require_trusted_agent = (
-        create_trusted_agent_authentication_dependency(
+    if (
+        signer_v2 is not None
+        and not isinstance(
+            signer_v2,
+            ExecutionMissionSignerV2,
+        )
+    ):
+        raise TypeError(
+            "signer_v2 must be ExecutionMissionSignerV2."
+        )
+
+    require_trusted_agent_protocol = (
+        create_trusted_agent_protocol_dependency(
             authenticator
         )
     )
@@ -133,10 +158,32 @@ def create_execution_mission_router(
         "/missions/next",
     )
     def next_mission(
-        authenticated_agent_id: str = Depends(
-            require_trusted_agent
+        agent_context: TrustedAgentProtocolContext = Depends(
+            require_trusted_agent_protocol
         ),
     ):
+        authenticated_agent_id = (
+            agent_context.agent_id
+        )
+
+        mission_protocol = (
+            agent_context.mission_protocol
+        )
+
+        if (
+            mission_protocol == "V2"
+            and signer_v2 is None
+        ):
+            raise HTTPException(
+                status_code=(
+                    status.HTTP_503_SERVICE_UNAVAILABLE
+                ),
+                detail=(
+                    "TODOBA mission protocol V2 "
+                    "is not enabled."
+                ),
+            )
+
         mission = store.pop_for_agent(
             authenticated_agent_id
         )
@@ -193,9 +240,18 @@ def create_execution_mission_router(
                 delivered_at=lease.leased_at,
             )
 
-        payload = ExecutionMissionSerializer.serialize(
-            mission
-        )
+        if mission_protocol == "V2":
+            payload = (
+                ExecutionMissionSerializerV2.serialize(
+                    mission
+                )
+            )
+        else:
+            payload = (
+                ExecutionMissionSerializer.serialize(
+                    mission
+                )
+            )
 
         response = {
             "status": "available",
@@ -204,7 +260,13 @@ def create_execution_mission_router(
             **payload,
         }
 
-        if signer is not None:
+        if mission_protocol == "V2":
+            response["mission_signature"] = (
+                signer_v2.sign(
+                    mission
+                )
+            )
+        elif signer is not None:
             response["mission_signature"] = (
                 signer.sign(
                     mission

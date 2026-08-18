@@ -9,11 +9,16 @@ This component owns:
 - lifecycle registration
 - queue transition
 - delivery to the Trusted Agent queue
+- producer retry safety
+- optional Cloud-owned security sequence assignment
 
 It does not:
 - receive HTTP requests
 - execute broker control actions
 """
+
+from dataclasses import replace
+from typing import Optional
 
 from backend.trading.control.control_mission import (
     ControlMission,
@@ -36,8 +41,14 @@ from backend.trading.control.control_mission_registry import (
 from backend.trading.control.control_mission_repository import (
     ControlMissionRepository,
 )
+from backend.trading.control.control_mission_serializer import (
+    ControlMissionSerializer,
+)
 from backend.trading.control.control_mission_status import (
     ControlMissionStatus,
+)
+from backend.trading.execution.security_sequence_assignment_service import (
+    SecuritySequenceAssignmentService,
 )
 
 
@@ -58,6 +69,10 @@ class ControlMissionService:
         delivery_bridge: ControlMissionDeliveryBridge,
         registry: ControlMissionRegistry,
         lifecycle_service: ControlMissionLifecycleService,
+        *,
+        security_sequence_assignment_service: Optional[
+            SecuritySequenceAssignmentService
+        ] = None,
     ) -> None:
         if not isinstance(
             repository,
@@ -104,11 +119,62 @@ class ControlMissionService:
                 "ControlMissionLifecycleService."
             )
 
+        if (
+            security_sequence_assignment_service
+            is not None
+            and not isinstance(
+                security_sequence_assignment_service,
+                SecuritySequenceAssignmentService,
+            )
+        ):
+            raise TypeError(
+                "security_sequence_assignment_service "
+                "must be SecuritySequenceAssignmentService."
+            )
+
         self.repository = repository
         self.persistence = persistence
         self.delivery_bridge = delivery_bridge
         self.registry = registry
         self.lifecycle_service = lifecycle_service
+        self.security_sequence_assignment_service = (
+            security_sequence_assignment_service
+        )
+
+    def _assign_security_sequence(
+        self,
+        mission: ControlMission,
+    ) -> ControlMission:
+        assignment_service = (
+            self.security_sequence_assignment_service
+        )
+
+        if assignment_service is None:
+            return mission
+
+        if mission.security_sequence != 0:
+            raise ValueError(
+                "source mission security_sequence "
+                "must be zero."
+            )
+
+        source_payload = (
+            ControlMissionSerializer.serialize(
+                mission
+            )
+        )
+
+        security_sequence = (
+            assignment_service.assign(
+                mission_id=mission.mission_id,
+                source_payload=source_payload,
+            )
+        )
+
+        return replace(
+            mission,
+            security_sequence=security_sequence,
+        )
 
     def create_mission(
         self,
@@ -122,13 +188,17 @@ class ControlMissionService:
                 "create_mission requires ControlMission."
             )
 
+        final_mission = self._assign_security_sequence(
+            mission
+        )
+
         existing_record = self.registry.get(
-            mission.mission_id
+            final_mission.mission_id
         )
 
         if (
             existing_record is not None
-            and existing_record.mission != mission
+            and existing_record.mission != final_mission
         ):
             raise ValueError(
                 "Control mission ID conflict."
@@ -142,7 +212,7 @@ class ControlMissionService:
             return existing_record.mission
 
         stored_mission = self.repository.save(
-            mission
+            final_mission
         )
 
         self.persistence.save(

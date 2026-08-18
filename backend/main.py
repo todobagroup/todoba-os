@@ -226,6 +226,15 @@ from backend.trading.execution.executor_authenticator import (
 from backend.trading.execution.trusted_agent_authenticator import (
     TrustedAgentAuthenticator,
 )
+from backend.trading.execution.persistent_security_sequence_allocator import (
+    PersistentSecuritySequenceAllocator,
+)
+from backend.trading.execution.persistent_security_sequence_binding_store import (
+    PersistentSecuritySequenceBindingStore,
+)
+from backend.trading.execution.security_sequence_assignment_service import (
+    SecuritySequenceAssignmentService,
+)
 
 
 MISSION_STORAGE_PATH = (
@@ -268,6 +277,30 @@ CONTROL_MISSION_DELIVERY_LEASE_STORAGE_PATH = (
     Path("data")
     / "trading"
     / "control_mission_delivery_leases.json"
+)
+
+EXECUTION_SECURITY_SEQUENCE_STORAGE_PATH = (
+    Path("data")
+    / "trading"
+    / "execution_security_sequence.json"
+)
+
+EXECUTION_SECURITY_SEQUENCE_BINDING_STORAGE_PATH = (
+    Path("data")
+    / "trading"
+    / "execution_security_sequence_bindings.json"
+)
+
+CONTROL_SECURITY_SEQUENCE_STORAGE_PATH = (
+    Path("data")
+    / "trading"
+    / "control_security_sequence.json"
+)
+
+CONTROL_SECURITY_SEQUENCE_BINDING_STORAGE_PATH = (
+    Path("data")
+    / "trading"
+    / "control_security_sequence_bindings.json"
 )
 
 
@@ -386,6 +419,28 @@ executor_authenticator = (
 )
 
 
+control_security_sequence_allocator = (
+    PersistentSecuritySequenceAllocator(
+        CONTROL_SECURITY_SEQUENCE_STORAGE_PATH
+    )
+)
+
+control_security_sequence_binding_store = (
+    PersistentSecuritySequenceBindingStore(
+        CONTROL_SECURITY_SEQUENCE_BINDING_STORAGE_PATH
+    )
+)
+
+control_security_sequence_assignment_service = (
+    SecuritySequenceAssignmentService(
+        allocator=control_security_sequence_allocator,
+        binding_store=(
+            control_security_sequence_binding_store
+        ),
+    )
+)
+
+
 control_mission_repository = (
     ControlMissionRepository()
 )
@@ -481,6 +536,9 @@ control_mission_service = (
         control_mission_delivery_bridge,
         control_mission_registry,
         control_mission_lifecycle_service,
+        security_sequence_assignment_service=(
+            control_security_sequence_assignment_service
+        ),
     )
 )
 
@@ -527,6 +585,28 @@ control_mission_lifecycle_scheduler = (
             control_mission_delivery_redelivery_processor
         ),
         interval_seconds=5.0,
+    )
+)
+
+
+execution_security_sequence_allocator = (
+    PersistentSecuritySequenceAllocator(
+        EXECUTION_SECURITY_SEQUENCE_STORAGE_PATH
+    )
+)
+
+execution_security_sequence_binding_store = (
+    PersistentSecuritySequenceBindingStore(
+        EXECUTION_SECURITY_SEQUENCE_BINDING_STORAGE_PATH
+    )
+)
+
+execution_security_sequence_assignment_service = (
+    SecuritySequenceAssignmentService(
+        allocator=execution_security_sequence_allocator,
+        binding_store=(
+            execution_security_sequence_binding_store
+        ),
     )
 )
 
@@ -615,6 +695,9 @@ execution_mission_service = (
         execution_mission_delivery_bridge,
         execution_mission_registry,
         execution_mission_record_persistence,
+        security_sequence_assignment_service=(
+            execution_security_sequence_assignment_service
+        ),
     )
 )
 

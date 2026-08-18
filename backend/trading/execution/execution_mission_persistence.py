@@ -88,6 +88,9 @@ class ExecutionMissionPersistence:
                     "created_at": mission.created_at,
                     "expires_at": mission.expires_at,
                     "sequence": mission.sequence,
+                    "security_sequence": (
+                        mission.security_sequence
+                    ),
                 }
             )
 
@@ -146,6 +149,10 @@ class ExecutionMissionPersistence:
                     created_at=item["created_at"],
                     expires_at=item["expires_at"],
                     sequence=item["sequence"],
+                    security_sequence=item.get(
+                        "security_sequence",
+                        0,
+                    ),
                 )
             )
 

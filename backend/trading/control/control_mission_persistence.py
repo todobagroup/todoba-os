@@ -9,6 +9,7 @@ HTTP transport, and broker control belong elsewhere.
 """
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from backend.trading.control.control_mission_repository import (
@@ -56,12 +57,22 @@ class ControlMissionPersistence:
             exist_ok=True,
         )
 
-        payload = [
-            ControlMissionSerializer.serialize(
-                mission
+        payload = []
+
+        for mission in repository.all():
+            mission_payload = (
+                ControlMissionSerializer.serialize(
+                    mission
+                )
             )
-            for mission in repository.all()
-        ]
+
+            mission_payload[
+                "security_sequence"
+            ] = mission.security_sequence
+
+            payload.append(
+                mission_payload
+            )
 
         temporary_path = self.storage_path.with_suffix(
             self.storage_path.suffix + ".tmp"
@@ -105,10 +116,22 @@ class ControlMissionPersistence:
         count = 0
 
         for item in payload:
-            repository.save(
+            mission = (
                 ControlMissionSerializer.deserialize(
                     item
                 )
+            )
+
+            mission = replace(
+                mission,
+                security_sequence=item.get(
+                    "security_sequence",
+                    0,
+                ),
+            )
+
+            repository.save(
+                mission
             )
 
             count += 1

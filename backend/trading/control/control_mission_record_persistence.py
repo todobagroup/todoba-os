@@ -9,6 +9,7 @@ deliver missions or control broker trades.
 """
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from backend.trading.control.control_mission_record import (
@@ -65,13 +66,19 @@ class ControlMissionRecordPersistence:
         payload = []
 
         for record in registry.list():
+            mission_payload = (
+                ControlMissionSerializer.serialize(
+                    record.mission
+                )
+            )
+
+            mission_payload[
+                "security_sequence"
+            ] = record.mission.security_sequence
+
             payload.append(
                 {
-                    "mission": (
-                        ControlMissionSerializer.serialize(
-                            record.mission
-                        )
-                    ),
+                    "mission": mission_payload,
                     "status": record.status.value,
                     "delivered_at": record.delivered_at,
                     "delivery_attempt_count": (
@@ -146,12 +153,24 @@ class ControlMissionRecordPersistence:
         count = 0
 
         for item in payload:
-            record = ControlMissionRecord(
-                mission=(
-                    ControlMissionSerializer.deserialize(
-                        item["mission"]
-                    )
+            mission_payload = item["mission"]
+
+            mission = (
+                ControlMissionSerializer.deserialize(
+                    mission_payload
+                )
+            )
+
+            mission = replace(
+                mission,
+                security_sequence=mission_payload.get(
+                    "security_sequence",
+                    0,
                 ),
+            )
+
+            record = ControlMissionRecord(
+                mission=mission,
                 status=ControlMissionStatus(
                     item["status"]
                 ),

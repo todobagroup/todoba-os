@@ -97,6 +97,9 @@ class ExecutionMissionRecordPersistence:
                         "created_at": mission.created_at,
                         "expires_at": mission.expires_at,
                         "sequence": mission.sequence,
+                        "security_sequence": (
+                            mission.security_sequence
+                        ),
                     },
                     "status": record.status.value,
                     "delivered_at": record.delivered_at,
@@ -176,6 +179,10 @@ class ExecutionMissionRecordPersistence:
                     "expires_at"
                 ],
                 sequence=mission_payload["sequence"],
+                security_sequence=mission_payload.get(
+                    "security_sequence",
+                    0,
+                ),
             )
 
             record = ExecutionMissionRecord(

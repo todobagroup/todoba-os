@@ -19,6 +19,7 @@ from datetime import UTC
 from fastapi import APIRouter
 from fastapi import Depends
 from fastapi import HTTPException
+from fastapi import status
 from pydantic import BaseModel
 
 from backend.trading.execution.broker_state import (
@@ -32,6 +33,9 @@ from backend.trading.execution.executor_authentication_dependency import (
 )
 from backend.trading.execution.executor_authenticator import (
     ExecutorAuthenticator,
+)
+from backend.trading.execution.trusted_agent_account_binding_guard import (
+    TrustedAgentAccountBindingGuard,
 )
 from backend.trading.execution.trusted_agent_authentication_dependency import (
     create_trusted_agent_authentication_dependency,
@@ -60,6 +64,7 @@ def create_broker_state_router(
     store: BrokerStateStore,
     authenticator: TrustedAgentAuthenticator,
     executor_authenticator: ExecutorAuthenticator,
+    account_binding_guard: TrustedAgentAccountBindingGuard,
 ) -> APIRouter:
     if not isinstance(
         store,
@@ -88,6 +93,15 @@ def create_broker_state_router(
             "ExecutorAuthenticator."
         )
 
+    if not isinstance(
+        account_binding_guard,
+        TrustedAgentAccountBindingGuard,
+    ):
+        raise TypeError(
+            "create_broker_state_router requires "
+            "TrustedAgentAccountBindingGuard."
+        )
+
     require_trusted_agent = (
         create_trusted_agent_authentication_dependency(
             authenticator
@@ -111,6 +125,22 @@ def create_broker_state_router(
             require_trusted_agent
         ),
     ):
+        try:
+            account_binding_guard.require_binding(
+                agent_id=agent_id,
+                account_fingerprint=(
+                    request.account_fingerprint
+                ),
+            )
+        except RuntimeError:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    "Trusted Agent account does not match "
+                    "authoritative binding."
+                ),
+            )
+
         state = BrokerState(
             account_fingerprint=(
                 request.account_fingerprint

@@ -5,6 +5,8 @@ Proof:
 
 Trusted Agent
 ->
+authenticated account binding
+->
 POST /broker/state
 ->
 BrokerStateStore
@@ -36,6 +38,12 @@ from backend.trading.execution.broker_state_store import (
 from backend.trading.execution.executor_authenticator import (
     ExecutorAuthenticator,
 )
+from backend.trading.execution.trusted_agent_account_binding_guard import (
+    TrustedAgentAccountBindingGuard,
+)
+from backend.trading.execution.trusted_agent_account_binding_store import (
+    TrustedAgentAccountBindingStore,
+)
 from backend.trading.execution.trusted_agent_authenticator import (
     TrustedAgentAuthenticator,
 )
@@ -43,6 +51,8 @@ from backend.trading.execution.trusted_agent_authenticator import (
 
 AGENT_ID = "trusted-agent-001"
 AGENT_SECRET = "proof-broker-state-secret"
+
+ACCOUNT_FINGERPRINT = "demo-account"
 
 EXECUTOR_ID = "telegram-executor-001"
 EXECUTOR_SECRET = "proof-executor-secret"
@@ -57,7 +67,9 @@ RECEIVED_AT = datetime(
 )
 
 
-def build_client() -> tuple[
+def build_client(
+    tmp_path: Path,
+) -> tuple[
     TestClient,
     BrokerStateStore,
 ]:
@@ -75,6 +87,26 @@ def build_client() -> tuple[
         executor_secret=EXECUTOR_SECRET,
     )
 
+    account_binding_store = (
+        TrustedAgentAccountBindingStore(
+            tmp_path
+            / "trusted_agent_account_bindings.json"
+        )
+    )
+
+    account_binding_store.initialize_empty()
+
+    account_binding_store.bind(
+        agent_id=AGENT_ID,
+        account_fingerprint=ACCOUNT_FINGERPRINT,
+    )
+
+    account_binding_guard = (
+        TrustedAgentAccountBindingGuard(
+            account_binding_store
+        )
+    )
+
     app = FastAPI()
 
     app.include_router(
@@ -83,6 +115,9 @@ def build_client() -> tuple[
             authenticator=agent_authenticator,
             executor_authenticator=(
                 executor_authenticator
+            ),
+            account_binding_guard=(
+                account_binding_guard
             ),
         )
     )
@@ -102,7 +137,9 @@ def publish_state(
             ),
         },
         json={
-            "account_fingerprint": "demo-account",
+            "account_fingerprint": (
+                ACCOUNT_FINGERPRINT
+            ),
             "equity": 2491.52,
             "open_position_count": 5,
             "pending_order_count": 3,
@@ -125,15 +162,19 @@ def executor_headers() -> dict[str, str]:
     }
 
 
-def test_authenticated_agent_can_publish_broker_state():
-    client, store = build_client()
+def test_authenticated_agent_can_publish_broker_state(
+    tmp_path: Path,
+):
+    client, store = build_client(
+        tmp_path
+    )
 
     publish_state(
         client
     )
 
     stored = store.get(
-        account_fingerprint="demo-account",
+        account_fingerprint=ACCOUNT_FINGERPRINT,
         symbol="XAUUSD",
     )
 
@@ -152,8 +193,12 @@ def test_authenticated_agent_can_publish_broker_state():
     assert agent_state == stored
 
 
-def test_authenticated_executor_can_read_latest_agent_state():
-    client, _ = build_client()
+def test_authenticated_executor_can_read_latest_agent_state(
+    tmp_path: Path,
+):
+    client, _ = build_client(
+        tmp_path
+    )
 
     publish_state(
         client
@@ -172,7 +217,9 @@ def test_authenticated_executor_can_read_latest_agent_state():
     assert response.json() == {
         "status": "available",
         "agent_id": AGENT_ID,
-        "account_fingerprint": "demo-account",
+        "account_fingerprint": (
+            ACCOUNT_FINGERPRINT
+        ),
         "equity": 2491.52,
         "open_position_count": 5,
         "pending_order_count": 3,
@@ -184,8 +231,12 @@ def test_authenticated_executor_can_read_latest_agent_state():
     }
 
 
-def test_publish_requires_pending_order_count():
-    client, _ = build_client()
+def test_publish_requires_pending_order_count(
+    tmp_path: Path,
+):
+    client, _ = build_client(
+        tmp_path
+    )
 
     response = client.post(
         "/broker/state",
@@ -196,7 +247,9 @@ def test_publish_requires_pending_order_count():
             ),
         },
         json={
-            "account_fingerprint": "demo-account",
+            "account_fingerprint": (
+                ACCOUNT_FINGERPRINT
+            ),
             "equity": 2491.52,
             "open_position_count": 5,
             "symbol": "XAUUSD",
@@ -209,8 +262,12 @@ def test_publish_requires_pending_order_count():
     assert response.status_code == 422
 
 
-def test_unknown_agent_state_returns_not_found():
-    client, _ = build_client()
+def test_unknown_agent_state_returns_not_found(
+    tmp_path: Path,
+):
+    client, _ = build_client(
+        tmp_path
+    )
 
     response = client.get(
         "/broker/state/latest",

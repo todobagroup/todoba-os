@@ -9,6 +9,8 @@ POST /broker/state
 ->
 Trusted Agent authentication
 ->
+authoritative account binding check
+->
 shared BrokerStateStore
 """
 
@@ -34,7 +36,33 @@ os.environ.setdefault(
 from backend import main
 
 
-def test_main_app_contains_broker_state_api():
+def test_main_app_contains_broker_state_api(
+    monkeypatch,
+):
+    binding_calls: list[
+        tuple[str, str]
+    ] = []
+
+    def require_binding(
+        *,
+        agent_id: str,
+        account_fingerprint: str,
+    ) -> str:
+        binding_calls.append(
+            (
+                agent_id,
+                account_fingerprint,
+            )
+        )
+
+        return account_fingerprint
+
+    monkeypatch.setattr(
+        main.trusted_agent_account_binding_guard,
+        "require_binding",
+        require_binding,
+    )
+
     client = TestClient(
         main.app
     )
@@ -51,7 +79,9 @@ def test_main_app_contains_broker_state_api():
             ),
         },
         json={
-            "account_fingerprint": "demo-account",
+            "account_fingerprint": (
+                main.TODOBA_TRUSTED_AGENT_ACCOUNT_FINGERPRINT
+            ),
             "equity": 2491.52,
             "open_position_count": 5,
             "pending_order_count": 3,
@@ -64,14 +94,25 @@ def test_main_app_contains_broker_state_api():
 
     assert response.status_code == 200
 
+    assert binding_calls == [
+        (
+            main.TODOBA_TRUSTED_AGENT_ID,
+            main.TODOBA_TRUSTED_AGENT_ACCOUNT_FINGERPRINT,
+        )
+    ]
+
     assert response.json() == {
         "status": "stored",
-        "account_fingerprint": "demo-account",
+        "account_fingerprint": (
+            main.TODOBA_TRUSTED_AGENT_ACCOUNT_FINGERPRINT
+        ),
         "symbol": "XAUUSD",
     }
 
     stored = main.broker_state_store.get(
-        account_fingerprint="demo-account",
+        account_fingerprint=(
+            main.TODOBA_TRUSTED_AGENT_ACCOUNT_FINGERPRINT
+        ),
         symbol="XAUUSD",
     )
 

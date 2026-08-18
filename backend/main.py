@@ -966,6 +966,9 @@ app.include_router(
         executor_authenticator=(
             executor_authenticator
         ),
+        account_binding_guard=(
+            trusted_agent_account_binding_guard
+        ),
     )
 )
 

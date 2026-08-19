@@ -1,8 +1,11 @@
 """
-TODOBA Trusted Agent Account Binding Startup Composition Tests
+TODOBA Trusted Agent Multi-Agent Startup Composition Tests
 
-Locks the production composition for authoritative
-Trusted Agent-to-MT5-account ownership at Cloud startup.
+Locks the production composition for:
+- Trusted Agent credential registry
+- multi-Agent authentication
+- authoritative Agent-to-account ownership checks
+- fail-closed Cloud startup
 """
 
 import asyncio
@@ -14,12 +17,19 @@ from backend import main
 from backend.config import (
     TODOBA_TRUSTED_AGENT_ACCOUNT_FINGERPRINT,
     TODOBA_TRUSTED_AGENT_ID,
+    TODOBA_TRUSTED_AGENT_SECRET,
 )
 from backend.trading.execution.trusted_agent_account_binding_guard import (
     TrustedAgentAccountBindingGuard,
 )
 from backend.trading.execution.trusted_agent_account_binding_store import (
     TrustedAgentAccountBindingStore,
+)
+from backend.trading.execution.trusted_agent_authenticator import (
+    TrustedAgentAuthenticator,
+)
+from backend.trading.execution.trusted_agent_credential_registry import (
+    TrustedAgentCredentialRegistry,
 )
 
 
@@ -54,12 +64,88 @@ def test_main_composes_trusted_agent_account_binding() -> None:
     )
 
 
-def test_main_account_binding_check_uses_deployment_identity(
+def test_main_composes_trusted_agent_credential_registry() -> None:
+    assert isinstance(
+        main.trusted_agent_credential_registry,
+        TrustedAgentCredentialRegistry,
+    )
+
+    assert (
+        main.trusted_agent_credential_registry.get_secret(
+            agent_id=TODOBA_TRUSTED_AGENT_ID
+        )
+        == TODOBA_TRUSTED_AGENT_SECRET
+    )
+
+    assert isinstance(
+        main.trusted_agent_authenticator,
+        TrustedAgentAuthenticator,
+    )
+
+    assert main.trusted_agent_authenticator.authenticate(
+        agent_id=TODOBA_TRUSTED_AGENT_ID,
+        authorization=(
+            f"Bearer {TODOBA_TRUSTED_AGENT_SECRET}"
+        ),
+    )
+
+
+def test_main_builds_registry_for_multiple_deployments() -> None:
+    deployments = (
+        {
+            "agent_id": "trusted-agent-001",
+            "agent_secret": "secret-a",
+            "account_fingerprint": "account-a",
+        },
+        {
+            "agent_id": "trusted-agent-002",
+            "agent_secret": "secret-b",
+            "account_fingerprint": "account-b",
+        },
+    )
+
+    registry = (
+        main._build_trusted_agent_credential_registry(
+            deployments
+        )
+    )
+
+    assert registry.size() == 2
+
+    assert (
+        registry.get_secret(
+            agent_id="trusted-agent-001"
+        )
+        == "secret-a"
+    )
+
+    assert (
+        registry.get_secret(
+            agent_id="trusted-agent-002"
+        )
+        == "secret-b"
+    )
+
+
+def test_main_account_binding_check_uses_all_deployments(
     monkeypatch,
 ) -> None:
     calls: list[
         tuple[str, str]
     ] = []
+
+    deployments = (
+        {
+            "agent_id": "trusted-agent-001",
+            "agent_secret": "secret-a",
+            "account_fingerprint": "account-a",
+        },
+        {
+            "agent_id": "trusted-agent-002",
+            "agent_secret": "secret-b",
+            "account_fingerprint": "account-b",
+        },
+    )
 
     def require_binding(
         *,
@@ -76,24 +162,36 @@ def test_main_account_binding_check_uses_deployment_identity(
         return account_fingerprint
 
     monkeypatch.setattr(
+        main,
+        "trusted_agent_deployments",
+        deployments,
+        raising=False,
+    )
+
+    monkeypatch.setattr(
         main.trusted_agent_account_binding_guard,
         "require_binding",
         require_binding,
     )
 
     result = (
-        main._require_trusted_agent_account_binding()
+        main._require_trusted_agent_account_bindings()
     )
 
     assert result == (
-        TODOBA_TRUSTED_AGENT_ACCOUNT_FINGERPRINT
+        "account-a",
+        "account-b",
     )
 
     assert calls == [
         (
-            TODOBA_TRUSTED_AGENT_ID,
-            TODOBA_TRUSTED_AGENT_ACCOUNT_FINGERPRINT,
-        )
+            "trusted-agent-001",
+            "account-a",
+        ),
+        (
+            "trusted-agent-002",
+            "account-b",
+        ),
     ]
 
 
@@ -102,9 +200,12 @@ def test_main_account_binding_failure_stops_before_recovery(
 ) -> None:
     calls: list[str] = []
 
-    def require_account_binding() -> str:
+    def require_account_bindings() -> tuple[
+        str,
+        ...,
+    ]:
         calls.append(
-            "account_binding"
+            "account_bindings"
         )
 
         raise RuntimeError(
@@ -120,8 +221,9 @@ def test_main_account_binding_failure_stops_before_recovery(
 
     monkeypatch.setattr(
         main,
-        "_require_trusted_agent_account_binding",
-        require_account_binding,
+        "_require_trusted_agent_account_bindings",
+        require_account_bindings,
+        raising=False,
     )
 
     monkeypatch.setattr(
@@ -145,5 +247,5 @@ def test_main_account_binding_failure_stops_before_recovery(
         )
 
     assert calls == [
-        "account_binding",
+        "account_bindings",
     ]

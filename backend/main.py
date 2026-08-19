@@ -17,6 +17,7 @@ from backend.config import (
     TODOBA_TRUSTED_AGENT_SECRET,
     TODOBA_EXECUTION_MISSION_SIGNING_SECRET,
     TODOBA_CONTROL_MISSION_SIGNING_SECRET,
+    get_trusted_agent_deployments,
 )
 from backend.runtime.runtime_mode import (
     RuntimeMode,
@@ -233,6 +234,9 @@ from backend.trading.execution.executor_authenticator import (
 from backend.trading.execution.trusted_agent_authenticator import (
     TrustedAgentAuthenticator,
 )
+from backend.trading.execution.trusted_agent_credential_registry import (
+    TrustedAgentCredentialRegistry,
+)
 from backend.trading.execution.trusted_agent_account_binding_guard import (
     TrustedAgentAccountBindingGuard,
 )
@@ -336,6 +340,34 @@ trusted_agent_account_binding_guard = (
 )
 
 
+def _build_trusted_agent_credential_registry(
+    deployments: tuple[
+        dict[str, str],
+        ...,
+    ],
+) -> TrustedAgentCredentialRegistry:
+    registry = TrustedAgentCredentialRegistry()
+
+    for deployment in deployments:
+        registry.register(
+            agent_id=deployment["agent_id"],
+            agent_secret=deployment["agent_secret"],
+        )
+
+    return registry
+
+
+trusted_agent_deployments = (
+    get_trusted_agent_deployments()
+)
+
+trusted_agent_credential_registry = (
+    _build_trusted_agent_credential_registry(
+        trusted_agent_deployments
+    )
+)
+
+
 todoba_runtime: TODOBARuntime = create_runtime(
     RuntimeMode(
         TODOBA_RUNTIME_MODE
@@ -386,23 +418,50 @@ def _process_recovered_execution_mission_evidence(
             return processed
 
 
+def _require_trusted_agent_account_bindings(
+) -> tuple[
+    str,
+    ...,
+]:
+    bound_accounts: list[str] = []
+
+    for deployment in trusted_agent_deployments:
+        bound_accounts.append(
+            trusted_agent_account_binding_guard.require_binding(
+                agent_id=deployment["agent_id"],
+                account_fingerprint=(
+                    deployment["account_fingerprint"]
+                ),
+            )
+        )
+
+    return tuple(
+        bound_accounts
+    )
+
+
 def _require_trusted_agent_account_binding(
 ) -> str:
-    return (
-        trusted_agent_account_binding_guard.require_binding(
-            agent_id=TODOBA_TRUSTED_AGENT_ID,
-            account_fingerprint=(
-                TODOBA_TRUSTED_AGENT_ACCOUNT_FINGERPRINT
-            ),
-        )
+    bound_accounts = (
+        _require_trusted_agent_account_bindings()
     )
+
+    if len(
+        bound_accounts
+    ) != 1:
+        raise RuntimeError(
+            "Single Trusted Agent account binding "
+            "requires exactly one deployment."
+        )
+
+    return bound_accounts[0]
 
 
 @asynccontextmanager
 async def lifespan(
     app: FastAPI,
 ):
-    _require_trusted_agent_account_binding()
+    _require_trusted_agent_account_bindings()
 
     execution_mission_record_recovery.restore()
 
@@ -456,8 +515,9 @@ app = FastAPI(
 
 trusted_agent_authenticator = (
     TrustedAgentAuthenticator(
-        agent_id=TODOBA_TRUSTED_AGENT_ID,
-        agent_secret=TODOBA_TRUSTED_AGENT_SECRET,
+        credential_registry=(
+            trusted_agent_credential_registry
+        ),
     )
 )
 executor_authenticator = (

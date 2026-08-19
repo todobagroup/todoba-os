@@ -3,6 +3,9 @@ import pytest
 from backend.trading.execution.trusted_agent_authenticator import (
     TrustedAgentAuthenticator,
 )
+from backend.trading.execution.trusted_agent_credential_registry import (
+    TrustedAgentCredentialRegistry,
+)
 
 
 def test_authenticate_accepts_matching_agent_and_secret() -> None:
@@ -100,3 +103,77 @@ def test_constructor_rejects_empty_credentials(
             agent_id=agent_id,
             agent_secret=agent_secret,
         )
+
+
+def test_authenticate_supports_multiple_registered_agents() -> None:
+    registry = TrustedAgentCredentialRegistry()
+
+    registry.register(
+        agent_id="trusted-agent-001",
+        agent_secret="secret-a",
+    )
+
+    registry.register(
+        agent_id="trusted-agent-002",
+        agent_secret="secret-b",
+    )
+
+    authenticator = TrustedAgentAuthenticator(
+        credential_registry=registry,
+    )
+
+    assert authenticator.authenticate(
+        agent_id="trusted-agent-001",
+        authorization="Bearer secret-a",
+    )
+
+    assert authenticator.authenticate(
+        agent_id="trusted-agent-002",
+        authorization="Bearer secret-b",
+    )
+
+
+def test_multi_agent_authentication_rejects_cross_agent_secret() -> None:
+    registry = TrustedAgentCredentialRegistry()
+
+    registry.register(
+        agent_id="trusted-agent-001",
+        agent_secret="secret-a",
+    )
+
+    registry.register(
+        agent_id="trusted-agent-002",
+        agent_secret="secret-b",
+    )
+
+    authenticator = TrustedAgentAuthenticator(
+        credential_registry=registry,
+    )
+
+    assert not authenticator.authenticate(
+        agent_id="trusted-agent-001",
+        authorization="Bearer secret-b",
+    )
+
+    assert not authenticator.authenticate(
+        agent_id="trusted-agent-002",
+        authorization="Bearer secret-a",
+    )
+
+
+def test_multi_agent_authentication_rejects_unknown_agent() -> None:
+    registry = TrustedAgentCredentialRegistry()
+
+    registry.register(
+        agent_id="trusted-agent-001",
+        agent_secret="secret-a",
+    )
+
+    authenticator = TrustedAgentAuthenticator(
+        credential_registry=registry,
+    )
+
+    assert not authenticator.authenticate(
+        agent_id="unknown-agent",
+        authorization="Bearer secret-a",
+    )

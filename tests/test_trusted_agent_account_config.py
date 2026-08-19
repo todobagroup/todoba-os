@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 import backend.config as config
@@ -6,6 +8,13 @@ import backend.config as config
 def _set_valid_trusted_agent_config(
     monkeypatch,
 ) -> None:
+    monkeypatch.setattr(
+        config,
+        "TODOBA_TRUSTED_AGENTS_JSON",
+        "",
+        raising=False,
+    )
+
     monkeypatch.setattr(
         config,
         "TODOBA_TRUSTED_AGENT_ID",
@@ -39,7 +48,7 @@ def _set_valid_trusted_agent_config(
 
 def test_trusted_agent_config_accepts_account_fingerprint(
     monkeypatch,
-):
+) -> None:
     _set_valid_trusted_agent_config(
         monkeypatch
     )
@@ -49,7 +58,7 @@ def test_trusted_agent_config_accepts_account_fingerprint(
 
 def test_trusted_agent_config_requires_account_fingerprint(
     monkeypatch,
-):
+) -> None:
     _set_valid_trusted_agent_config(
         monkeypatch
     )
@@ -66,5 +75,145 @@ def test_trusted_agent_config_requires_account_fingerprint(
             "TODOBA_TRUSTED_AGENT_ACCOUNT_FINGERPRINT "
             "is required"
         ),
+    ):
+        config.validate_trusted_agent_config()
+
+
+def test_trusted_agent_deployments_fall_back_to_legacy_config(
+    monkeypatch,
+) -> None:
+    _set_valid_trusted_agent_config(
+        monkeypatch
+    )
+
+    deployments = (
+        config.get_trusted_agent_deployments()
+    )
+
+    assert deployments == (
+        {
+            "agent_id": "trusted-agent-001",
+            "agent_secret": "test-agent-secret",
+            "account_fingerprint": "account-a",
+        },
+    )
+
+
+def test_trusted_agent_config_accepts_multi_agent_json(
+    monkeypatch,
+) -> None:
+    _set_valid_trusted_agent_config(
+        monkeypatch
+    )
+
+    monkeypatch.setattr(
+        config,
+        "TODOBA_TRUSTED_AGENT_ID",
+        "",
+    )
+
+    monkeypatch.setattr(
+        config,
+        "TODOBA_TRUSTED_AGENT_SECRET",
+        "",
+    )
+
+    monkeypatch.setattr(
+        config,
+        "TODOBA_TRUSTED_AGENT_ACCOUNT_FINGERPRINT",
+        "",
+    )
+
+    monkeypatch.setattr(
+        config,
+        "TODOBA_TRUSTED_AGENTS_JSON",
+        json.dumps(
+            [
+                {
+                    "agent_id": "trusted-agent-001",
+                    "agent_secret": "secret-a",
+                    "account_fingerprint": "account-a",
+                },
+                {
+                    "agent_id": "trusted-agent-002",
+                    "agent_secret": "secret-b",
+                    "account_fingerprint": "account-b",
+                },
+            ]
+        ),
+        raising=False,
+    )
+
+    config.validate_trusted_agent_config()
+
+    deployments = (
+        config.get_trusted_agent_deployments()
+    )
+
+    assert deployments == (
+        {
+            "agent_id": "trusted-agent-001",
+            "agent_secret": "secret-a",
+            "account_fingerprint": "account-a",
+        },
+        {
+            "agent_id": "trusted-agent-002",
+            "agent_secret": "secret-b",
+            "account_fingerprint": "account-b",
+        },
+    )
+
+
+def test_trusted_agent_config_rejects_duplicate_multi_agent_ids(
+    monkeypatch,
+) -> None:
+    _set_valid_trusted_agent_config(
+        monkeypatch
+    )
+
+    monkeypatch.setattr(
+        config,
+        "TODOBA_TRUSTED_AGENTS_JSON",
+        json.dumps(
+            [
+                {
+                    "agent_id": "trusted-agent-001",
+                    "agent_secret": "secret-a",
+                    "account_fingerprint": "account-a",
+                },
+                {
+                    "agent_id": "trusted-agent-001",
+                    "agent_secret": "secret-b",
+                    "account_fingerprint": "account-b",
+                },
+            ]
+        ),
+        raising=False,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Duplicate Trusted Agent ID",
+    ):
+        config.validate_trusted_agent_config()
+
+
+def test_trusted_agent_config_rejects_invalid_multi_agent_json(
+    monkeypatch,
+) -> None:
+    _set_valid_trusted_agent_config(
+        monkeypatch
+    )
+
+    monkeypatch.setattr(
+        config,
+        "TODOBA_TRUSTED_AGENTS_JSON",
+        "{invalid-json",
+        raising=False,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="TODOBA_TRUSTED_AGENTS_JSON",
     ):
         config.validate_trusted_agent_config()

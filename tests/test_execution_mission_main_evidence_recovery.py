@@ -8,12 +8,17 @@ def test_main_converges_evidence_before_mission_delivery(
 ) -> None:
     calls: list[str] = []
 
-    def require_account_binding() -> str:
+    def require_account_bindings() -> tuple[
+        str,
+        ...,
+    ]:
         calls.append(
-            "account_binding"
+            "account_bindings"
         )
 
-        return "test-account"
+        return (
+            "test-account",
+        )
 
     def restore_records() -> int:
         calls.append(
@@ -84,8 +89,8 @@ def test_main_converges_evidence_before_mission_delivery(
 
     monkeypatch.setattr(
         main,
-        "_require_trusted_agent_account_binding",
-        require_account_binding,
+        "_require_trusted_agent_account_bindings",
+        require_account_bindings,
     )
 
     monkeypatch.setattr(
@@ -135,7 +140,7 @@ def test_main_converges_evidence_before_mission_delivery(
             main.app
         ):
             assert calls == [
-                "account_binding",
+                "account_bindings",
                 "records",
                 "delivery_leases",
                 "evidence",
@@ -149,7 +154,7 @@ def test_main_converges_evidence_before_mission_delivery(
     )
 
     assert calls == [
-        "account_binding",
+        "account_bindings",
         "records",
         "delivery_leases",
         "evidence",

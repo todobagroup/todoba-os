@@ -11,20 +11,75 @@ capabilities.
 
 from hmac import compare_digest
 
+from backend.trading.execution.trusted_agent_credential_registry import (
+    TrustedAgentCredentialRegistry,
+)
+
 
 class TrustedAgentAuthenticator:
     """
-    Authenticate one Trusted Agent identity using
-    a shared secret supplied through HTTP headers.
+    Authenticate Trusted Agent identities using
+    Agent-specific shared secrets.
+
+    The legacy single-Agent constructor remains supported
+    for backward-compatible deployment composition.
     """
 
     def __init__(
         self,
-        agent_id: str,
-        agent_secret: str,
+        agent_id: str | None = None,
+        agent_secret: str | None = None,
+        *,
+        credential_registry: (
+            TrustedAgentCredentialRegistry | None
+        ) = None,
     ) -> None:
+        if credential_registry is not None:
+            if not isinstance(
+                credential_registry,
+                TrustedAgentCredentialRegistry,
+            ):
+                raise TypeError(
+                    "credential_registry must be "
+                    "TrustedAgentCredentialRegistry."
+                )
+
+            if (
+                agent_id is not None
+                or agent_secret is not None
+            ):
+                raise ValueError(
+                    "Provide either legacy Agent "
+                    "credentials or credential_registry, "
+                    "not both."
+                )
+
+            self._credential_registry = (
+                credential_registry
+            )
+
+            return
+
+        if not isinstance(
+            agent_id,
+            str,
+        ):
+            raise ValueError(
+                "agent_id is required."
+            )
+
+        if not isinstance(
+            agent_secret,
+            str,
+        ):
+            raise ValueError(
+                "agent_secret is required."
+            )
+
         normalized_agent_id = agent_id.strip()
-        normalized_agent_secret = agent_secret.strip()
+        normalized_agent_secret = (
+            agent_secret.strip()
+        )
 
         if not normalized_agent_id:
             raise ValueError(
@@ -36,22 +91,43 @@ class TrustedAgentAuthenticator:
                 "agent_secret is required."
             )
 
-        self._agent_id = normalized_agent_id
-        self._agent_secret = normalized_agent_secret
+        legacy_registry = (
+            TrustedAgentCredentialRegistry()
+        )
+
+        legacy_registry.register(
+            agent_id=normalized_agent_id,
+            agent_secret=normalized_agent_secret,
+        )
+
+        self._credential_registry = (
+            legacy_registry
+        )
 
     def authenticate(
         self,
         agent_id: str | None,
         authorization: str | None,
     ) -> bool:
-        if agent_id is None:
+        if not isinstance(
+            agent_id,
+            str,
+        ):
             return False
 
-        if authorization is None:
+        if not isinstance(
+            authorization,
+            str,
+        ):
             return False
 
         supplied_agent_id = agent_id.strip()
-        supplied_authorization = authorization.strip()
+        supplied_authorization = (
+            authorization.strip()
+        )
+
+        if not supplied_agent_id:
+            return False
 
         bearer_prefix = "Bearer "
 
@@ -67,14 +143,16 @@ class TrustedAgentAuthenticator:
         if not supplied_secret:
             return False
 
-        agent_matches = compare_digest(
-            supplied_agent_id,
-            self._agent_id,
+        expected_secret = (
+            self._credential_registry.get_secret(
+                agent_id=supplied_agent_id
+            )
         )
 
-        secret_matches = compare_digest(
+        if expected_secret is None:
+            return False
+
+        return compare_digest(
             supplied_secret,
-            self._agent_secret,
+            expected_secret,
         )
-
-        return agent_matches and secret_matches

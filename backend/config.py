@@ -6,6 +6,7 @@ Loads runtime configuration from the repository .env file.
 Secrets must never be committed to Git.
 """
 
+import json
 import os
 from pathlib import Path
 
@@ -174,6 +175,11 @@ TODOBA_TRUSTED_AGENT_ACCOUNT_FINGERPRINT = os.getenv(
     "",
 ).strip()
 
+TODOBA_TRUSTED_AGENTS_JSON = os.getenv(
+    "TODOBA_TRUSTED_AGENTS_JSON",
+    "",
+).strip()
+
 TODOBA_EXECUTION_MISSION_SIGNING_SECRET = os.getenv(
     "TODOBA_EXECUTION_MISSION_SIGNING_SECRET",
     "",
@@ -203,6 +209,175 @@ DEBUG = os.getenv(
     "yes",
     "on",
 }
+
+
+def get_trusted_agent_deployments() -> tuple[
+    dict[str, str],
+    ...,
+]:
+    """
+    Return configured Trusted Agent deployments.
+
+    Multi-Agent JSON configuration takes precedence.
+    When it is absent, the legacy single-Agent
+    environment variables remain supported.
+    """
+
+    if not TODOBA_TRUSTED_AGENTS_JSON:
+        return (
+            {
+                "agent_id": TODOBA_TRUSTED_AGENT_ID,
+                "agent_secret": TODOBA_TRUSTED_AGENT_SECRET,
+                "account_fingerprint": (
+                    TODOBA_TRUSTED_AGENT_ACCOUNT_FINGERPRINT
+                ),
+            },
+        )
+
+    try:
+        payload = json.loads(
+            TODOBA_TRUSTED_AGENTS_JSON
+        )
+    except json.JSONDecodeError as error:
+        raise RuntimeError(
+            "TODOBA_TRUSTED_AGENTS_JSON must contain "
+            "valid JSON."
+        ) from error
+
+    if not isinstance(
+        payload,
+        list,
+    ):
+        raise RuntimeError(
+            "TODOBA_TRUSTED_AGENTS_JSON must contain "
+            "a JSON list."
+        )
+
+    if not payload:
+        raise RuntimeError(
+            "TODOBA_TRUSTED_AGENTS_JSON must contain "
+            "at least one Trusted Agent."
+        )
+
+    deployments: list[
+        dict[str, str]
+    ] = []
+
+    known_agent_ids: set[str] = set()
+
+    required_fields = {
+        "agent_id",
+        "agent_secret",
+        "account_fingerprint",
+    }
+
+    for item in payload:
+        if not isinstance(
+            item,
+            dict,
+        ):
+            raise RuntimeError(
+                "TODOBA_TRUSTED_AGENTS_JSON entries "
+                "must be JSON objects."
+            )
+
+        if set(
+            item.keys()
+        ) != required_fields:
+            raise RuntimeError(
+                "TODOBA_TRUSTED_AGENTS_JSON entries "
+                "must contain exactly agent_id, "
+                "agent_secret, and account_fingerprint."
+            )
+
+        agent_id = item[
+            "agent_id"
+        ]
+
+        agent_secret = item[
+            "agent_secret"
+        ]
+
+        account_fingerprint = item[
+            "account_fingerprint"
+        ]
+
+        if not isinstance(
+            agent_id,
+            str,
+        ):
+            raise RuntimeError(
+                "Trusted Agent agent_id must be str."
+            )
+
+        if not isinstance(
+            agent_secret,
+            str,
+        ):
+            raise RuntimeError(
+                "Trusted Agent agent_secret must be str."
+            )
+
+        if not isinstance(
+            account_fingerprint,
+            str,
+        ):
+            raise RuntimeError(
+                "Trusted Agent account_fingerprint "
+                "must be str."
+            )
+
+        normalized_agent_id = (
+            agent_id.strip()
+        )
+
+        normalized_agent_secret = (
+            agent_secret.strip()
+        )
+
+        normalized_account_fingerprint = (
+            account_fingerprint.strip()
+        )
+
+        if not normalized_agent_id:
+            raise RuntimeError(
+                "Trusted Agent agent_id is required."
+            )
+
+        if not normalized_agent_secret:
+            raise RuntimeError(
+                "Trusted Agent agent_secret is required."
+            )
+
+        if not normalized_account_fingerprint:
+            raise RuntimeError(
+                "Trusted Agent account_fingerprint "
+                "is required."
+            )
+
+        if normalized_agent_id in known_agent_ids:
+            raise RuntimeError(
+                "Duplicate Trusted Agent ID "
+                "in TODOBA_TRUSTED_AGENTS_JSON."
+            )
+
+        known_agent_ids.add(
+            normalized_agent_id
+        )
+
+        deployments.append(
+            {
+                "agent_id": normalized_agent_id,
+                "agent_secret": normalized_agent_secret,
+                "account_fingerprint": (
+                    normalized_account_fingerprint
+                ),
+            }
+        )
+
+    return tuple(
+        deployments
+    )
 
 
 def validate_telegram_config() -> None:
@@ -300,21 +475,24 @@ def validate_telegram_config() -> None:
 def validate_trusted_agent_config() -> None:
     errors: list[str] = []
 
-    if not TODOBA_TRUSTED_AGENT_ID:
-        errors.append(
-            "TODOBA_TRUSTED_AGENT_ID is required."
-        )
+    if TODOBA_TRUSTED_AGENTS_JSON:
+        get_trusted_agent_deployments()
+    else:
+        if not TODOBA_TRUSTED_AGENT_ID:
+            errors.append(
+                "TODOBA_TRUSTED_AGENT_ID is required."
+            )
 
-    if not TODOBA_TRUSTED_AGENT_SECRET:
-        errors.append(
-            "TODOBA_TRUSTED_AGENT_SECRET is required."
-        )
+        if not TODOBA_TRUSTED_AGENT_SECRET:
+            errors.append(
+                "TODOBA_TRUSTED_AGENT_SECRET is required."
+            )
 
-    if not TODOBA_TRUSTED_AGENT_ACCOUNT_FINGERPRINT:
-        errors.append(
-            "TODOBA_TRUSTED_AGENT_ACCOUNT_FINGERPRINT "
-            "is required."
-        )
+        if not TODOBA_TRUSTED_AGENT_ACCOUNT_FINGERPRINT:
+            errors.append(
+                "TODOBA_TRUSTED_AGENT_ACCOUNT_FINGERPRINT "
+                "is required."
+            )
 
     if not TODOBA_EXECUTION_MISSION_SIGNING_SECRET:
         errors.append(

@@ -237,6 +237,9 @@ from backend.trading.execution.trusted_agent_authenticator import (
 from backend.trading.execution.trusted_agent_credential_registry import (
     TrustedAgentCredentialRegistry,
 )
+from backend.trading.execution.trusted_agent_signing_key_registry import (
+    TrustedAgentSigningKeyRegistry,
+)
 from backend.trading.execution.trusted_agent_account_binding_guard import (
     TrustedAgentAccountBindingGuard,
 )
@@ -357,6 +360,27 @@ def _build_trusted_agent_credential_registry(
     return registry
 
 
+def _build_trusted_agent_signing_key_registry(
+    deployments: tuple[
+        dict[str, str],
+        ...,
+    ],
+    *,
+    signing_secret_field: str,
+) -> TrustedAgentSigningKeyRegistry:
+    registry = TrustedAgentSigningKeyRegistry()
+
+    for deployment in deployments:
+        registry.register(
+            agent_id=deployment["agent_id"],
+            signing_secret=deployment[
+                signing_secret_field
+            ],
+        )
+
+    return registry
+
+
 trusted_agent_deployments = (
     get_trusted_agent_deployments()
 )
@@ -367,6 +391,23 @@ trusted_agent_credential_registry = (
     )
 )
 
+execution_signing_key_registry = (
+    _build_trusted_agent_signing_key_registry(
+        trusted_agent_deployments,
+        signing_secret_field=(
+            "execution_mission_signing_secret"
+        ),
+    )
+)
+
+control_signing_key_registry = (
+    _build_trusted_agent_signing_key_registry(
+        trusted_agent_deployments,
+        signing_secret_field=(
+            "control_mission_signing_secret"
+        ),
+    )
+)
 
 todoba_runtime: TODOBARuntime = create_runtime(
     RuntimeMode(
@@ -556,13 +597,17 @@ control_mission_repository = (
 
 control_mission_signer = (
     ControlMissionSigner(
-        TODOBA_CONTROL_MISSION_SIGNING_SECRET
+        signing_key_registry=(
+            control_signing_key_registry
+        )
     )
 )
 
 control_mission_signer_v2 = (
     ControlMissionSignerV2(
-        TODOBA_CONTROL_MISSION_SIGNING_SECRET
+        signing_key_registry=(
+            control_signing_key_registry
+        )
     )
 )
 
@@ -732,13 +777,17 @@ execution_mission_repository = (
 
 execution_mission_signer = (
     ExecutionMissionSigner(
-        TODOBA_EXECUTION_MISSION_SIGNING_SECRET
+        signing_key_registry=(
+            execution_signing_key_registry
+        )
     )
 )
 
 execution_mission_signer_v2 = (
     ExecutionMissionSignerV2(
-        TODOBA_EXECUTION_MISSION_SIGNING_SECRET
+        signing_key_registry=(
+            execution_signing_key_registry
+        )
     )
 )
 

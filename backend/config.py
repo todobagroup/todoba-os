@@ -231,6 +231,12 @@ def get_trusted_agent_deployments() -> tuple[
                 "account_fingerprint": (
                     TODOBA_TRUSTED_AGENT_ACCOUNT_FINGERPRINT
                 ),
+                "execution_mission_signing_secret": (
+                    TODOBA_EXECUTION_MISSION_SIGNING_SECRET
+                ),
+                "control_mission_signing_secret": (
+                    TODOBA_CONTROL_MISSION_SIGNING_SECRET
+                ),
             },
         )
 
@@ -269,6 +275,8 @@ def get_trusted_agent_deployments() -> tuple[
         "agent_id",
         "agent_secret",
         "account_fingerprint",
+        "execution_mission_signing_secret",
+        "control_mission_signing_secret",
     }
 
     for item in payload:
@@ -281,13 +289,34 @@ def get_trusted_agent_deployments() -> tuple[
                 "must be JSON objects."
             )
 
-        if set(
-            item.keys()
-        ) != required_fields:
+        missing_fields = (
+            required_fields
+            - set(
+                item.keys()
+            )
+        )
+
+        extra_fields = (
+            set(
+                item.keys()
+            )
+            - required_fields
+        )
+
+        if missing_fields:
+            missing_field = sorted(
+                missing_fields
+            )[0]
+
+            raise RuntimeError(
+                "TODOBA_TRUSTED_AGENTS_JSON entry "
+                f"is missing {missing_field}."
+            )
+
+        if extra_fields:
             raise RuntimeError(
                 "TODOBA_TRUSTED_AGENTS_JSON entries "
-                "must contain exactly agent_id, "
-                "agent_secret, and account_fingerprint."
+                "contain unsupported fields."
             )
 
         agent_id = item[
@@ -300,6 +329,14 @@ def get_trusted_agent_deployments() -> tuple[
 
         account_fingerprint = item[
             "account_fingerprint"
+        ]
+
+        execution_mission_signing_secret = item[
+            "execution_mission_signing_secret"
+        ]
+
+        control_mission_signing_secret = item[
+            "control_mission_signing_secret"
         ]
 
         if not isinstance(
@@ -327,6 +364,26 @@ def get_trusted_agent_deployments() -> tuple[
                 "must be str."
             )
 
+        if not isinstance(
+            execution_mission_signing_secret,
+            str,
+        ):
+            raise RuntimeError(
+                "Trusted Agent "
+                "execution_mission_signing_secret "
+                "must be str."
+            )
+
+        if not isinstance(
+            control_mission_signing_secret,
+            str,
+        ):
+            raise RuntimeError(
+                "Trusted Agent "
+                "control_mission_signing_secret "
+                "must be str."
+            )
+
         normalized_agent_id = (
             agent_id.strip()
         )
@@ -337,6 +394,14 @@ def get_trusted_agent_deployments() -> tuple[
 
         normalized_account_fingerprint = (
             account_fingerprint.strip()
+        )
+
+        normalized_execution_signing_secret = (
+            execution_mission_signing_secret.strip()
+        )
+
+        normalized_control_signing_secret = (
+            control_mission_signing_secret.strip()
         )
 
         if not normalized_agent_id:
@@ -352,6 +417,20 @@ def get_trusted_agent_deployments() -> tuple[
         if not normalized_account_fingerprint:
             raise RuntimeError(
                 "Trusted Agent account_fingerprint "
+                "is required."
+            )
+
+        if not normalized_execution_signing_secret:
+            raise RuntimeError(
+                "Trusted Agent "
+                "execution_mission_signing_secret "
+                "is required."
+            )
+
+        if not normalized_control_signing_secret:
+            raise RuntimeError(
+                "Trusted Agent "
+                "control_mission_signing_secret "
                 "is required."
             )
 
@@ -372,13 +451,18 @@ def get_trusted_agent_deployments() -> tuple[
                 "account_fingerprint": (
                     normalized_account_fingerprint
                 ),
+                "execution_mission_signing_secret": (
+                    normalized_execution_signing_secret
+                ),
+                "control_mission_signing_secret": (
+                    normalized_control_signing_secret
+                ),
             }
         )
 
     return tuple(
         deployments
     )
-
 
 def validate_telegram_config() -> None:
     errors: list[str] = []
@@ -494,17 +578,17 @@ def validate_trusted_agent_config() -> None:
                 "is required."
             )
 
-    if not TODOBA_EXECUTION_MISSION_SIGNING_SECRET:
-        errors.append(
-            "TODOBA_EXECUTION_MISSION_SIGNING_SECRET "
-            "is required."
-        )
+        if not TODOBA_EXECUTION_MISSION_SIGNING_SECRET:
+            errors.append(
+                "TODOBA_EXECUTION_MISSION_SIGNING_SECRET "
+                "is required."
+            )
 
-    if not TODOBA_CONTROL_MISSION_SIGNING_SECRET:
-        errors.append(
-            "TODOBA_CONTROL_MISSION_SIGNING_SECRET "
-            "is required."
-        )
+        if not TODOBA_CONTROL_MISSION_SIGNING_SECRET:
+            errors.append(
+                "TODOBA_CONTROL_MISSION_SIGNING_SECRET "
+                "is required."
+            )
 
     if errors:
         joined_errors = "\n- ".join(

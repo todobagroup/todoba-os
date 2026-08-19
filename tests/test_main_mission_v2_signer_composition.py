@@ -1,9 +1,4 @@
-from backend.main import (
-    control_mission_signer,
-    control_mission_signer_v2,
-    execution_mission_signer,
-    execution_mission_signer_v2,
-)
+from backend import main
 from backend.trading.control.control_mission_signer import (
     ControlMissionSigner,
 )
@@ -16,40 +11,105 @@ from backend.trading.execution.execution_mission_signer import (
 from backend.trading.execution.execution_mission_signer_v2 import (
     ExecutionMissionSignerV2,
 )
+from backend.trading.execution.trusted_agent_signing_key_registry import (
+    TrustedAgentSigningKeyRegistry,
+)
 
 
 def test_main_composes_v1_and_v2_mission_signers_side_by_side() -> None:
     assert isinstance(
-        execution_mission_signer,
+        main.execution_mission_signer,
         ExecutionMissionSigner,
     )
 
     assert isinstance(
-        execution_mission_signer_v2,
+        main.execution_mission_signer_v2,
         ExecutionMissionSignerV2,
     )
 
     assert isinstance(
-        control_mission_signer,
+        main.control_mission_signer,
         ControlMissionSigner,
     )
 
     assert isinstance(
-        control_mission_signer_v2,
+        main.control_mission_signer_v2,
         ControlMissionSignerV2,
     )
 
     assert (
-        execution_mission_signer
-        is not execution_mission_signer_v2
+        main.execution_mission_signer
+        is not main.execution_mission_signer_v2
     )
 
     assert (
-        control_mission_signer
-        is not control_mission_signer_v2
+        main.control_mission_signer
+        is not main.control_mission_signer_v2
     )
 
     assert (
-        execution_mission_signer_v2
-        is not control_mission_signer_v2
+        main.execution_mission_signer_v2
+        is not main.control_mission_signer_v2
+    )
+
+
+def test_main_composes_separate_signing_key_domains() -> None:
+    assert isinstance(
+        main.execution_signing_key_registry,
+        TrustedAgentSigningKeyRegistry,
+    )
+
+    assert isinstance(
+        main.control_signing_key_registry,
+        TrustedAgentSigningKeyRegistry,
+    )
+
+    assert (
+        main.execution_signing_key_registry
+        is not main.control_signing_key_registry
+    )
+
+    for deployment in main.trusted_agent_deployments:
+        agent_id = deployment[
+            "agent_id"
+        ]
+
+        assert (
+            main.execution_signing_key_registry.get_secret(
+                agent_id=agent_id
+            )
+            == deployment[
+                "execution_mission_signing_secret"
+            ]
+        )
+
+        assert (
+            main.control_signing_key_registry.get_secret(
+                agent_id=agent_id
+            )
+            == deployment[
+                "control_mission_signing_secret"
+            ]
+        )
+
+
+def test_main_signers_use_their_own_signing_domain() -> None:
+    assert (
+        main.execution_mission_signer._signing_key_registry
+        is main.execution_signing_key_registry
+    )
+
+    assert (
+        main.execution_mission_signer_v2._signing_key_registry
+        is main.execution_signing_key_registry
+    )
+
+    assert (
+        main.control_mission_signer._signing_key_registry
+        is main.control_signing_key_registry
+    )
+
+    assert (
+        main.control_mission_signer_v2._signing_key_registry
+        is main.control_signing_key_registry
     )

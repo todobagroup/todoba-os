@@ -1,5 +1,7 @@
 from dataclasses import replace
 
+import pytest
+
 from backend.trading.execution.execution_mission import (
     ExecutionMission,
 )
@@ -8,6 +10,9 @@ from backend.trading.execution.execution_mission_signer_v2 import (
 )
 from backend.trading.execution.execution_mission_signing_payload_v2 import (
     ExecutionMissionSigningPayloadV2,
+)
+from backend.trading.execution.trusted_agent_signing_key_registry import (
+    TrustedAgentSigningKeyRegistry,
 )
 
 
@@ -29,6 +34,23 @@ def build_mission() -> ExecutionMission:
         sequence=168001,
         security_sequence=42,
     )
+
+
+def build_signing_key_registry(
+) -> TrustedAgentSigningKeyRegistry:
+    registry = TrustedAgentSigningKeyRegistry()
+
+    registry.register(
+        agent_id="trusted-agent-001",
+        signing_secret="execution-key-a",
+    )
+
+    registry.register(
+        agent_id="trusted-agent-002",
+        signing_secret="execution-key-b",
+    )
+
+    return registry
 
 
 def test_execution_v2_signing_payload_matches_fixed_cross_language_vector():
@@ -101,3 +123,104 @@ def test_execution_v2_signature_binds_security_sequence():
     ) != signer.sign(
         replay_variant
     )
+
+
+def test_execution_v2_multi_agent_signer_uses_agent_specific_key():
+    registry = build_signing_key_registry()
+
+    signer = ExecutionMissionSignerV2(
+        signing_key_registry=registry,
+    )
+
+    mission_a = build_mission()
+
+    mission_b = replace(
+        mission_a,
+        mission_id="proof182-002",
+        agent_id="trusted-agent-002",
+        account_fingerprint="account-b",
+    )
+
+    signature_a = signer.sign(
+        mission_a
+    )
+
+    signature_b = signer.sign(
+        mission_b
+    )
+
+    verifier_a = ExecutionMissionSignerV2(
+        "execution-key-a"
+    )
+
+    verifier_b = ExecutionMissionSignerV2(
+        "execution-key-b"
+    )
+
+    assert verifier_a.verify(
+        mission_a,
+        signature_a,
+    )
+
+    assert verifier_b.verify(
+        mission_b,
+        signature_b,
+    )
+
+
+def test_execution_v2_multi_agent_signer_rejects_cross_agent_key():
+    registry = build_signing_key_registry()
+
+    signer = ExecutionMissionSignerV2(
+        signing_key_registry=registry,
+    )
+
+    mission = build_mission()
+
+    signature = signer.sign(
+        mission
+    )
+
+    wrong_verifier = ExecutionMissionSignerV2(
+        "execution-key-b"
+    )
+
+    assert not wrong_verifier.verify(
+        mission,
+        signature,
+    )
+
+
+def test_execution_v2_multi_agent_signer_rejects_unknown_agent():
+    registry = build_signing_key_registry()
+
+    signer = ExecutionMissionSignerV2(
+        signing_key_registry=registry,
+    )
+
+    unknown_mission = replace(
+        build_mission(),
+        mission_id="proof182-unknown",
+        agent_id="unknown-agent",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="signing key not found",
+    ):
+        signer.sign(
+            unknown_mission
+        )
+
+
+def test_execution_v2_rejects_legacy_secret_and_registry_together():
+    registry = build_signing_key_registry()
+
+    with pytest.raises(
+        ValueError,
+        match="either",
+    ):
+        ExecutionMissionSignerV2(
+            "legacy-secret",
+            signing_key_registry=registry,
+        )

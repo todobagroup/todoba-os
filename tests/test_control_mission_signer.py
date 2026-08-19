@@ -11,6 +11,9 @@ from backend.trading.control.control_mission import (
 from backend.trading.control.control_mission_signer import (
     ControlMissionSigner,
 )
+from backend.trading.execution.trusted_agent_signing_key_registry import (
+    TrustedAgentSigningKeyRegistry,
+)
 
 
 SIGNING_SECRET = "proof178-control-signing-secret"
@@ -29,6 +32,23 @@ def build_mission() -> ControlMission:
         expires_at="2026-08-15T00:01:00Z",
         sequence=1,
     )
+
+
+def build_signing_key_registry(
+) -> TrustedAgentSigningKeyRegistry:
+    registry = TrustedAgentSigningKeyRegistry()
+
+    registry.register(
+        agent_id="trusted-agent-001",
+        signing_secret="control-key-a",
+    )
+
+    registry.register(
+        agent_id="trusted-agent-002",
+        signing_secret="control-key-b",
+    )
+
+    return registry
 
 
 def test_signing_matches_fixed_cross_language_vector() -> None:
@@ -127,4 +147,105 @@ def test_empty_signing_secret_is_rejected() -> None:
     ):
         ControlMissionSigner(
             "   "
+        )
+
+
+def test_multi_agent_signer_uses_agent_specific_key() -> None:
+    registry = build_signing_key_registry()
+
+    signer = ControlMissionSigner(
+        signing_key_registry=registry,
+    )
+
+    mission_a = build_mission()
+
+    mission_b = replace(
+        mission_a,
+        mission_id="control-002",
+        agent_id="trusted-agent-002",
+        account_fingerprint="account-b",
+    )
+
+    signature_a = signer.sign(
+        mission_a
+    )
+
+    signature_b = signer.sign(
+        mission_b
+    )
+
+    verifier_a = ControlMissionSigner(
+        "control-key-a"
+    )
+
+    verifier_b = ControlMissionSigner(
+        "control-key-b"
+    )
+
+    assert verifier_a.verify(
+        mission_a,
+        signature_a,
+    )
+
+    assert verifier_b.verify(
+        mission_b,
+        signature_b,
+    )
+
+
+def test_multi_agent_signer_rejects_cross_agent_key() -> None:
+    registry = build_signing_key_registry()
+
+    signer = ControlMissionSigner(
+        signing_key_registry=registry,
+    )
+
+    mission = build_mission()
+
+    signature = signer.sign(
+        mission
+    )
+
+    wrong_verifier = ControlMissionSigner(
+        "control-key-b"
+    )
+
+    assert not wrong_verifier.verify(
+        mission,
+        signature,
+    )
+
+
+def test_multi_agent_signer_rejects_unknown_agent() -> None:
+    registry = build_signing_key_registry()
+
+    signer = ControlMissionSigner(
+        signing_key_registry=registry,
+    )
+
+    unknown_mission = replace(
+        build_mission(),
+        mission_id="control-unknown",
+        agent_id="unknown-agent",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="signing key not found",
+    ):
+        signer.sign(
+            unknown_mission
+        )
+
+
+def test_signer_rejects_legacy_secret_and_registry_together() -> None:
+    registry = build_signing_key_registry()
+
+    with pytest.raises(
+        ValueError,
+        match="either",
+    ):
+        ControlMissionSigner(
+            "legacy-secret",
+            signing_key_registry=registry,
         )

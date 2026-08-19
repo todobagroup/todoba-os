@@ -95,6 +95,12 @@ def test_trusted_agent_deployments_fall_back_to_legacy_config(
             "agent_id": "trusted-agent-001",
             "agent_secret": "test-agent-secret",
             "account_fingerprint": "account-a",
+            "execution_mission_signing_secret": (
+                "test-execution-signing-secret"
+            ),
+            "control_mission_signing_secret": (
+                "test-control-signing-secret"
+            ),
         },
     )
 
@@ -126,6 +132,18 @@ def test_trusted_agent_config_accepts_multi_agent_json(
 
     monkeypatch.setattr(
         config,
+        "TODOBA_EXECUTION_MISSION_SIGNING_SECRET",
+        "",
+    )
+
+    monkeypatch.setattr(
+        config,
+        "TODOBA_CONTROL_MISSION_SIGNING_SECRET",
+        "",
+    )
+
+    monkeypatch.setattr(
+        config,
         "TODOBA_TRUSTED_AGENTS_JSON",
         json.dumps(
             [
@@ -133,11 +151,23 @@ def test_trusted_agent_config_accepts_multi_agent_json(
                     "agent_id": "trusted-agent-001",
                     "agent_secret": "secret-a",
                     "account_fingerprint": "account-a",
+                    "execution_mission_signing_secret": (
+                        "execution-key-a"
+                    ),
+                    "control_mission_signing_secret": (
+                        "control-key-a"
+                    ),
                 },
                 {
                     "agent_id": "trusted-agent-002",
                     "agent_secret": "secret-b",
                     "account_fingerprint": "account-b",
+                    "execution_mission_signing_secret": (
+                        "execution-key-b"
+                    ),
+                    "control_mission_signing_secret": (
+                        "control-key-b"
+                    ),
                 },
             ]
         ),
@@ -155,11 +185,23 @@ def test_trusted_agent_config_accepts_multi_agent_json(
             "agent_id": "trusted-agent-001",
             "agent_secret": "secret-a",
             "account_fingerprint": "account-a",
+            "execution_mission_signing_secret": (
+                "execution-key-a"
+            ),
+            "control_mission_signing_secret": (
+                "control-key-a"
+            ),
         },
         {
             "agent_id": "trusted-agent-002",
             "agent_secret": "secret-b",
             "account_fingerprint": "account-b",
+            "execution_mission_signing_secret": (
+                "execution-key-b"
+            ),
+            "control_mission_signing_secret": (
+                "control-key-b"
+            ),
         },
     )
 
@@ -180,11 +222,23 @@ def test_trusted_agent_config_rejects_duplicate_multi_agent_ids(
                     "agent_id": "trusted-agent-001",
                     "agent_secret": "secret-a",
                     "account_fingerprint": "account-a",
+                    "execution_mission_signing_secret": (
+                        "execution-key-a"
+                    ),
+                    "control_mission_signing_secret": (
+                        "control-key-a"
+                    ),
                 },
                 {
                     "agent_id": "trusted-agent-001",
                     "agent_secret": "secret-b",
                     "account_fingerprint": "account-b",
+                    "execution_mission_signing_secret": (
+                        "execution-key-b"
+                    ),
+                    "control_mission_signing_secret": (
+                        "control-key-b"
+                    ),
                 },
             ]
         ),
@@ -194,6 +248,70 @@ def test_trusted_agent_config_rejects_duplicate_multi_agent_ids(
     with pytest.raises(
         RuntimeError,
         match="Duplicate Trusted Agent ID",
+    ):
+        config.validate_trusted_agent_config()
+
+
+def test_trusted_agent_config_rejects_missing_execution_signing_key(
+    monkeypatch,
+) -> None:
+    _set_valid_trusted_agent_config(
+        monkeypatch
+    )
+
+    monkeypatch.setattr(
+        config,
+        "TODOBA_TRUSTED_AGENTS_JSON",
+        json.dumps(
+            [
+                {
+                    "agent_id": "trusted-agent-001",
+                    "agent_secret": "secret-a",
+                    "account_fingerprint": "account-a",
+                    "control_mission_signing_secret": (
+                        "control-key-a"
+                    ),
+                },
+            ]
+        ),
+        raising=False,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="execution_mission_signing_secret",
+    ):
+        config.validate_trusted_agent_config()
+
+
+def test_trusted_agent_config_rejects_missing_control_signing_key(
+    monkeypatch,
+) -> None:
+    _set_valid_trusted_agent_config(
+        monkeypatch
+    )
+
+    monkeypatch.setattr(
+        config,
+        "TODOBA_TRUSTED_AGENTS_JSON",
+        json.dumps(
+            [
+                {
+                    "agent_id": "trusted-agent-001",
+                    "agent_secret": "secret-a",
+                    "account_fingerprint": "account-a",
+                    "execution_mission_signing_secret": (
+                        "execution-key-a"
+                    ),
+                },
+            ]
+        ),
+        raising=False,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="control_mission_signing_secret",
     ):
         config.validate_trusted_agent_config()
 

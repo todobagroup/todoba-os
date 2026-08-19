@@ -19,17 +19,54 @@ from backend.trading.execution.execution_mission import (
 from backend.trading.execution.execution_mission_signing_payload_v2 import (
     ExecutionMissionSigningPayloadV2,
 )
+from backend.trading.execution.trusted_agent_signing_key_registry import (
+    TrustedAgentSigningKeyRegistry,
+)
 
 
 class ExecutionMissionSignerV2:
     """
     Sign and verify ExecutionMission V2 payload integrity.
+
+    Legacy single-secret construction remains supported.
+    Multi-Agent construction resolves the signing secret
+    from the mission Agent identity.
     """
 
     def __init__(
         self,
-        signing_secret: str,
+        signing_secret: str | None = None,
+        *,
+        signing_key_registry: (
+            TrustedAgentSigningKeyRegistry | None
+        ) = None,
     ) -> None:
+        if (
+            signing_secret is not None
+            and signing_key_registry is not None
+        ):
+            raise ValueError(
+                "Provide either signing_secret or "
+                "signing_key_registry, not both."
+            )
+
+        if signing_key_registry is not None:
+            if not isinstance(
+                signing_key_registry,
+                TrustedAgentSigningKeyRegistry,
+            ):
+                raise TypeError(
+                    "signing_key_registry must be "
+                    "TrustedAgentSigningKeyRegistry."
+                )
+
+            self._signing_secret: bytes | None = None
+            self._signing_key_registry = (
+                signing_key_registry
+            )
+
+            return
+
         if not isinstance(
             signing_secret,
             str,
@@ -51,6 +88,36 @@ class ExecutionMissionSignerV2:
             )
         )
 
+        self._signing_key_registry = None
+
+    def _resolve_signing_secret(
+        self,
+        mission: ExecutionMission,
+    ) -> bytes:
+        if self._signing_key_registry is None:
+            if self._signing_secret is None:
+                raise RuntimeError(
+                    "Execution mission V2 signer "
+                    "has no signing secret."
+                )
+
+            return self._signing_secret
+
+        signing_secret = (
+            self._signing_key_registry.get_secret(
+                agent_id=mission.agent_id
+            )
+        )
+
+        if signing_secret is None:
+            raise ValueError(
+                "Trusted Agent signing key not found."
+            )
+
+        return signing_secret.encode(
+            "utf-8"
+        )
+
     def sign(
         self,
         mission: ExecutionMission,
@@ -61,8 +128,14 @@ class ExecutionMissionSignerV2:
             )
         )
 
+        signing_secret = (
+            self._resolve_signing_secret(
+                mission
+            )
+        )
+
         return hmac.new(
-            self._signing_secret,
+            signing_secret,
             payload,
             hashlib.sha256,
         ).hexdigest()

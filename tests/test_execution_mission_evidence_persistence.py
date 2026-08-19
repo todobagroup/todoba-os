@@ -6,6 +6,9 @@ from backend.trading.execution.broker_execution_evidence import (
 from backend.trading.execution.broker_execution_evidence_store import (
     BrokerExecutionEvidenceStore,
 )
+from backend.trading.execution.execution_mission import (
+    ExecutionMission,
+)
 from backend.trading.execution.execution_mission_acknowledgement import (
     ExecutionMissionAcknowledgement,
 )
@@ -33,6 +36,15 @@ from backend.trading.execution.execution_mission_failed import (
 from backend.trading.execution.execution_mission_failed_store import (
     ExecutionMissionFailedStore,
 )
+from backend.trading.execution.execution_mission_record import (
+    ExecutionMissionRecord,
+)
+from backend.trading.execution.execution_mission_registry import (
+    ExecutionMissionRegistry,
+)
+
+
+AGENT_ID = "agent-001"
 
 
 def build_stores():
@@ -55,6 +67,53 @@ def build_stores():
     }
 
 
+def build_mission(
+    mission_id: str,
+    sequence: int,
+) -> ExecutionMission:
+    return ExecutionMission(
+        mission_id=mission_id,
+        agent_id=AGENT_ID,
+        account_fingerprint="demo-account",
+        symbol="XAUUSD",
+        order_type="BUY",
+        volume=0.01,
+        entry=None,
+        sl=4000.0,
+        tp=4200.0,
+        magic_number=10001,
+        comment="TODOBA evidence persistence",
+        sequence=sequence,
+        created_at="2026-08-07T00:00:00Z",
+        expires_at="2026-08-07T00:05:00Z",
+    )
+
+
+def build_mission_registry() -> ExecutionMissionRegistry:
+    mission_registry = ExecutionMissionRegistry()
+
+    for sequence, mission_id in enumerate(
+        (
+            "mission-001",
+            "mission-002",
+            "mission-003",
+            "mission-004",
+            "mission-005",
+        ),
+        start=1,
+    ):
+        mission_registry.register(
+            ExecutionMissionRecord(
+                mission=build_mission(
+                    mission_id=mission_id,
+                    sequence=sequence,
+                )
+            )
+        )
+
+    return mission_registry
+
+
 def test_persistence_saves_and_restores_all_evidence_types(
     tmp_path: Path,
 ) -> None:
@@ -64,7 +123,7 @@ def test_persistence_saves_and_restores_all_evidence_types(
 
     acknowledgement = ExecutionMissionAcknowledgement(
         mission_id="mission-001",
-        agent_id="agent-001",
+        agent_id=AGENT_ID,
         sequence=1,
         status="ACKNOWLEDGED",
         acknowledged_at="2026-08-07T00:00:01Z",
@@ -72,21 +131,21 @@ def test_persistence_saves_and_restores_all_evidence_types(
 
     execution_started = ExecutionMissionExecutionStarted(
         mission_id="mission-002",
-        agent_id="agent-001",
+        agent_id=AGENT_ID,
         sequence=2,
         started_at="2026-08-07T00:00:02Z",
     )
 
     completed = ExecutionMissionCompleted(
         mission_id="mission-003",
-        agent_id="agent-001",
+        agent_id=AGENT_ID,
         sequence=3,
         completed_at="2026-08-07T00:00:03Z",
     )
 
     failed = ExecutionMissionFailed(
         mission_id="mission-004",
-        agent_id="agent-001",
+        agent_id=AGENT_ID,
         sequence=4,
         failed_at="2026-08-07T00:00:04Z",
         failure_reason="broker rejected order",
@@ -94,7 +153,7 @@ def test_persistence_saves_and_restores_all_evidence_types(
 
     broker_evidence = BrokerExecutionEvidence(
         mission_id="mission-005",
-        agent_id="agent-001",
+        agent_id=AGENT_ID,
         success=True,
         retcode=10009,
         order_ticket=123456,
@@ -121,8 +180,11 @@ def test_persistence_saves_and_restores_all_evidence_types(
 
     stores = build_stores()
 
+    mission_registry = build_mission_registry()
+
     restored = persistence.restore(
-        **stores
+        **stores,
+        mission_registry=mission_registry,
     )
 
     assert restored == 5
@@ -162,7 +224,7 @@ def test_persistence_remove_removes_processed_evidence(
 
     evidence = ExecutionMissionCompleted(
         mission_id="mission-remove",
-        agent_id="agent-001",
+        agent_id=AGENT_ID,
         sequence=1,
         completed_at="2026-08-07T00:00:00Z",
     )
@@ -190,7 +252,7 @@ def test_persistence_remove_missing_evidence_returns_false(
 
     evidence = ExecutionMissionFailed(
         mission_id="mission-missing",
-        agent_id="agent-001",
+        agent_id=AGENT_ID,
         sequence=1,
         failed_at="2026-08-07T00:00:00Z",
         failure_reason="test",

@@ -10,6 +10,9 @@ from fastapi.testclient import TestClient
 from backend.trading.execution.broker_execution_evidence_store import (
     BrokerExecutionEvidenceStore,
 )
+from backend.trading.execution.execution_mission import (
+    ExecutionMission,
+)
 from backend.trading.execution.execution_mission_acknowledgement_store import (
     ExecutionMissionAcknowledgementStore,
 )
@@ -31,11 +34,18 @@ from backend.trading.execution.execution_mission_execution_started_store import 
 from backend.trading.execution.execution_mission_failed_store import (
     ExecutionMissionFailedStore,
 )
+from backend.trading.execution.execution_mission_record import (
+    ExecutionMissionRecord,
+)
+from backend.trading.execution.execution_mission_registry import (
+    ExecutionMissionRegistry,
+)
 from backend.trading.execution.trusted_agent_authenticator import (
     TrustedAgentAuthenticator,
 )
 
 
+MISSION_ID = "execution-started-001"
 AGENT_ID = "trusted-agent-001"
 AGENT_SECRET = "test-trusted-agent-secret"
 
@@ -45,8 +55,31 @@ AUTHENTICATION_HEADERS = {
 }
 
 
+def build_mission(
+    agent_id: str = AGENT_ID,
+) -> ExecutionMission:
+    return ExecutionMission(
+        mission_id=MISSION_ID,
+        agent_id=agent_id,
+        account_fingerprint="demo-account",
+        symbol="XAUUSD",
+        order_type="BUY",
+        volume=0.01,
+        entry=None,
+        sl=4000.0,
+        tp=4200.0,
+        magic_number=10001,
+        comment="TODOBA execution started API test",
+        sequence=1,
+        created_at="2026-07-31T00:00:00Z",
+        expires_at="2026-07-31T00:15:00Z",
+    )
+
 def build_client(
     tmp_path: Path,
+    *,
+    mission_agent_id: str = AGENT_ID,
+    raise_server_exceptions: bool = True,
 ) -> tuple[
     TestClient,
     ExecutionMissionExecutionStartedStore,
@@ -59,6 +92,16 @@ def build_client(
     persistence = ExecutionMissionEvidencePersistence(
         tmp_path
         / "execution_mission_evidence.json"
+    )
+
+    mission_registry = ExecutionMissionRegistry()
+
+    mission_registry.register(
+        ExecutionMissionRecord(
+        mission=build_mission(
+            agent_id=mission_agent_id
+)
+        )
     )
 
     intake = ExecutionMissionEvidenceIntake(
@@ -78,6 +121,7 @@ def build_client(
         broker_evidence_store=(
             BrokerExecutionEvidenceStore()
         ),
+        mission_registry=mission_registry,
     )
 
     authenticator = TrustedAgentAuthenticator(
@@ -95,7 +139,10 @@ def build_client(
     )
 
     return (
-        TestClient(app),
+        TestClient(
+            app,
+            raise_server_exceptions=raise_server_exceptions,
+),
         execution_started_store,
         persistence,
     )
@@ -105,7 +152,7 @@ def build_payload(
     agent_id: str = AGENT_ID,
 ) -> dict[str, object]:
     return {
-        "mission_id": "execution-started-001",
+        "mission_id": MISSION_ID,
         "agent_id": agent_id,
         "sequence": 1,
         "started_at": "2026-07-31T00:10:00Z",
@@ -128,7 +175,7 @@ def test_execution_started_api_receives_evidence(
     assert response.status_code == 200
     assert response.json() == {
         "status": "execution_started",
-        "mission_id": "execution-started-001",
+        "mission_id": MISSION_ID,
         "store_size": 1,
     }
 
@@ -138,9 +185,7 @@ def test_execution_started_api_receives_evidence(
     evidence = store.pop()
 
     assert evidence is not None
-    assert evidence.mission_id == (
-        "execution-started-001"
-    )
+    assert evidence.mission_id == MISSION_ID
 
 
 def test_execution_started_api_rejects_missing_credentials(
@@ -180,6 +225,29 @@ def test_execution_started_api_rejects_wrong_agent_identity(
         "detail": (
             "Execution started evidence "
             "does not belong to authenticated Agent."
+        ),
+    }
+def test_execution_started_api_rejects_mission_owned_by_other_agent(
+    tmp_path: Path,
+) -> None:
+    client, store, persistence = build_client(
+        tmp_path,
+        mission_agent_id="trusted-agent-999",
+        raise_server_exceptions=False,
+    )
+
+    response = client.post(
+        "/missions/execution_started",
+        headers=AUTHENTICATION_HEADERS,
+        json=build_payload(),
+    )
+
+    assert response.status_code == 403
+
+    assert response.json() == {
+        "detail": (
+            "Execution mission evidence does not belong "
+            "to mission Agent."
         ),
     }
 

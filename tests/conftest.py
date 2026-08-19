@@ -62,7 +62,16 @@ def isolated_main_execution_mission_evidence(
             while store.pop() is not None:
                 pass
 
+    def drain_mission_registry() -> None:
+        for record in (
+            main.execution_mission_registry.list()
+        ):
+            main.execution_mission_registry.remove(
+                record.mission.mission_id
+            )
+
     drain_stores()
+    drain_mission_registry()
 
     storage_path = (
         tmp_path
@@ -116,3 +125,4 @@ def isolated_main_execution_mission_evidence(
     yield storage_path
 
     drain_stores()
+    drain_mission_registry()

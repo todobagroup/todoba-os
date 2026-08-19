@@ -15,6 +15,7 @@ from fastapi import status
 
 from backend.trading.execution.execution_mission_evidence_intake import (
     ExecutionMissionEvidenceIntake,
+    ExecutionMissionEvidenceOwnershipError,
 )
 from backend.trading.execution.execution_mission_failed import (
     ExecutionMissionFailed,
@@ -75,9 +76,15 @@ def create_execution_mission_failed_router(
                 ),
             )
 
-        intake.receive(
-            evidence
-        )
+        try:
+            intake.receive(
+                evidence
+            )
+        except ExecutionMissionEvidenceOwnershipError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=str(exc),
+            ) from exc
 
         return {
             "status": "failed",

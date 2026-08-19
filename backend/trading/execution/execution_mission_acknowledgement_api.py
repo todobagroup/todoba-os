@@ -18,6 +18,7 @@ from backend.trading.execution.execution_mission_acknowledgement import (
 )
 from backend.trading.execution.execution_mission_evidence_intake import (
     ExecutionMissionEvidenceIntake,
+    ExecutionMissionEvidenceOwnershipError,
 )
 from backend.trading.execution.trusted_agent_authentication_dependency import (
     create_trusted_agent_authentication_dependency,
@@ -75,9 +76,15 @@ def create_execution_mission_acknowledgement_router(
                 ),
             )
 
-        intake.receive(
-            acknowledgement
-        )
+        try:
+            intake.receive(
+                acknowledgement
+            )
+        except ExecutionMissionEvidenceOwnershipError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=str(exc),
+            ) from exc
 
         return {
             "status": "acknowledged",

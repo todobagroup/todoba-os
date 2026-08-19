@@ -45,6 +45,12 @@ from backend.trading.execution.execution_mission_evidence_idempotency_registry i
 from backend.trading.execution.execution_mission_evidence_identity import (
     ExecutionMissionEvidenceIdentity,
 )
+from backend.trading.execution.execution_mission_evidence_ownership import (
+    require_execution_mission_evidence_ownership,
+)
+from backend.trading.execution.execution_mission_registry import (
+    ExecutionMissionRegistry,
+)
 from backend.trading.execution.execution_mission_execution_started import (
     ExecutionMissionExecutionStarted,
 )
@@ -155,6 +161,7 @@ class ExecutionMissionEvidencePersistence:
         broker_evidence_store: (
             BrokerExecutionEvidenceStore
         ),
+        mission_registry: ExecutionMissionRegistry,
         idempotency_registry: Optional[
             ExecutionMissionEvidenceIdempotencyRegistry
         ] = None,
@@ -180,6 +187,15 @@ class ExecutionMissionEvidencePersistence:
                 broker_evidence_store
             ),
         )
+
+        if not isinstance(
+            mission_registry,
+            ExecutionMissionRegistry,
+        ):
+            raise TypeError(
+                "mission_registry must be "
+                "ExecutionMissionRegistry."
+            )
 
         if (
             idempotency_registry is not None
@@ -217,6 +233,11 @@ class ExecutionMissionEvidencePersistence:
             evidence = self._deserialize(
                 evidence_type=evidence_type,
                 evidence_payload=evidence_payload,
+            )
+
+            require_execution_mission_evidence_ownership(
+                evidence=evidence,
+                mission_registry=mission_registry,
             )
 
             if idempotency_registry is not None:

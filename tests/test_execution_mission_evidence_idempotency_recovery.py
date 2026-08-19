@@ -3,6 +3,9 @@ from pathlib import Path
 from backend.trading.execution.broker_execution_evidence_store import (
     BrokerExecutionEvidenceStore,
 )
+from backend.trading.execution.execution_mission import (
+    ExecutionMission,
+)
 from backend.trading.execution.execution_mission_acknowledgement import (
     ExecutionMissionAcknowledgement,
 )
@@ -24,6 +27,16 @@ from backend.trading.execution.execution_mission_execution_started_store import 
 from backend.trading.execution.execution_mission_failed_store import (
     ExecutionMissionFailedStore,
 )
+from backend.trading.execution.execution_mission_record import (
+    ExecutionMissionRecord,
+)
+from backend.trading.execution.execution_mission_registry import (
+    ExecutionMissionRegistry,
+)
+
+
+MISSION_ID = "recovery-001"
+AGENT_ID = "trusted-agent-001"
 
 
 def build_stores():
@@ -48,12 +61,41 @@ def build_stores():
 
 def build_acknowledgement():
     return ExecutionMissionAcknowledgement(
-        mission_id="recovery-001",
-        agent_id="trusted-agent-001",
+        mission_id=MISSION_ID,
+        agent_id=AGENT_ID,
         sequence=1,
         status="ACCEPTED",
         acknowledged_at="2026-08-07T00:00:00Z",
     )
+
+
+def build_mission_registry():
+    mission = ExecutionMission(
+        mission_id=MISSION_ID,
+        agent_id=AGENT_ID,
+        account_fingerprint="demo-account",
+        symbol="XAUUSD",
+        order_type="BUY",
+        volume=0.01,
+        entry=None,
+        sl=4000.0,
+        tp=4200.0,
+        magic_number=10001,
+        comment="TODOBA evidence recovery",
+        sequence=1,
+        created_at="2026-08-07T00:00:00Z",
+        expires_at="2026-08-07T00:05:00Z",
+    )
+
+    mission_registry = ExecutionMissionRegistry()
+
+    mission_registry.register(
+        ExecutionMissionRecord(
+            mission=mission
+        )
+    )
+
+    return mission_registry
 
 
 def test_restore_recovers_evidence_identity(
@@ -71,13 +113,16 @@ def test_restore_recovers_evidence_identity(
 
     stores = build_stores()
 
-    registry = (
+    mission_registry = build_mission_registry()
+
+    idempotency_registry = (
         ExecutionMissionEvidenceIdempotencyRegistry()
     )
 
     restored = persistence.restore(
         **stores,
-        idempotency_registry=registry,
+        mission_registry=mission_registry,
+        idempotency_registry=idempotency_registry,
     )
 
     assert restored == 1
@@ -87,7 +132,7 @@ def test_restore_recovers_evidence_identity(
         == 1
     )
 
-    assert registry.size() == 1
+    assert idempotency_registry.size() == 1
 
 
 def test_restore_does_not_enqueue_duplicate_evidence(
@@ -111,13 +156,16 @@ def test_restore_does_not_enqueue_duplicate_evidence(
 
     stores = build_stores()
 
-    registry = (
+    mission_registry = build_mission_registry()
+
+    idempotency_registry = (
         ExecutionMissionEvidenceIdempotencyRegistry()
     )
 
     restored = persistence.restore(
         **stores,
-        idempotency_registry=registry,
+        mission_registry=mission_registry,
+        idempotency_registry=idempotency_registry,
     )
 
     assert restored == 1
@@ -127,4 +175,4 @@ def test_restore_does_not_enqueue_duplicate_evidence(
         == 1
     )
 
-    assert registry.size() == 1
+    assert idempotency_registry.size() == 1

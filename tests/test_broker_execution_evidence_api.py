@@ -9,6 +9,9 @@ from backend.trading.execution.broker_execution_evidence_api import (
 from backend.trading.execution.broker_execution_evidence_store import (
     BrokerExecutionEvidenceStore,
 )
+from backend.trading.execution.execution_mission import (
+    ExecutionMission,
+)
 from backend.trading.execution.execution_mission_acknowledgement_store import (
     ExecutionMissionAcknowledgementStore,
 )
@@ -27,11 +30,18 @@ from backend.trading.execution.execution_mission_execution_started_store import 
 from backend.trading.execution.execution_mission_failed_store import (
     ExecutionMissionFailedStore,
 )
+from backend.trading.execution.execution_mission_record import (
+    ExecutionMissionRecord,
+)
+from backend.trading.execution.execution_mission_registry import (
+    ExecutionMissionRegistry,
+)
 from backend.trading.execution.trusted_agent_authenticator import (
     TrustedAgentAuthenticator,
 )
 
 
+MISSION_ID = "proof049-001"
 AGENT_ID = "trusted-agent-001"
 AGENT_SECRET = "test-trusted-agent-secret"
 
@@ -41,8 +51,31 @@ AUTHENTICATION_HEADERS = {
 }
 
 
+def build_mission(
+    agent_id: str = AGENT_ID,
+) -> ExecutionMission:
+    return ExecutionMission(
+        mission_id=MISSION_ID,
+        agent_id=agent_id,
+        account_fingerprint="demo-account",
+        symbol="XAUUSD",
+        order_type="BUY",
+        volume=0.01,
+        entry=None,
+        sl=4000.0,
+        tp=4200.0,
+        magic_number=10001,
+        comment="TODOBA broker evidence API test",
+        sequence=1,
+        created_at="2026-08-04T00:00:00Z",
+        expires_at="2026-08-04T00:05:00Z",
+    )
+
+
 def create_test_app(
     tmp_path: Path,
+    *,
+    mission_agent_id: str = AGENT_ID,
 ) -> tuple[
     FastAPI,
     BrokerExecutionEvidenceStore,
@@ -55,6 +88,14 @@ def create_test_app(
     persistence = ExecutionMissionEvidencePersistence(
         tmp_path
         / "execution_mission_evidence.json"
+    )
+
+    mission_registry = ExecutionMissionRegistry()
+
+    mission_registry.register(
+        ExecutionMissionRecord(
+            mission=build_mission(agent_id=mission_agent_id)
+        )
     )
 
     intake = ExecutionMissionEvidenceIntake(
@@ -74,6 +115,7 @@ def create_test_app(
         broker_evidence_store=(
             broker_evidence_store
         ),
+        mission_registry=mission_registry,
     )
 
     authenticator = TrustedAgentAuthenticator(
@@ -101,7 +143,7 @@ def build_payload(
     agent_id: str = AGENT_ID,
 ) -> dict[str, object]:
     return {
-        "mission_id": "proof049-001",
+        "mission_id": MISSION_ID,
         "agent_id": agent_id,
         "success": True,
         "retcode": 10009,
@@ -134,7 +176,7 @@ def test_broker_execution_evidence_is_stored(
 
     assert response.json() == {
         "status": "stored",
-        "mission_id": "proof049-001",
+        "mission_id": MISSION_ID,
         "store_size": 1,
     }
 
@@ -188,6 +230,34 @@ def test_broker_execution_evidence_rejects_wrong_agent_identity(
         "detail": (
             "Broker execution evidence does not belong "
             "to authenticated Agent."
+        ),
+    }
+
+def test_broker_execution_evidence_rejects_mission_owned_by_other_agent(
+    tmp_path: Path,
+) -> None:
+    app, store, persistence = create_test_app(
+        tmp_path,
+        mission_agent_id="trusted-agent-999",
+    )
+
+    client = TestClient(
+        app,
+        raise_server_exceptions=False,
+    )
+
+    response = client.post(
+        "/broker/evidence",
+        headers=AUTHENTICATION_HEADERS,
+        json=build_payload(),
+    )
+
+    assert response.status_code == 403
+
+    assert response.json() == {
+        "detail": (
+            "Execution mission evidence does not belong "
+            "to mission Agent."
         ),
     }
 

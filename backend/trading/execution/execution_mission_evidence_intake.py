@@ -4,6 +4,7 @@ TODOBA Execution Mission Evidence Intake
 Safely accepts execution mission evidence.
 
 Responsibilities:
+- validate evidence ownership against the authoritative mission
 - persist evidence before acknowledging receipt
 - protect evidence intake from duplicate delivery
 - push persisted evidence into the correct in-memory store
@@ -40,6 +41,10 @@ from backend.trading.execution.execution_mission_evidence_idempotency_registry i
 from backend.trading.execution.execution_mission_evidence_identity import (
     ExecutionMissionEvidenceIdentity,
 )
+from backend.trading.execution.execution_mission_evidence_ownership import (
+    ExecutionMissionEvidenceOwnershipError,
+    require_execution_mission_evidence_ownership,
+)
 from backend.trading.execution.execution_mission_evidence_persistence import (
     ExecutionMissionEvidencePersistence,
 )
@@ -55,11 +60,15 @@ from backend.trading.execution.execution_mission_failed import (
 from backend.trading.execution.execution_mission_failed_store import (
     ExecutionMissionFailedStore,
 )
+from backend.trading.execution.execution_mission_registry import (
+    ExecutionMissionRegistry,
+)
 
 
 class ExecutionMissionEvidenceIntake:
     """
-    Persists evidence before placing it in memory.
+    Validates mission ownership, persists evidence,
+    then places accepted evidence in memory.
 
     When an idempotency registry is configured,
     duplicate evidence is ignored safely.
@@ -78,6 +87,7 @@ class ExecutionMissionEvidenceIntake:
         completed_store: ExecutionMissionCompletedStore,
         failed_store: ExecutionMissionFailedStore,
         broker_evidence_store: BrokerExecutionEvidenceStore,
+        mission_registry: ExecutionMissionRegistry,
         idempotency_registry: Optional[
             ExecutionMissionEvidenceIdempotencyRegistry
         ] = None,
@@ -136,6 +146,15 @@ class ExecutionMissionEvidenceIntake:
                 "BrokerExecutionEvidenceStore."
             )
 
+        if not isinstance(
+            mission_registry,
+            ExecutionMissionRegistry,
+        ):
+            raise TypeError(
+                "mission_registry must be "
+                "ExecutionMissionRegistry."
+            )
+
         if (
             idempotency_registry is not None
             and not isinstance(
@@ -165,6 +184,8 @@ class ExecutionMissionEvidenceIntake:
             broker_evidence_store
         )
 
+        self.mission_registry = mission_registry
+
         self.idempotency_registry = (
             idempotency_registry
         )
@@ -174,7 +195,8 @@ class ExecutionMissionEvidenceIntake:
         evidence: object,
     ) -> object | None:
         """
-        Persist new evidence, then enqueue it in RAM.
+        Validate ownership, persist new evidence,
+        then enqueue it in RAM.
 
         Returns the evidence when accepted.
         Returns None when the evidence is a duplicate.
@@ -182,6 +204,11 @@ class ExecutionMissionEvidenceIntake:
 
         store = self._resolve_store(
             evidence
+        )
+
+        require_execution_mission_evidence_ownership(
+            evidence=evidence,
+            mission_registry=self.mission_registry,
         )
 
         if self.idempotency_registry is None:

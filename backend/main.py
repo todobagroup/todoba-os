@@ -424,6 +424,9 @@ async def lifespan(
         broker_evidence_store=(
             broker_execution_evidence_store
         ),
+        mission_registry=(
+            execution_mission_registry
+        ),
         idempotency_registry=(
             execution_mission_evidence_idempotency_registry
         ),
@@ -844,6 +847,9 @@ execution_mission_evidence_intake = (
         ),
         broker_evidence_store=(
             broker_execution_evidence_store
+        ),
+        mission_registry=(
+            execution_mission_registry
         ),
         idempotency_registry=(
             execution_mission_evidence_idempotency_registry

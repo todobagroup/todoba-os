@@ -50,6 +50,9 @@ def test_main_converges_evidence_before_mission_delivery(
             "broker_evidence_store": (
                 main.broker_execution_evidence_store
             ),
+            "mission_registry": (
+                main.execution_mission_registry
+            ),
             "idempotency_registry": (
                 main.execution_mission_evidence_idempotency_registry
             ),

@@ -5,6 +5,9 @@ import pytest
 from backend.trading.execution.broker_execution_evidence_store import (
     BrokerExecutionEvidenceStore,
 )
+from backend.trading.execution.execution_mission import (
+    ExecutionMission,
+)
 from backend.trading.execution.execution_mission_acknowledgement import (
     ExecutionMissionAcknowledgement,
 )
@@ -29,6 +32,16 @@ from backend.trading.execution.execution_mission_execution_started_store import 
 from backend.trading.execution.execution_mission_failed_store import (
     ExecutionMissionFailedStore,
 )
+from backend.trading.execution.execution_mission_record import (
+    ExecutionMissionRecord,
+)
+from backend.trading.execution.execution_mission_registry import (
+    ExecutionMissionRegistry,
+)
+
+
+MISSION_ID = "idempotency-001"
+AGENT_ID = "trusted-agent-001"
 
 
 class FailingEvidencePersistence(
@@ -43,12 +56,31 @@ class FailingEvidencePersistence(
         )
 
 
+def build_mission() -> ExecutionMission:
+    return ExecutionMission(
+        mission_id=MISSION_ID,
+        agent_id=AGENT_ID,
+        account_fingerprint="demo-account",
+        symbol="XAUUSD",
+        order_type="BUY",
+        volume=0.01,
+        entry=None,
+        sl=4000.0,
+        tp=4200.0,
+        magic_number=10001,
+        comment="TODOBA idempotency test",
+        sequence=1,
+        created_at="2026-08-07T00:00:00Z",
+        expires_at="2026-08-07T00:05:00Z",
+    )
+
+
 def build_acknowledgement() -> (
     ExecutionMissionAcknowledgement
 ):
     return ExecutionMissionAcknowledgement(
-        mission_id="idempotency-001",
-        agent_id="trusted-agent-001",
+        mission_id=MISSION_ID,
+        agent_id=AGENT_ID,
         sequence=1,
         status="ACCEPTED",
         acknowledged_at="2026-08-07T00:00:00Z",
@@ -66,8 +98,16 @@ def build_intake(
         ExecutionMissionAcknowledgementStore()
     )
 
-    registry = (
+    idempotency_registry = (
         ExecutionMissionEvidenceIdempotencyRegistry()
+    )
+
+    mission_registry = ExecutionMissionRegistry()
+
+    mission_registry.register(
+        ExecutionMissionRecord(
+            mission=build_mission()
+        )
     )
 
     intake = ExecutionMissionEvidenceIntake(
@@ -87,13 +127,16 @@ def build_intake(
         broker_evidence_store=(
             BrokerExecutionEvidenceStore()
         ),
-        idempotency_registry=registry,
+        mission_registry=mission_registry,
+        idempotency_registry=(
+            idempotency_registry
+        ),
     )
 
     return (
         intake,
         acknowledgement_store,
-        registry,
+        idempotency_registry,
     )
 
 

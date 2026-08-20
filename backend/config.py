@@ -180,6 +180,11 @@ TODOBA_TRUSTED_AGENTS_JSON = os.getenv(
     "",
 ).strip()
 
+TODOBA_EXECUTION_TARGETS_JSON = os.getenv(
+    "TODOBA_EXECUTION_TARGETS_JSON",
+    "",
+).strip()
+
 TODOBA_EXECUTION_MISSION_SIGNING_SECRET = os.getenv(
     "TODOBA_EXECUTION_MISSION_SIGNING_SECRET",
     "",
@@ -462,6 +467,213 @@ def get_trusted_agent_deployments() -> tuple[
 
     return tuple(
         deployments
+    )
+
+def get_execution_targets() -> tuple[
+    dict[str, str],
+    ...,
+]:
+    """
+    Return configured remote execution routing targets.
+
+    Trusted Agent deployments define security ownership.
+    Execution targets independently define which configured
+    Agents/accounts receive trading signals.
+
+    Legacy single-Agent configuration remains supported.
+    """
+
+    if not TODOBA_TRUSTED_AGENTS_JSON:
+        return (
+            {
+                "agent_id": TODOBA_TRUSTED_AGENT_ID,
+                "account_fingerprint": (
+                    TODOBA_TRUSTED_AGENT_ACCOUNT_FINGERPRINT
+                ),
+            },
+        )
+
+    deployments = (
+        get_trusted_agent_deployments()
+    )
+
+    if not TODOBA_EXECUTION_TARGETS_JSON:
+        raise RuntimeError(
+            "TODOBA_EXECUTION_TARGETS_JSON is required "
+            "when TODOBA_TRUSTED_AGENTS_JSON is configured."
+        )
+
+    try:
+        payload = json.loads(
+            TODOBA_EXECUTION_TARGETS_JSON
+        )
+    except json.JSONDecodeError as error:
+        raise RuntimeError(
+            "TODOBA_EXECUTION_TARGETS_JSON must contain "
+            "valid JSON."
+        ) from error
+
+    if not isinstance(
+        payload,
+        list,
+    ):
+        raise RuntimeError(
+            "TODOBA_EXECUTION_TARGETS_JSON must contain "
+            "a JSON list."
+        )
+
+    if not payload:
+        raise RuntimeError(
+            "TODOBA_EXECUTION_TARGETS_JSON must contain "
+            "at least one execution target."
+        )
+
+    configured_deployments = {
+        deployment["agent_id"]: deployment
+        for deployment in deployments
+    }
+
+    known_target_agent_ids: set[str] = set()
+
+    targets: list[
+        dict[str, str]
+    ] = []
+
+    required_fields = {
+        "agent_id",
+        "account_fingerprint",
+    }
+
+    for item in payload:
+        if not isinstance(
+            item,
+            dict,
+        ):
+            raise RuntimeError(
+                "TODOBA_EXECUTION_TARGETS_JSON entries "
+                "must be JSON objects."
+            )
+
+        missing_fields = (
+            required_fields
+            - set(
+                item.keys()
+            )
+        )
+
+        extra_fields = (
+            set(
+                item.keys()
+            )
+            - required_fields
+        )
+
+        if missing_fields:
+            missing_field = sorted(
+                missing_fields
+            )[0]
+
+            raise RuntimeError(
+                "TODOBA_EXECUTION_TARGETS_JSON entry "
+                f"is missing {missing_field}."
+            )
+
+        if extra_fields:
+            raise RuntimeError(
+                "TODOBA_EXECUTION_TARGETS_JSON entries "
+                "contain unsupported fields."
+            )
+
+        agent_id = item[
+            "agent_id"
+        ]
+
+        account_fingerprint = item[
+            "account_fingerprint"
+        ]
+
+        if not isinstance(
+            agent_id,
+            str,
+        ):
+            raise RuntimeError(
+                "Execution target agent_id must be str."
+            )
+
+        if not isinstance(
+            account_fingerprint,
+            str,
+        ):
+            raise RuntimeError(
+                "Execution target account_fingerprint "
+                "must be str."
+            )
+
+        normalized_agent_id = (
+            agent_id.strip()
+        )
+
+        normalized_account_fingerprint = (
+            account_fingerprint.strip()
+        )
+
+        if not normalized_agent_id:
+            raise RuntimeError(
+                "Execution target agent_id is required."
+            )
+
+        if not normalized_account_fingerprint:
+            raise RuntimeError(
+                "Execution target account_fingerprint "
+                "is required."
+            )
+
+        deployment = (
+            configured_deployments.get(
+                normalized_agent_id
+            )
+        )
+
+        if deployment is None:
+            raise RuntimeError(
+                "Execution target Agent is not a "
+                "configured Trusted Agent."
+            )
+
+        if (
+            deployment["account_fingerprint"]
+            != normalized_account_fingerprint
+        ):
+            raise RuntimeError(
+                "Execution target account_fingerprint "
+                "does not match the configured Trusted "
+                "Agent deployment."
+            )
+
+        if (
+            normalized_agent_id
+            in known_target_agent_ids
+        ):
+            raise RuntimeError(
+                "Duplicate execution target Agent "
+                "in TODOBA_EXECUTION_TARGETS_JSON."
+            )
+
+        known_target_agent_ids.add(
+            normalized_agent_id
+        )
+
+        targets.append(
+            {
+                "agent_id": normalized_agent_id,
+                "account_fingerprint": (
+                    normalized_account_fingerprint
+                ),
+            }
+        )
+
+    return tuple(
+        targets
     )
 
 def validate_telegram_config() -> None:

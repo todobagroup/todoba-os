@@ -36,6 +36,8 @@ from backend.config import (
     TODOBA_EXECUTOR_ID,
     TODOBA_EXECUTOR_SECRET,
     TODOBA_TRUSTED_AGENT_ID,
+    TODOBA_TRUSTED_AGENTS_JSON,
+    get_execution_targets,
     validate_telegram_config,
 )
 from backend.integrations.telegram_client import (
@@ -53,6 +55,11 @@ from backend.integrations.telegram_trading_pipeline import (
 from backend.trading.execution.execution_planner import (
     create_plan,
 )
+
+from backend.trading.execution.execution_target_registry import (
+    build_execution_target_registry,
+)
+
 from backend.trading.execution.remote_execution_mission_http_client import (
     RemoteExecutionMissionHttpClient,
 )
@@ -95,6 +102,7 @@ remote_profile = None
 remote_task_producer = None
 remote_mission_adapter = None
 remote_http_client = None
+remote_execution_target_registry = None
 
 BROKER_STATE_MAX_AGE_SECONDS = 30.0
 
@@ -147,6 +155,13 @@ else:
             executor_secret=TODOBA_EXECUTOR_SECRET,
         )
     )
+
+    if TODOBA_TRUSTED_AGENTS_JSON:
+        remote_execution_target_registry = (
+            build_execution_target_registry(
+                get_execution_targets()
+            )
+        )
 
 processed_message_keys: set[
     tuple[int, int]
@@ -335,6 +350,259 @@ def process_remote_vps_signal(
             "REMOTE_VPS composition is not available."
         )
 
+    chat_id, message_id = source_key
+
+    if message_id <= 0:
+        raise ValueError(
+            "Telegram message_id must be positive."
+        )
+
+    if remote_execution_target_registry is not None:
+        targets = (
+            remote_execution_target_registry.all()
+        )
+
+        if not targets:
+            raise RuntimeError(
+                "REMOTE_VPS execution target registry "
+                "is empty."
+            )
+
+        target_results: list[dict] = []
+
+        for target in targets:
+            broker_state = (
+                remote_http_client
+                .read_latest_broker_state(
+                    agent_id=target.agent_id
+                )
+            )
+
+            rejection_reason = (
+                _broker_state_rejection_reason(
+                    broker_state
+                )
+            )
+
+            if rejection_reason is not None:
+                target_results.append(
+                    {
+                        "agent_id": target.agent_id,
+                        "status": (
+                            "broker_state_rejected"
+                        ),
+                        "reason": rejection_reason,
+                        "broker_state": broker_state,
+                    }
+                )
+                continue
+
+            if (
+                str(
+                    broker_state.get(
+                        "agent_id",
+                        "",
+                    )
+                ).strip()
+                != target.agent_id
+            ):
+                target_results.append(
+                    {
+                        "agent_id": target.agent_id,
+                        "status": (
+                            "broker_state_rejected"
+                        ),
+                        "reason": (
+                            "Broker state Agent does not "
+                            "match execution target."
+                        ),
+                        "broker_state": broker_state,
+                    }
+                )
+                continue
+
+            if (
+                str(
+                    broker_state.get(
+                        "account_fingerprint",
+                        "",
+                    )
+                ).strip()
+                != target.account_fingerprint
+            ):
+                target_results.append(
+                    {
+                        "agent_id": target.agent_id,
+                        "status": (
+                            "broker_state_rejected"
+                        ),
+                        "reason": (
+                            "Broker state account_fingerprint "
+                            "does not match execution target."
+                        ),
+                        "broker_state": broker_state,
+                    }
+                )
+                continue
+
+            production = (
+                remote_task_producer.produce(
+                    incoming_signal,
+                    open_position_count=int(
+                        broker_state[
+                            "open_position_count"
+                        ]
+                    ),
+                    pending_order_count=int(
+                        broker_state[
+                            "pending_order_count"
+                        ]
+                    ),
+                    spread_ok=(
+                        float(
+                            broker_state[
+                                "spread_points"
+                            ]
+                        )
+                        <= MT5_MAX_SPREAD_POINTS
+                    ),
+                    market_open=(
+                        float(
+                            broker_state["bid"]
+                        )
+                        > 0
+                        and float(
+                            broker_state["ask"]
+                        )
+                        > 0
+                    ),
+                    risk_ok=True,
+                )
+            )
+
+            if production.task is None:
+                target_results.append(
+                    {
+                        "agent_id": target.agent_id,
+                        "status": production.status,
+                        "production": production,
+                        "broker_state": broker_state,
+                    }
+                )
+                continue
+
+            if production.signal is None:
+                raise RuntimeError(
+                    "Approved Telegram production "
+                    "does not contain a signal."
+                )
+
+            execution_plan = create_plan(
+                production.signal,
+                remote_profile,
+            )
+
+            sizing_result = (
+                PositionSizingEngine().evaluate(
+                    account_equity=float(
+                        broker_state["equity"]
+                    ),
+                )
+            )
+
+            if not sizing_result.approved:
+                target_results.append(
+                    {
+                        "agent_id": target.agent_id,
+                        "status": "sizing_rejected",
+                        "reason": sizing_result.reason,
+                        "production": production,
+                        "broker_state": broker_state,
+                    }
+                )
+                continue
+
+            created_at = datetime.now(
+                UTC
+            )
+
+            expires_at = (
+                created_at
+                + timedelta(minutes=2)
+            )
+
+            mission = (
+                remote_mission_adapter.to_mission(
+                    production.task,
+                    mission_id=(
+                        f"telegram-{abs(chat_id)}-"
+                        f"{message_id}-"
+                        f"{target.agent_id}"
+                    ),
+                    agent_id=target.agent_id,
+                    account_fingerprint=(
+                        target.account_fingerprint
+                    ),
+                    volume=sizing_result.volume,
+                    magic_number=(
+                        execution_plan.magic_number
+                    ),
+                    comment=execution_plan.comment,
+                    created_at=_to_utc_iso8601(
+                        created_at
+                    ),
+                    expires_at=_to_utc_iso8601(
+                        expires_at
+                    ),
+                    sequence=message_id,
+                )
+            )
+
+            cloud_response = (
+                remote_http_client.send(
+                    mission
+                )
+            )
+
+            target_results.append(
+                {
+                    "agent_id": target.agent_id,
+                    "status": "submitted",
+                    "production": production,
+                    "broker_state": broker_state,
+                    "mission": mission,
+                    "cloud_response": (
+                        cloud_response
+                    ),
+                }
+            )
+
+        submitted_count = sum(
+            1
+            for result in target_results
+            if result["status"] == "submitted"
+        )
+
+        if submitted_count == len(
+            target_results
+        ):
+            overall_status = "submitted"
+        elif submitted_count > 0:
+            overall_status = (
+                "partially_submitted"
+            )
+        else:
+            overall_status = "rejected"
+
+        processed_message_keys.add(
+            source_key
+        )
+
+        return {
+            "status": overall_status,
+            "target_results": target_results,
+        }
+
     broker_state = (
         remote_http_client.read_latest_broker_state(
             agent_id=TODOBA_TRUSTED_AGENT_ID
@@ -414,13 +682,6 @@ def process_remote_vps_signal(
         + timedelta(minutes=2)
     )
 
-    chat_id, message_id = source_key
-
-    if message_id <= 0:
-        raise ValueError(
-            "Telegram message_id must be positive."
-        )
-
     mission = remote_mission_adapter.to_mission(
         production.task,
         mission_id=(
@@ -457,8 +718,6 @@ def process_remote_vps_signal(
         "mission": mission,
         "cloud_response": cloud_response,
     }
-
-
 def read_demo_decision_context() -> dict:
     mt5.symbol_select(
         MT5_BROKER_GOLD_SYMBOL,

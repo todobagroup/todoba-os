@@ -724,7 +724,14 @@ def validate_telegram_config() -> None:
                 "for REMOTE_VPS."
             )
 
-        if not TODOBA_TRUSTED_AGENT_ID:
+        if TODOBA_TRUSTED_AGENTS_JSON:
+            try:
+                get_execution_targets()
+            except RuntimeError as error:
+                errors.append(
+                    str(error)
+                )
+        elif not TODOBA_TRUSTED_AGENT_ID:
             errors.append(
                 "TODOBA_TRUSTED_AGENT_ID is required "
                 "for REMOTE_VPS."

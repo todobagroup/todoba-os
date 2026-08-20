@@ -49,6 +49,9 @@ from backend.integrations.telegram_dispatch_progress_store import (
     TelegramDispatchProgressStore,
     TelegramDispatchStatus,
 )
+from backend.integrations.telegram_dispatch_recovery import (
+    TelegramDispatchRecovery,
+)
 
 from backend.integrations.telegram_sender_authorizer import (
     TelegramSenderAuthorizer,
@@ -111,6 +114,7 @@ remote_mission_adapter = None
 remote_http_client = None
 remote_execution_target_registry = None
 remote_dispatch_progress_store = None
+remote_dispatch_recovery = None
 
 BROKER_STATE_MAX_AGE_SECONDS = 30.0
 TELEGRAM_DISPATCH_PROGRESS_STORAGE_PATH = (
@@ -180,6 +184,18 @@ else:
                 storage_path=(
                     TELEGRAM_DISPATCH_PROGRESS_STORAGE_PATH
                 )
+            )
+        )
+
+        remote_dispatch_recovery = (
+            TelegramDispatchRecovery(
+                progress_store=(
+                    remote_dispatch_progress_store
+                ),
+                execution_target_registry=(
+                    remote_execution_target_registry
+                ),
+                http_client=remote_http_client,
             )
         )
 
@@ -1088,6 +1104,12 @@ async def main() -> None:
     global client
 
     validate_telegram_config()
+
+    if (
+        TELEGRAM_EXECUTION_MODE == "REMOTE_VPS"
+        and remote_dispatch_recovery is not None
+    ):
+        remote_dispatch_recovery.restore()
 
     print("Starting TODOBA Telegram Listener...")
     print(

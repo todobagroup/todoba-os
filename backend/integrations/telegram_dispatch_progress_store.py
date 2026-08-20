@@ -513,6 +513,16 @@ class TelegramDispatchProgressStore:
 
         return expired
 
+    def all(
+        self,
+    ) -> tuple[
+        TelegramDispatchProgress,
+        ...,
+    ]:
+        return tuple(
+            self._progress.values()
+        )
+
     def size(
         self,
     ) -> int:

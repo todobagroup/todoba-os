@@ -137,6 +137,7 @@ def reload_multi_target_config(
 
 def load_multi_target_listener(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     *,
     legacy_agent_id: str = (
         "legacy-agent-must-not-route"
@@ -145,6 +146,29 @@ def load_multi_target_listener(
     reload_multi_target_config(
         monkeypatch,
         legacy_agent_id=legacy_agent_id,
+    )
+
+    import backend.integrations.telegram_dispatch_progress_store as progress_store_module
+
+    real_progress_store = (
+        progress_store_module.TelegramDispatchProgressStore
+    )
+
+    def build_test_progress_store(
+        *,
+        storage_path: Path,
+    ):
+        return real_progress_store(
+            storage_path=(
+                tmp_path
+                / "telegram_dispatch_progress.json"
+            )
+        )
+
+    monkeypatch.setattr(
+        progress_store_module,
+        "TelegramDispatchProgressStore",
+        build_test_progress_store,
     )
 
     sys.modules.pop(
@@ -308,9 +332,11 @@ def test_remote_vps_multi_agent_config_does_not_require_legacy_agent_id(
 
 def test_remote_vps_listener_composes_configured_execution_targets(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     listener = load_multi_target_listener(
         monkeypatch,
+        tmp_path,
     )
 
     targets = (
@@ -339,9 +365,11 @@ def test_remote_vps_listener_composes_configured_execution_targets(
 
 def test_remote_vps_listener_fans_out_to_each_execution_target(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     listener = load_multi_target_listener(
         monkeypatch,
+        tmp_path,
     )
 
     fake_http_client = (
@@ -475,9 +503,11 @@ def test_remote_vps_listener_fans_out_to_each_execution_target(
 
 def test_remote_vps_rejects_target_when_broker_state_agent_does_not_match(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     listener = load_multi_target_listener(
         monkeypatch,
+        tmp_path,
     )
 
     fake_http_client = (
@@ -558,9 +588,11 @@ def test_remote_vps_rejects_target_when_broker_state_agent_does_not_match(
 
 def test_remote_vps_rejects_account_mismatch_without_blocking_other_target(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     listener = load_multi_target_listener(
         monkeypatch,
+        tmp_path,
     )
 
     fake_http_client = (

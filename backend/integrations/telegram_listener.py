@@ -22,6 +22,7 @@ import json
 from dataclasses import asdict, is_dataclass
 from datetime import UTC
 from datetime import datetime
+from pathlib import Path
 from datetime import timedelta
 
 from telethon import events
@@ -43,6 +44,12 @@ from backend.config import (
 from backend.integrations.telegram_client import (
     create_telegram_client,
 )
+
+from backend.integrations.telegram_dispatch_progress_store import (
+    TelegramDispatchProgressStore,
+    TelegramDispatchStatus,
+)
+
 from backend.integrations.telegram_sender_authorizer import (
     TelegramSenderAuthorizer,
 )
@@ -103,8 +110,14 @@ remote_task_producer = None
 remote_mission_adapter = None
 remote_http_client = None
 remote_execution_target_registry = None
+remote_dispatch_progress_store = None
 
 BROKER_STATE_MAX_AGE_SECONDS = 30.0
+TELEGRAM_DISPATCH_PROGRESS_STORAGE_PATH = (
+    Path("data")
+    / "trading"
+    / "telegram_dispatch_progress.json"
+)
 
 
 if TELEGRAM_EXECUTION_MODE != "REMOTE_VPS":
@@ -160,6 +173,13 @@ else:
         remote_execution_target_registry = (
             build_execution_target_registry(
                 get_execution_targets()
+            )
+        )
+        remote_dispatch_progress_store = (
+            TelegramDispatchProgressStore(
+                storage_path=(
+                    TELEGRAM_DISPATCH_PROGRESS_STORAGE_PATH
+                )
             )
         )
 
@@ -305,7 +325,64 @@ def _broker_state_rejection_reason(
 
     return None
 
+def _dispatch_mission_is_expired(
+    mission,
+    *,
+    now: datetime | None = None,
+) -> bool:
+    expires_at_value = mission.expires_at
 
+    if not isinstance(
+        expires_at_value,
+        str,
+    ):
+        raise RuntimeError(
+            "Persisted Telegram dispatch mission "
+            "expires_at is invalid."
+        )
+
+    normalized_expires_at = (
+        expires_at_value.strip()
+    )
+
+    if not normalized_expires_at:
+        raise RuntimeError(
+            "Persisted Telegram dispatch mission "
+            "expires_at is invalid."
+        )
+
+    if normalized_expires_at.endswith("Z"):
+        normalized_expires_at = (
+            normalized_expires_at[:-1]
+            + "+00:00"
+        )
+
+    try:
+        expires_at = datetime.fromisoformat(
+            normalized_expires_at
+        )
+    except ValueError as error:
+        raise RuntimeError(
+            "Persisted Telegram dispatch mission "
+            "expires_at is invalid."
+        ) from error
+
+    if expires_at.tzinfo is None:
+        raise RuntimeError(
+            "Persisted Telegram dispatch mission "
+            "expires_at is invalid."
+        )
+
+    current_time = (
+        datetime.now(UTC)
+        if now is None
+        else now.astimezone(UTC)
+    )
+
+    return (
+        current_time
+        >= expires_at.astimezone(UTC)
+    )
 def process_remote_vps_signal(
     incoming_signal: IncomingSignal,
 ) -> dict:
@@ -358,6 +435,12 @@ def process_remote_vps_signal(
         )
 
     if remote_execution_target_registry is not None:
+        if remote_dispatch_progress_store is None:
+            raise RuntimeError(
+                "REMOTE_VPS dispatch progress store "
+                "is not available."
+            )
+
         targets = (
             remote_execution_target_registry.all()
         )
@@ -371,6 +454,100 @@ def process_remote_vps_signal(
         target_results: list[dict] = []
 
         for target in targets:
+            existing_progress = (
+                remote_dispatch_progress_store.get(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    agent_id=target.agent_id,
+                )
+            )
+
+            if existing_progress is not None:
+                persisted_mission = (
+                    existing_progress.mission
+                )
+
+                if (
+                    persisted_mission.agent_id
+                    != target.agent_id
+                    or persisted_mission.account_fingerprint
+                    != target.account_fingerprint
+                ):
+                    raise RuntimeError(
+                        "Persisted Telegram dispatch "
+                        "mission does not match "
+                        "execution target."
+                    )
+
+                if (
+                    existing_progress.status
+                    == TelegramDispatchStatus.SUBMITTED
+                ):
+                    target_results.append(
+                        {
+                            "agent_id": target.agent_id,
+                            "status": "submitted",
+                            "mission": persisted_mission,
+                            "cloud_response": None,
+                            "recovered": True,
+                        }
+                    )
+                    continue
+
+                if (
+                    existing_progress.status
+                    == TelegramDispatchStatus.EXPIRED
+                ):
+                    target_results.append(
+                        {
+                            "agent_id": target.agent_id,
+                            "status": "expired",
+                            "mission": persisted_mission,
+                        }
+                    )
+                    continue
+
+                if _dispatch_mission_is_expired(
+                    persisted_mission
+                ):
+                    remote_dispatch_progress_store.mark_expired(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        agent_id=target.agent_id,
+                    )
+
+                    target_results.append(
+                        {
+                            "agent_id": target.agent_id,
+                            "status": "expired",
+                            "mission": persisted_mission,
+                        }
+                    )
+                    continue
+
+                cloud_response = (
+                    remote_http_client.send(
+                        persisted_mission
+                    )
+                )
+
+                remote_dispatch_progress_store.mark_submitted(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    agent_id=target.agent_id,
+                )
+
+                target_results.append(
+                    {
+                        "agent_id": target.agent_id,
+                        "status": "submitted",
+                        "mission": persisted_mission,
+                        "cloud_response": cloud_response,
+                        "recovered": True,
+                    }
+                )
+                continue
+
             broker_state = (
                 remote_http_client
                 .read_latest_broker_state(
@@ -558,10 +735,24 @@ def process_remote_vps_signal(
                 )
             )
 
+            prepared_progress = (
+                remote_dispatch_progress_store.prepare(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    mission=mission,
+                )
+            )
+
             cloud_response = (
                 remote_http_client.send(
-                    mission
+                    prepared_progress.mission
                 )
+            )
+
+            remote_dispatch_progress_store.mark_submitted(
+                chat_id=chat_id,
+                message_id=message_id,
+                agent_id=target.agent_id,
             )
 
             target_results.append(
@@ -570,10 +761,10 @@ def process_remote_vps_signal(
                     "status": "submitted",
                     "production": production,
                     "broker_state": broker_state,
-                    "mission": mission,
-                    "cloud_response": (
-                        cloud_response
+                    "mission": (
+                        prepared_progress.mission
                     ),
+                    "cloud_response": cloud_response,
                 }
             )
 

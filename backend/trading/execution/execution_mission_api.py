@@ -4,10 +4,10 @@ TODOBA Execution Mission API
 Exposes the remote mission polling boundary.
 
 This module owns HTTP transport only.
-Mission storage, delivery leasing, lifecycle tracking,
-delivery expiration policy, serialization, signing,
-protocol negotiation, and authentication policy belong
-to separate capabilities.
+Mission storage, release readiness, delivery leasing,
+lifecycle tracking, delivery expiration policy,
+serialization, signing, protocol negotiation, and
+authentication policy belong to separate capabilities.
 """
 
 from typing import Optional
@@ -25,6 +25,9 @@ from backend.trading.execution.execution_mission_delivery_lease_service import (
 )
 from backend.trading.execution.execution_mission_lifecycle_service import (
     ExecutionMissionLifecycleService,
+)
+from backend.trading.execution.execution_mission_release_guard import (
+    ExecutionMissionReleaseGuard,
 )
 from backend.trading.execution.execution_mission_serializer import (
     ExecutionMissionSerializer,
@@ -66,6 +69,9 @@ def create_execution_mission_router(
         ExecutionMissionSigner
     ] = None,
     *,
+    release_guard: Optional[
+        ExecutionMissionReleaseGuard
+    ] = None,
     signer_v2: Optional[
         ExecutionMissionSignerV2
     ] = None,
@@ -136,6 +142,18 @@ def create_execution_mission_router(
         )
 
     if (
+        release_guard is not None
+        and not isinstance(
+            release_guard,
+            ExecutionMissionReleaseGuard,
+        )
+    ):
+        raise TypeError(
+            "release_guard must be "
+            "ExecutionMissionReleaseGuard."
+        )
+
+    if (
         signer_v2 is not None
         and not isinstance(
             signer_v2,
@@ -184,8 +202,28 @@ def create_execution_mission_router(
                 ),
             )
 
+        release_account_fingerprint = None
+
+        if release_guard is not None:
+            try:
+                ready_state = release_guard.require_ready(
+                    agent_id=authenticated_agent_id
+                )
+            except RuntimeError:
+                return {
+                    "status": "empty",
+                    "mission": None,
+                }
+
+            release_account_fingerprint = (
+                ready_state.account_fingerprint
+            )
+
         mission = store.pop_for_agent(
-            authenticated_agent_id
+            authenticated_agent_id,
+            account_fingerprint=(
+                release_account_fingerprint
+            ),
         )
 
         if mission is None:

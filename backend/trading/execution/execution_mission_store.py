@@ -145,19 +145,34 @@ class ExecutionMissionStore:
     def pop_for_agent(
         self,
         agent_id: str,
+        *,
+        account_fingerprint: str | None = None,
     ) -> Optional[ExecutionMission]:
         """
         Return the first queued mission belonging
         to the requested Trusted Agent.
+
+        When account_fingerprint is supplied, the
+        mission must also belong to that exact
+        execution account.
         """
 
         for mission in self._missions:
-            if mission.agent_id == agent_id:
-                self._missions.remove(
-                    mission
-                )
+            if mission.agent_id != agent_id:
+                continue
 
-                return mission
+            if (
+                account_fingerprint is not None
+                and mission.account_fingerprint
+                != account_fingerprint
+            ):
+                continue
+
+            self._missions.remove(
+                mission
+            )
+
+            return mission
 
         return None
 

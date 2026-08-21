@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 from fastapi.testclient import TestClient
 
 from backend.config import (
@@ -6,6 +8,7 @@ from backend.config import (
 )
 from backend.main import (
     app,
+    execution_mission_release_guard,
     execution_mission_delivery_lease_registry,
     execution_mission_delivery_lease_service,
     execution_mission_lifecycle_service,
@@ -65,6 +68,14 @@ def test_main_poll_tracks_mission_delivery(
         execution_mission_lifecycle_service,
         "record_persistence",
         None,
+    )
+
+    monkeypatch.setattr(
+        execution_mission_release_guard,
+        "require_ready",
+        lambda **_: SimpleNamespace(
+            account_fingerprint="proof075-account"
+        ),
     )
 
     while execution_mission_store.pop_for_agent(

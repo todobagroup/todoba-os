@@ -204,6 +204,9 @@ from backend.trading.execution.execution_mission_record_retention_policy import 
 from backend.trading.execution.execution_mission_record_retention_scheduler import (
     ExecutionMissionRecordRetentionScheduler,
 )
+from backend.trading.execution.execution_mission_release_guard import (
+    ExecutionMissionReleaseGuard,
+)
 from backend.trading.execution.execution_mission_recovery import (
     ExecutionMissionRecovery,
 )
@@ -805,6 +808,16 @@ broker_state_store = (
     BrokerStateStore()
 )
 
+execution_mission_release_guard = (
+    ExecutionMissionReleaseGuard(
+        broker_state_store=broker_state_store,
+        account_binding_guard=(
+            trusted_agent_account_binding_guard
+        ),
+        max_age_seconds=30.0,
+    )
+)
+
 execution_mission_delivery_bridge = (
     ExecutionMissionDeliveryBridge(
         execution_mission_store
@@ -1096,6 +1109,9 @@ app.include_router(
         execution_mission_lifecycle_service,
         execution_mission_delivery_expiration_policy,
         execution_mission_signer,
+        release_guard=(
+            execution_mission_release_guard
+        ),
         signer_v2=execution_mission_signer_v2,
     )
 )

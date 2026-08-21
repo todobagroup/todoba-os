@@ -541,11 +541,23 @@ def process_remote_vps_signal(
                     )
                     continue
 
-                cloud_response = (
-                    remote_http_client.send(
-                        persisted_mission
+                try:
+                    cloud_response = (
+                        remote_http_client.send(
+                            persisted_mission
+                        )
                     )
-                )
+                except Exception as error:
+                    target_results.append(
+                        {
+                            "agent_id": target.agent_id,
+                            "status": "transport_failed",
+                            "operation": "send_mission",
+                            "reason": str(error),
+                            "mission": persisted_mission,
+                        }
+                    )
+                    continue
 
                 remote_dispatch_progress_store.mark_submitted(
                     chat_id=chat_id,
@@ -564,12 +576,23 @@ def process_remote_vps_signal(
                 )
                 continue
 
-            broker_state = (
-                remote_http_client
-                .read_latest_broker_state(
-                    agent_id=target.agent_id
+            try:
+                broker_state = (
+                    remote_http_client
+                    .read_latest_broker_state(
+                        agent_id=target.agent_id
+                    )
                 )
-            )
+            except Exception as error:
+                target_results.append(
+                    {
+                        "agent_id": target.agent_id,
+                        "status": "transport_failed",
+                        "operation": "read_broker_state",
+                        "reason": str(error),
+                    }
+                )
+                continue
 
             rejection_reason = (
                 _broker_state_rejection_reason(
@@ -759,11 +782,25 @@ def process_remote_vps_signal(
                 )
             )
 
-            cloud_response = (
-                remote_http_client.send(
-                    prepared_progress.mission
+            try:
+                cloud_response = (
+                    remote_http_client.send(
+                        prepared_progress.mission
+                    )
                 )
-            )
+            except Exception as error:
+                target_results.append(
+                    {
+                        "agent_id": target.agent_id,
+                        "status": "transport_failed",
+                        "operation": "send_mission",
+                        "reason": str(error),
+                        "mission": (
+                            prepared_progress.mission
+                        ),
+                    }
+                )
+                continue
 
             remote_dispatch_progress_store.mark_submitted(
                 chat_id=chat_id,

@@ -6,12 +6,14 @@ Telegram executor restart.
 
 Responsibilities:
 - inspect durable per-target dispatch progress
-- skip SUBMITTED dispatches
-- skip EXPIRED dispatches
+- skip terminal dispatches
 - expire stale PENDING missions without sending
 - validate persisted mission ownership against the
   current Execution Target Registry
+- durably invalidate missions whose current target
+  no longer owns the persisted execution account
 - resend only the exact persisted PENDING mission
+- isolate remote dispatch failures per mission
 - mark successful recovery dispatches SUBMITTED
 
 This component does not:
@@ -210,6 +212,11 @@ class TelegramDispatchRecovery:
 
         Returns the number of missions successfully
         resent and marked SUBMITTED.
+
+        Remote dispatch failure is isolated to the
+        affected mission. Its durable state remains
+        PENDING so the exact persisted mission can be
+        retried safely on a later recovery pass.
         """
 
         recovered_count = 0
@@ -226,6 +233,12 @@ class TelegramDispatchRecovery:
             if (
                 progress.status
                 == TelegramDispatchStatus.EXPIRED
+            ):
+                continue
+
+            if (
+                progress.status
+                == TelegramDispatchStatus.INVALID_TARGET
             ):
                 continue
 
@@ -253,11 +266,20 @@ class TelegramDispatchRecovery:
             if not self._mission_matches_current_target(
                 mission
             ):
+                self.progress_store.mark_invalid_target(
+                    chat_id=progress.chat_id,
+                    message_id=progress.message_id,
+                    agent_id=progress.agent_id,
+                )
+
                 continue
 
-            self.http_client.send(
-                mission
-            )
+            try:
+                self.http_client.send(
+                    mission
+                )
+            except Exception:
+                continue
 
             self.progress_store.mark_submitted(
                 chat_id=progress.chat_id,

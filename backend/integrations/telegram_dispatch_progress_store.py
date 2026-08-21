@@ -37,6 +37,7 @@ class TelegramDispatchStatus(str, Enum):
     PENDING = "PENDING"
     SUBMITTED = "SUBMITTED"
     EXPIRED = "EXPIRED"
+    INVALID_TARGET = "INVALID_TARGET"
 
 
 @dataclass(frozen=True)
@@ -435,6 +436,18 @@ class TelegramDispatchProgressStore:
         ):
             return existing
 
+        if (
+            existing.status
+            in {
+                TelegramDispatchStatus.EXPIRED,
+                TelegramDispatchStatus.INVALID_TARGET,
+            }
+        ):
+            raise ValueError(
+                "Terminal Telegram dispatch progress "
+                "cannot be marked submitted."
+            )
+
         submitted = TelegramDispatchProgress(
             chat_id=existing.chat_id,
             message_id=existing.message_id,
@@ -493,6 +506,15 @@ class TelegramDispatchProgressStore:
                 "cannot be marked expired."
             )
 
+        if (
+            existing.status
+            == TelegramDispatchStatus.INVALID_TARGET
+        ):
+            raise ValueError(
+                "Invalid-target Telegram dispatch progress "
+                "cannot be marked expired."
+            )
+
         expired = TelegramDispatchProgress(
             chat_id=existing.chat_id,
             message_id=existing.message_id,
@@ -512,6 +534,67 @@ class TelegramDispatchProgressStore:
             raise
 
         return expired
+
+    def mark_invalid_target(
+        self,
+        *,
+        chat_id: int,
+        message_id: int,
+        agent_id: str,
+    ) -> TelegramDispatchProgress:
+        key = self._key(
+            chat_id=chat_id,
+            message_id=message_id,
+            agent_id=agent_id,
+        )
+
+        existing = self._progress.get(
+            key
+        )
+
+        if existing is None:
+            raise KeyError(
+                "Telegram dispatch progress "
+                "was not found."
+            )
+
+        if (
+            existing.status
+            == TelegramDispatchStatus.INVALID_TARGET
+        ):
+            return existing
+
+        if (
+            existing.status
+            in {
+                TelegramDispatchStatus.SUBMITTED,
+                TelegramDispatchStatus.EXPIRED,
+            }
+        ):
+            raise ValueError(
+                "Terminal Telegram dispatch progress "
+                "cannot be marked invalid target."
+            )
+
+        invalid_target = TelegramDispatchProgress(
+            chat_id=existing.chat_id,
+            message_id=existing.message_id,
+            agent_id=existing.agent_id,
+            mission=existing.mission,
+            status=(
+                TelegramDispatchStatus.INVALID_TARGET
+            ),
+        )
+
+        self._progress[key] = invalid_target
+
+        try:
+            self._save()
+        except Exception:
+            self._progress[key] = existing
+            raise
+
+        return invalid_target
 
     def all(
         self,

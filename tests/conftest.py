@@ -1,44 +1,51 @@
 """
 TODOBA Test Configuration
 
-Provides non-production environment values and
-isolated persistence for application-level tests.
+Provides deterministic non-production environment values
+and isolated persistence for application-level tests.
+
+Production customer fleet configuration must never leak
+from the repository .env file into the pytest runtime.
 """
 
 import os
 from collections.abc import Iterator
 from pathlib import Path
 
+
+_TEST_ENVIRONMENT = {
+    "TODOBA_TRUSTED_AGENT_ID": (
+        "trusted-agent-001"
+    ),
+    "TODOBA_TRUSTED_AGENT_SECRET": (
+        "test-trusted-agent-secret"
+    ),
+    "TODOBA_TRUSTED_AGENT_ACCOUNT_FINGERPRINT": (
+        "test-account"
+    ),
+    "TODOBA_EXECUTION_MISSION_SIGNING_SECRET": (
+        "test-execution-mission-signing-secret"
+    ),
+    "TODOBA_CONTROL_MISSION_SIGNING_SECRET": (
+        "test-control-mission-signing-secret"
+    ),
+    "TODOBA_TRUSTED_AGENTS_JSON": "",
+    "TODOBA_EXECUTION_TARGETS_JSON": "",
+}
+
+
+for environment_name, environment_value in (
+    _TEST_ENVIRONMENT.items()
+):
+    os.environ[
+        environment_name
+    ] = environment_value
+
+
 import pytest
 
 from backend.trading.execution.execution_mission_evidence_persistence import (
     ExecutionMissionEvidencePersistence,
-)
-
-
-os.environ.setdefault(
-    "TODOBA_TRUSTED_AGENT_ID",
-    "trusted-agent-001",
-)
-
-os.environ.setdefault(
-    "TODOBA_TRUSTED_AGENT_SECRET",
-    "test-trusted-agent-secret",
-)
-
-os.environ.setdefault(
-    "TODOBA_TRUSTED_AGENT_ACCOUNT_FINGERPRINT",
-    "test-account",
-)
-
-os.environ.setdefault(
-    "TODOBA_EXECUTION_MISSION_SIGNING_SECRET",
-    "test-execution-mission-signing-secret",
-)
-
-os.environ.setdefault(
-    "TODOBA_CONTROL_MISSION_SIGNING_SECRET",
-    "test-control-mission-signing-secret",
 )
 
 

@@ -6,3 +6,4 @@ telethon
 MetaTrader5
 pytest
 httpx
+cryptography

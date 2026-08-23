@@ -335,3 +335,81 @@ def test_trusted_agent_config_rejects_invalid_multi_agent_json(
         match="TODOBA_TRUSTED_AGENTS_JSON",
     ):
         config.validate_trusted_agent_config()
+
+def test_multi_agent_config_preserves_opaque_secrets_exactly(
+    monkeypatch,
+) -> None:
+    _set_valid_trusted_agent_config(
+        monkeypatch
+    )
+
+    agent_secret = "  agent-??-secret  "
+    execution_secret = (
+        "\texecution-???-secret\n"
+    )
+    control_secret = (
+        " control-??-secret "
+    )
+
+    monkeypatch.setattr(
+        config,
+        "TODOBA_TRUSTED_AGENTS_JSON",
+        json.dumps(
+            [
+                {
+                    "agent_id": (
+                        " trusted-agent-opaque "
+                    ),
+                    "agent_secret": agent_secret,
+                    "account_fingerprint": (
+                        " server-opaque:1001 "
+                    ),
+                    "execution_mission_signing_secret": (
+                        execution_secret
+                    ),
+                    "control_mission_signing_secret": (
+                        control_secret
+                    ),
+                },
+            ],
+            ensure_ascii=False,
+        ),
+        raising=False,
+    )
+
+    deployments = (
+        config.get_trusted_agent_deployments()
+    )
+
+    assert len(deployments) == 1
+
+    deployment = deployments[0]
+
+    assert (
+        deployment["agent_id"]
+        == "trusted-agent-opaque"
+    )
+
+    assert (
+        deployment["account_fingerprint"]
+        == "server-opaque:1001"
+    )
+
+    assert (
+        deployment["agent_secret"]
+        == agent_secret
+    )
+
+    assert (
+        deployment[
+            "execution_mission_signing_secret"
+        ]
+        == execution_secret
+    )
+
+    assert (
+        deployment[
+            "control_mission_signing_secret"
+        ]
+        == control_secret
+    )

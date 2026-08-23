@@ -32,7 +32,6 @@ Transport isolation must not:
 """
 
 import importlib
-import json
 import sys
 from datetime import UTC
 from datetime import datetime
@@ -59,42 +58,10 @@ from backend.trading.signal.incoming_signal import (
 )
 
 
-TRUSTED_AGENTS = [
-    {
-        "agent_id": "trusted-agent-001",
-        "agent_secret": "agent-secret-a",
-        "account_fingerprint": "account-a",
-        "execution_mission_signing_secret": (
-            "execution-signing-a"
-        ),
-        "control_mission_signing_secret": (
-            "control-signing-a"
-        ),
-    },
-    {
-        "agent_id": "trusted-agent-002",
-        "agent_secret": "agent-secret-b",
-        "account_fingerprint": "account-b",
-        "execution_mission_signing_secret": (
-            "execution-signing-b"
-        ),
-        "control_mission_signing_secret": (
-            "control-signing-b"
-        ),
-    },
-]
 
 
-EXECUTION_TARGETS = [
-    {
-        "agent_id": "trusted-agent-001",
-        "account_fingerprint": "account-a",
-    },
-    {
-        "agent_id": "trusted-agent-002",
-        "account_fingerprint": "account-b",
-    },
-]
+
+
 
 
 CHAT_ID = -1001
@@ -124,16 +91,8 @@ def configure_environment(
             "transport-isolation-secret"
         ),
         "TODOBA_TRUSTED_AGENT_ID": "",
-        "TODOBA_TRUSTED_AGENTS_JSON": (
-            json.dumps(
-                TRUSTED_AGENTS
-            )
-        ),
-        "TODOBA_EXECUTION_TARGETS_JSON": (
-            json.dumps(
-                EXECUTION_TARGETS
-            )
-        ),
+        "TODOBA_TRUSTED_AGENTS_JSON": "",
+        "TODOBA_EXECUTION_TARGETS_JSON": "",
     }
 
     for name, value in environment.items():
@@ -146,7 +105,27 @@ def configure_environment(
 def load_listener(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    commercial_executor_fleet,
 ):
+    commercial_executor_fleet(
+        (
+            (
+                "trusted-agent-001",
+                "account-a",
+            ),
+            (
+                "trusted-agent-002",
+                "account-b",
+            ),
+        )
+    )
+
+    # Keep telegram_listener's real relative
+    # data/trading dispatch store inside pytest temp.
+    monkeypatch.chdir(
+        tmp_path
+    )
+
     configure_environment(
         monkeypatch
     )
@@ -155,29 +134,6 @@ def load_listener(
 
     importlib.reload(
         config
-    )
-
-    import backend.integrations.telegram_dispatch_progress_store as progress_store_module
-
-    real_progress_store = (
-        progress_store_module.TelegramDispatchProgressStore
-    )
-
-    def build_test_progress_store(
-        *,
-        storage_path: Path,
-    ):
-        return real_progress_store(
-            storage_path=(
-                tmp_path
-                / "telegram_dispatch_progress.json"
-            )
-        )
-
-    monkeypatch.setattr(
-        progress_store_module,
-        "TelegramDispatchProgressStore",
-        build_test_progress_store,
     )
 
     sys.modules.pop(
@@ -398,10 +354,12 @@ def install_runtime_fakes(
 def test_broker_state_transport_failure_does_not_block_later_target(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    commercial_executor_fleet,
 ) -> None:
     listener = load_listener(
         monkeypatch,
         tmp_path,
+        commercial_executor_fleet,
     )
 
     http_client = FaultInjectingRemoteHttpClient(
@@ -497,10 +455,12 @@ def test_broker_state_transport_failure_does_not_block_later_target(
 def test_new_mission_send_failure_stays_pending_and_does_not_block_later_target(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    commercial_executor_fleet,
 ) -> None:
     listener = load_listener(
         monkeypatch,
         tmp_path,
+        commercial_executor_fleet,
     )
 
     http_client = FaultInjectingRemoteHttpClient(
@@ -596,10 +556,12 @@ def test_new_mission_send_failure_stays_pending_and_does_not_block_later_target(
 def test_persisted_pending_resend_failure_preserves_exact_mission_and_does_not_block_later_target(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    commercial_executor_fleet,
 ) -> None:
     listener = load_listener(
         monkeypatch,
         tmp_path,
+        commercial_executor_fleet,
     )
 
     persisted_mission = (

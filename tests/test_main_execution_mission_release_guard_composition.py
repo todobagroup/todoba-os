@@ -49,17 +49,48 @@ def test_main_composes_execution_mission_release_guard(
 def test_main_execution_mission_router_uses_release_guard(
     monkeypatch,
 ) -> None:
-    deployment = (
-        main.trusted_agent_deployments[0]
+    deployments = (
+        main.customer_deployment_registry.all()
     )
 
-    agent_id = deployment[
-        "agent_id"
-    ]
+    assert deployments
 
-    agent_secret = deployment[
-        "agent_secret"
-    ]
+    deployment = deployments[0]
+
+    secrets = (
+        main.customer_deployment_secret_store.get(
+            deployment_id=(
+                deployment.deployment_id
+            )
+        )
+    )
+
+    assert secrets is not None
+
+    agent_id = deployment.agent_id
+    agent_secret = secrets.agent_secret
+
+    target = (
+        main.execution_target_registry.get(
+            agent_id=agent_id
+        )
+    )
+
+    assert target is not None
+
+    account_fingerprint = (
+        main.trusted_agent_account_binding_store
+        .get_account_fingerprint(
+            agent_id=agent_id
+        )
+    )
+
+    assert account_fingerprint is not None
+
+    assert (
+        target.account_fingerprint
+        == account_fingerprint
+    )
 
     guarded_agents: list[str] = []
 

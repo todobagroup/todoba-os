@@ -36,7 +36,25 @@ from backend.trading.signal.incoming_signal import (
 
 def load_remote_listener(
     monkeypatch: pytest.MonkeyPatch,
+    commercial_executor_fleet,
+    tmp_path: Path,
 ):
+    commercial_executor_fleet(
+        (
+            (
+                "trusted-agent-001",
+                "XMGlobal-MT5 9:336627882",
+            ),
+        )
+    )
+
+    # telegram_listener currently stores dispatch progress
+    # beneath relative Path("data"). Move the test working
+    # directory so that durable dispatch state is isolated.
+    monkeypatch.chdir(
+        tmp_path
+    )
+
     environment = {
         "TELEGRAM_API_ID": "1",
         "TELEGRAM_API_HASH": "test-hash",
@@ -47,9 +65,6 @@ def load_remote_listener(
         "MT5_MAX_SPREAD_POINTS": "100",
         "TODOBA_CLOUD_BASE_URL": (
             "https://api.todobagroup.com"
-        ),
-        "TODOBA_TRUSTED_AGENT_ID": (
-            "trusted-agent-001"
         ),
         "TODOBA_EXECUTOR_ID": (
             "telegram-executor-001"
@@ -136,9 +151,13 @@ class FakeRemoteHttpClient:
 
 def test_remote_vps_listener_submits_each_telegram_message_once(
     monkeypatch: pytest.MonkeyPatch,
+    commercial_executor_fleet,
+    tmp_path: Path,
 ) -> None:
     listener = load_remote_listener(
-        monkeypatch
+        monkeypatch,
+        commercial_executor_fleet,
+        tmp_path,
     )
 
     fake_http_client = FakeRemoteHttpClient()
@@ -194,7 +213,7 @@ def test_remote_vps_listener_submits_each_telegram_message_once(
     mission = fake_http_client.sent_missions[0]
 
     assert mission.mission_id == (
-        "telegram-1001-168001"
+        "telegram-1001-168001-trusted-agent-001"
     )
     assert mission.agent_id == (
         "trusted-agent-001"
@@ -212,9 +231,34 @@ def test_remote_vps_listener_submits_each_telegram_message_once(
     assert mission.comment == "TODOBA"
     assert mission.sequence == 168001
 
-    assert first_result["cloud_response"] == {
+    assert len(
+        first_result["target_results"]
+    ) == 1
+
+    first_target_result = (
+        first_result["target_results"][0]
+    )
+
+    assert first_target_result["agent_id"] == (
+        "trusted-agent-001"
+    )
+
+    assert (
+        first_target_result["status"]
+        == "submitted"
+    )
+
+    assert (
+        first_target_result["mission"]
+        == mission
+    )
+
+    assert first_target_result["cloud_response"] == {
         "status": "persisted",
-        "mission_id": "telegram-1001-168001",
+        "mission_id": (
+            "telegram-1001-168001-"
+            "trusted-agent-001"
+        ),
     }
 
 
@@ -271,6 +315,8 @@ def test_remote_vps_listener_submits_each_telegram_message_once(
 )
 def test_remote_vps_listener_preserves_pending_order(
     monkeypatch: pytest.MonkeyPatch,
+    commercial_executor_fleet,
+    tmp_path: Path,
     message,
     expected_order_type,
     expected_entry,
@@ -278,7 +324,9 @@ def test_remote_vps_listener_preserves_pending_order(
     expected_tp,
 ) -> None:
     listener = load_remote_listener(
-        monkeypatch
+        monkeypatch,
+        commercial_executor_fleet,
+        tmp_path,
     )
 
     fake_http_client = FakeRemoteHttpClient()
@@ -325,9 +373,13 @@ def test_remote_vps_listener_preserves_pending_order(
 
 def test_remote_vps_rejects_at_active_trade_limit(
     monkeypatch: pytest.MonkeyPatch,
+    commercial_executor_fleet,
+    tmp_path: Path,
 ) -> None:
     listener = load_remote_listener(
-        monkeypatch
+        monkeypatch,
+        commercial_executor_fleet,
+        tmp_path,
     )
 
     class FullRemoteHttpClient(
@@ -379,20 +431,48 @@ def test_remote_vps_rejects_at_active_trade_limit(
         incoming_signal
     )
 
-    assert result["status"] == "decision_rejected"
-    assert len(fake_http_client.sent_missions) == 0
+    assert result["status"] == "rejected"
 
-    assert result["production"].decision.reason == (
-        "Maximum active trade limit reached: "
-        "10/10 (positions=6, pending=4)."
+    assert len(
+        result["target_results"]
+    ) == 1
+
+    target_result = (
+        result["target_results"][0]
+    )
+
+    assert target_result["agent_id"] == (
+        "trusted-agent-001"
+    )
+
+    assert (
+        target_result["status"]
+        == "decision_rejected"
+    )
+
+    assert len(
+        fake_http_client.sent_missions
+    ) == 0
+
+    assert (
+        target_result["production"]
+        .decision.reason
+        == (
+            "Maximum active trade limit reached: "
+            "10/10 (positions=6, pending=4)."
+        )
     )
 
 
 def test_remote_vps_rejects_unauthorized_sender(
     monkeypatch: pytest.MonkeyPatch,
+    commercial_executor_fleet,
+    tmp_path: Path,
 ) -> None:
     listener = load_remote_listener(
-        monkeypatch
+        monkeypatch,
+        commercial_executor_fleet,
+        tmp_path,
     )
 
     fake_http_client = FakeRemoteHttpClient()
@@ -477,11 +557,15 @@ def test_remote_vps_rejects_unauthorized_sender(
 )
 def test_remote_vps_rejects_untrusted_broker_state(
     monkeypatch: pytest.MonkeyPatch,
+    commercial_executor_fleet,
+    tmp_path: Path,
     received_at,
     expected_reason,
 ) -> None:
     listener = load_remote_listener(
-        monkeypatch
+        monkeypatch,
+        commercial_executor_fleet,
+        tmp_path,
     )
 
     class UntrustedRemoteHttpClient(
@@ -542,11 +626,30 @@ def test_remote_vps_rejects_untrusted_broker_state(
         )
     )
 
+    assert result["status"] == "rejected"
+
+    assert len(
+        result["target_results"]
+    ) == 1
+
+    target_result = (
+        result["target_results"][0]
+    )
+
+    assert target_result["agent_id"] == (
+        "trusted-agent-001"
+    )
+
     assert (
-        result["status"]
+        target_result["status"]
         == "broker_state_rejected"
     )
-    assert result["reason"] == expected_reason
+
+    assert (
+        target_result["reason"]
+        == expected_reason
+    )
+
     assert len(
         fake_http_client.sent_missions
     ) == 0

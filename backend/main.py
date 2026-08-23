@@ -8,16 +8,24 @@ from pydantic import BaseModel
 from backend.brain.memory import memory_engine
 from backend.brain.models.experience import Experience
 from backend.brain_engine import brain_engine
+import base64
+
+
 from backend.config import (
+    TODOBA_CONTROL_PLANE_DATA_ROOT,
+    TODOBA_CUSTOMER_DEPLOYMENT_MASTER_KEY,
     TODOBA_EXECUTOR_ID,
     TODOBA_EXECUTOR_SECRET,
     TODOBA_RUNTIME_MODE,
-    TODOBA_TRUSTED_AGENT_ID,
-    TODOBA_TRUSTED_AGENT_ACCOUNT_FINGERPRINT,
-    TODOBA_TRUSTED_AGENT_SECRET,
-    TODOBA_EXECUTION_MISSION_SIGNING_SECRET,
-    TODOBA_CONTROL_MISSION_SIGNING_SECRET,
-    get_trusted_agent_deployments,
+)
+from backend.commercial.customer_deployment_registry import (
+    CustomerDeploymentRegistry,
+)
+from backend.commercial.customer_deployment_runtime_projection import (
+    CustomerDeploymentRuntimeProjection,
+)
+from backend.commercial.customer_deployment_secret_store import (
+    CustomerDeploymentSecretStore,
 )
 from backend.runtime.runtime_mode import (
     RuntimeMode,
@@ -231,6 +239,9 @@ from backend.trading.execution.broker_state_api import (
 from backend.trading.execution.broker_state_store import (
     BrokerStateStore,
 )
+from backend.trading.execution.execution_target_registry import (
+    ExecutionTargetRegistry,
+)
 from backend.trading.execution.executor_authenticator import (
     ExecutorAuthenticator,
 )
@@ -326,12 +337,89 @@ CONTROL_SECURITY_SEQUENCE_BINDING_STORAGE_PATH = (
     / "control_security_sequence_bindings.json"
 )
 
+CUSTOMER_DEPLOYMENT_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_deployments.json"
+)
+
+CUSTOMER_DEPLOYMENT_SECRET_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_deployment_secrets.json"
+)
+
 TRUSTED_AGENT_ACCOUNT_BINDING_STORAGE_PATH = (
-    Path("data")
+    TODOBA_CONTROL_PLANE_DATA_ROOT
     / "trading"
     / "trusted_agent_account_bindings.json"
 )
 
+
+def _decode_customer_deployment_master_key(
+    encoded_master_key: str,
+) -> bytes:
+    if not isinstance(
+        encoded_master_key,
+        str,
+    ):
+        raise TypeError(
+            "Customer deployment master key "
+            "must be str."
+        )
+
+    if encoded_master_key == "":
+        raise RuntimeError(
+            "TODOBA_CUSTOMER_DEPLOYMENT_MASTER_KEY "
+            "is required."
+        )
+
+    try:
+        encoded_bytes = (
+            encoded_master_key.encode(
+                "ascii"
+            )
+        )
+
+        master_key = base64.b64decode(
+            encoded_bytes,
+            altchars=b"-_",
+            validate=True,
+        )
+    except (
+        UnicodeEncodeError,
+        ValueError,
+    ) as error:
+        raise RuntimeError(
+            "TODOBA_CUSTOMER_DEPLOYMENT_MASTER_KEY "
+            "must contain valid URL-safe base64."
+        ) from error
+
+    if len(master_key) != 32:
+        raise RuntimeError(
+            "TODOBA_CUSTOMER_DEPLOYMENT_MASTER_KEY "
+            "must decode to exactly 32 bytes."
+        )
+
+    return master_key
+
+
+customer_deployment_registry = (
+    CustomerDeploymentRegistry(
+        CUSTOMER_DEPLOYMENT_STORAGE_PATH
+    )
+)
+
+customer_deployment_secret_store = (
+    CustomerDeploymentSecretStore(
+        CUSTOMER_DEPLOYMENT_SECRET_STORAGE_PATH,
+        master_key=(
+            _decode_customer_deployment_master_key(
+                TODOBA_CUSTOMER_DEPLOYMENT_MASTER_KEY
+            )
+        ),
+    )
+)
 
 trusted_agent_account_binding_store = (
     TrustedAgentAccountBindingStore(
@@ -345,72 +433,58 @@ trusted_agent_account_binding_guard = (
     )
 )
 
-
-def _build_trusted_agent_credential_registry(
-    deployments: tuple[
-        dict[str, str],
-        ...,
-    ],
-) -> TrustedAgentCredentialRegistry:
-    registry = TrustedAgentCredentialRegistry()
-
-    for deployment in deployments:
-        registry.register(
-            agent_id=deployment["agent_id"],
-            agent_secret=deployment["agent_secret"],
-        )
-
-    return registry
-
-
-def _build_trusted_agent_signing_key_registry(
-    deployments: tuple[
-        dict[str, str],
-        ...,
-    ],
-    *,
-    signing_secret_field: str,
-) -> TrustedAgentSigningKeyRegistry:
-    registry = TrustedAgentSigningKeyRegistry()
-
-    for deployment in deployments:
-        registry.register(
-            agent_id=deployment["agent_id"],
-            signing_secret=deployment[
-                signing_secret_field
-            ],
-        )
-
-    return registry
-
-
-trusted_agent_deployments = (
-    get_trusted_agent_deployments()
-)
-
 trusted_agent_credential_registry = (
-    _build_trusted_agent_credential_registry(
-        trusted_agent_deployments
-    )
+    TrustedAgentCredentialRegistry()
 )
 
 execution_signing_key_registry = (
-    _build_trusted_agent_signing_key_registry(
-        trusted_agent_deployments,
-        signing_secret_field=(
-            "execution_mission_signing_secret"
+    TrustedAgentSigningKeyRegistry()
+)
+
+control_signing_key_registry = (
+    TrustedAgentSigningKeyRegistry()
+)
+
+execution_target_registry = (
+    ExecutionTargetRegistry()
+)
+
+customer_deployment_runtime_projection = (
+    CustomerDeploymentRuntimeProjection(
+        deployment_registry=(
+            customer_deployment_registry
+        ),
+        secret_store=(
+            customer_deployment_secret_store
+        ),
+        account_binding_store=(
+            trusted_agent_account_binding_store
+        ),
+        credential_registry=(
+            trusted_agent_credential_registry
+        ),
+        execution_signing_key_registry=(
+            execution_signing_key_registry
+        ),
+        control_signing_key_registry=(
+            control_signing_key_registry
+        ),
+        execution_target_registry=(
+            execution_target_registry
         ),
     )
 )
 
-control_signing_key_registry = (
-    _build_trusted_agent_signing_key_registry(
-        trusted_agent_deployments,
-        signing_secret_field=(
-            "control_mission_signing_secret"
-        ),
+
+def refresh_customer_deployment_runtime_projection(
+) -> int:
+    return (
+        customer_deployment_runtime_projection
+        .project()
     )
-)
+
+
+refresh_customer_deployment_runtime_projection()
 
 todoba_runtime: TODOBARuntime = create_runtime(
     RuntimeMode(
@@ -469,12 +543,12 @@ def _require_trusted_agent_account_bindings(
 ]:
     bound_accounts: list[str] = []
 
-    for deployment in trusted_agent_deployments:
+    for target in execution_target_registry.all():
         bound_accounts.append(
             trusted_agent_account_binding_guard.require_binding(
-                agent_id=deployment["agent_id"],
+                agent_id=target.agent_id,
                 account_fingerprint=(
-                    deployment["account_fingerprint"]
+                    target.account_fingerprint
                 ),
             )
         )
@@ -505,6 +579,8 @@ def _require_trusted_agent_account_binding(
 async def lifespan(
     app: FastAPI,
 ):
+    refresh_customer_deployment_runtime_projection()
+
     _require_trusted_agent_account_bindings()
 
     execution_mission_record_recovery.restore()

@@ -13,12 +13,11 @@ per-target risk and sizing
 ->
 one target-specific ExecutionMission per target
 
-Legacy single-target behavior remains protected by the
+Single-target behavior remains protected by the
 existing Telegram REMOTE_VPS mission flow tests.
 """
 
 import importlib
-import json
 import sys
 from datetime import UTC
 from datetime import datetime
@@ -36,48 +35,8 @@ from backend.trading.signal.incoming_signal import (
 )
 
 
-TRUSTED_AGENTS = [
-    {
-        "agent_id": "trusted-agent-001",
-        "agent_secret": "agent-secret-a",
-        "account_fingerprint": "account-a",
-        "execution_mission_signing_secret": (
-            "execution-signing-a"
-        ),
-        "control_mission_signing_secret": (
-            "control-signing-a"
-        ),
-    },
-    {
-        "agent_id": "trusted-agent-002",
-        "agent_secret": "agent-secret-b",
-        "account_fingerprint": "account-b",
-        "execution_mission_signing_secret": (
-            "execution-signing-b"
-        ),
-        "control_mission_signing_secret": (
-            "control-signing-b"
-        ),
-    },
-]
-
-
-EXECUTION_TARGETS = [
-    {
-        "agent_id": "trusted-agent-001",
-        "account_fingerprint": "account-a",
-    },
-    {
-        "agent_id": "trusted-agent-002",
-        "account_fingerprint": "account-b",
-    },
-]
-
-
 def configure_multi_target_environment(
     monkeypatch: pytest.MonkeyPatch,
-    *,
-    legacy_agent_id: str,
 ) -> None:
     environment = {
         "TELEGRAM_API_ID": "1",
@@ -96,19 +55,9 @@ def configure_multi_target_environment(
         "TODOBA_EXECUTOR_SECRET": (
             "fan-out-executor-secret"
         ),
-        "TODOBA_TRUSTED_AGENT_ID": (
-            legacy_agent_id
-        ),
-        "TODOBA_TRUSTED_AGENTS_JSON": (
-            json.dumps(
-                TRUSTED_AGENTS
-            )
-        ),
-        "TODOBA_EXECUTION_TARGETS_JSON": (
-            json.dumps(
-                EXECUTION_TARGETS
-            )
-        ),
+        "TODOBA_TRUSTED_AGENT_ID": "",
+        "TODOBA_TRUSTED_AGENTS_JSON": "",
+        "TODOBA_EXECUTION_TARGETS_JSON": "",
     }
 
     for name, value in environment.items():
@@ -120,12 +69,9 @@ def configure_multi_target_environment(
 
 def reload_multi_target_config(
     monkeypatch: pytest.MonkeyPatch,
-    *,
-    legacy_agent_id: str,
 ):
     configure_multi_target_environment(
-        monkeypatch,
-        legacy_agent_id=legacy_agent_id,
+        monkeypatch
     )
 
     import backend.config as config
@@ -138,37 +84,27 @@ def reload_multi_target_config(
 def load_multi_target_listener(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
-    *,
-    legacy_agent_id: str = (
-        "legacy-agent-must-not-route"
-    ),
+    commercial_executor_fleet,
 ):
-    reload_multi_target_config(
-        monkeypatch,
-        legacy_agent_id=legacy_agent_id,
-    )
-
-    import backend.integrations.telegram_dispatch_progress_store as progress_store_module
-
-    real_progress_store = (
-        progress_store_module.TelegramDispatchProgressStore
-    )
-
-    def build_test_progress_store(
-        *,
-        storage_path: Path,
-    ):
-        return real_progress_store(
-            storage_path=(
-                tmp_path
-                / "telegram_dispatch_progress.json"
-            )
+    commercial_executor_fleet(
+        (
+            (
+                "trusted-agent-001",
+                "account-a",
+            ),
+            (
+                "trusted-agent-002",
+                "account-b",
+            ),
         )
+    )
 
-    monkeypatch.setattr(
-        progress_store_module,
-        "TelegramDispatchProgressStore",
-        build_test_progress_store,
+    monkeypatch.chdir(
+        tmp_path
+    )
+
+    reload_multi_target_config(
+        monkeypatch
     )
 
     sys.modules.pop(
@@ -229,6 +165,7 @@ def make_incoming_signal() -> IncomingSignal:
             UTC
         ),
     )
+
 
 
 class FakeRemoteHttpClient:
@@ -323,8 +260,7 @@ def test_remote_vps_multi_agent_config_does_not_require_legacy_agent_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     config = reload_multi_target_config(
-        monkeypatch,
-        legacy_agent_id="",
+        monkeypatch
     )
 
     config.validate_telegram_config()
@@ -333,11 +269,26 @@ def test_remote_vps_multi_agent_config_does_not_require_legacy_agent_id(
 def test_remote_vps_listener_composes_configured_execution_targets(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    commercial_executor_fleet,
 ) -> None:
     listener = load_multi_target_listener(
         monkeypatch,
         tmp_path,
+        commercial_executor_fleet,
     )
+
+    assert (
+        listener
+        .remote_execution_target_registry
+        .all()
+        == ()
+    )
+
+    projected_count = (
+        listener.refresh_remote_execution_targets()
+    )
+
+    assert projected_count == 2
 
     targets = (
         listener
@@ -366,10 +317,12 @@ def test_remote_vps_listener_composes_configured_execution_targets(
 def test_remote_vps_listener_fans_out_to_each_execution_target(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    commercial_executor_fleet,
 ) -> None:
     listener = load_multi_target_listener(
         monkeypatch,
         tmp_path,
+        commercial_executor_fleet,
     )
 
     fake_http_client = (
@@ -504,10 +457,12 @@ def test_remote_vps_listener_fans_out_to_each_execution_target(
 def test_remote_vps_rejects_target_when_broker_state_agent_does_not_match(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    commercial_executor_fleet,
 ) -> None:
     listener = load_multi_target_listener(
         monkeypatch,
         tmp_path,
+        commercial_executor_fleet,
     )
 
     fake_http_client = (
@@ -589,10 +544,12 @@ def test_remote_vps_rejects_target_when_broker_state_agent_does_not_match(
 def test_remote_vps_rejects_account_mismatch_without_blocking_other_target(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    commercial_executor_fleet,
 ) -> None:
     listener = load_multi_target_listener(
         monkeypatch,
         tmp_path,
+        commercial_executor_fleet,
     )
 
     fake_http_client = (

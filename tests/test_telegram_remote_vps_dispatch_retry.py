@@ -18,7 +18,6 @@ After executor restart:
 """
 
 import importlib
-import json
 import sys
 from datetime import UTC
 from datetime import datetime
@@ -39,44 +38,6 @@ from backend.integrations.telegram_dispatch_progress_store import (
 from backend.trading.signal.incoming_signal import (
     IncomingSignal,
 )
-
-
-TRUSTED_AGENTS = [
-    {
-        "agent_id": "trusted-agent-001",
-        "agent_secret": "agent-secret-a",
-        "account_fingerprint": "account-a",
-        "execution_mission_signing_secret": (
-            "execution-signing-a"
-        ),
-        "control_mission_signing_secret": (
-            "control-signing-a"
-        ),
-    },
-    {
-        "agent_id": "trusted-agent-002",
-        "agent_secret": "agent-secret-b",
-        "account_fingerprint": "account-b",
-        "execution_mission_signing_secret": (
-            "execution-signing-b"
-        ),
-        "control_mission_signing_secret": (
-            "control-signing-b"
-        ),
-    },
-]
-
-
-EXECUTION_TARGETS = [
-    {
-        "agent_id": "trusted-agent-001",
-        "account_fingerprint": "account-a",
-    },
-    {
-        "agent_id": "trusted-agent-002",
-        "account_fingerprint": "account-b",
-    },
-]
 
 
 def configure_environment(
@@ -100,16 +61,8 @@ def configure_environment(
             "retry-executor-secret"
         ),
         "TODOBA_TRUSTED_AGENT_ID": "",
-        "TODOBA_TRUSTED_AGENTS_JSON": (
-            json.dumps(
-                TRUSTED_AGENTS
-            )
-        ),
-        "TODOBA_EXECUTION_TARGETS_JSON": (
-            json.dumps(
-                EXECUTION_TARGETS
-            )
-        ),
+        "TODOBA_TRUSTED_AGENTS_JSON": "",
+        "TODOBA_EXECUTION_TARGETS_JSON": "",
     }
 
     for name, value in environment.items():
@@ -121,7 +74,21 @@ def configure_environment(
 
 def load_listener(
     monkeypatch: pytest.MonkeyPatch,
+    commercial_executor_fleet,
 ):
+    commercial_executor_fleet(
+        (
+            (
+                "trusted-agent-001",
+                "account-a",
+            ),
+            (
+                "trusted-agent-002",
+                "account-b",
+            ),
+        )
+    )
+
     configure_environment(
         monkeypatch
     )
@@ -336,6 +303,7 @@ class FailIfSizingEngineRuns:
 def test_restart_retries_only_pending_target_with_exact_persisted_mission(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
+    commercial_executor_fleet,
 ) -> None:
     storage_path = (
         tmp_path
@@ -343,7 +311,8 @@ def test_restart_retries_only_pending_target_with_exact_persisted_mission(
     )
 
     listener = load_listener(
-        monkeypatch
+        monkeypatch,
+        commercial_executor_fleet,
     )
 
     progress_store = (
@@ -441,7 +410,8 @@ def test_restart_retries_only_pending_target_with_exact_persisted_mission(
 
     # Simulate Telegram executor restart.
     restarted_listener = load_listener(
-        monkeypatch
+        monkeypatch,
+        commercial_executor_fleet,
     )
 
     restored_store = (

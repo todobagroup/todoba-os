@@ -80,3 +80,23 @@ def test_unknown_agent_returns_none() -> None:
         )
         is None
     )
+
+def test_agent_secret_is_preserved_exactly() -> None:
+    registry = TrustedAgentCredentialRegistry()
+
+    secret = "  agent-??-secret  "
+
+    registered = registry.register(
+        agent_id="trusted-agent-opaque",
+        agent_secret=secret,
+    )
+
+    restored = registry.get_secret(
+        agent_id="trusted-agent-opaque"
+    )
+
+    assert registered == secret
+    assert restored == secret
+
+    assert registered.startswith("  ")
+    assert registered.endswith("  ")

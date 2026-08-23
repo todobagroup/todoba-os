@@ -195,6 +195,18 @@ TODOBA_CONTROL_MISSION_SIGNING_SECRET = os.getenv(
     "",
 ).strip()
 
+TODOBA_CONTROL_PLANE_DATA_ROOT = Path(
+    os.getenv(
+        "TODOBA_CONTROL_PLANE_DATA_ROOT",
+        "data",
+    ).strip()
+)
+
+TODOBA_CUSTOMER_DEPLOYMENT_MASTER_KEY = os.getenv(
+    "TODOBA_CUSTOMER_DEPLOYMENT_MASTER_KEY",
+    "",
+)
+
 TODOBA_EXECUTOR_ID = os.getenv(
     "TODOBA_EXECUTOR_ID",
     "telegram-executor-001",
@@ -394,7 +406,7 @@ def get_trusted_agent_deployments() -> tuple[
         )
 
         normalized_agent_secret = (
-            agent_secret.strip()
+            agent_secret
         )
 
         normalized_account_fingerprint = (
@@ -402,11 +414,11 @@ def get_trusted_agent_deployments() -> tuple[
         )
 
         normalized_execution_signing_secret = (
-            execution_mission_signing_secret.strip()
+            execution_mission_signing_secret
         )
 
         normalized_control_signing_secret = (
-            control_mission_signing_secret.strip()
+            control_mission_signing_secret
         )
 
         if not normalized_agent_id:
@@ -414,7 +426,7 @@ def get_trusted_agent_deployments() -> tuple[
                 "Trusted Agent agent_id is required."
             )
 
-        if not normalized_agent_secret:
+        if normalized_agent_secret == "":
             raise RuntimeError(
                 "Trusted Agent agent_secret is required."
             )
@@ -425,14 +437,14 @@ def get_trusted_agent_deployments() -> tuple[
                 "is required."
             )
 
-        if not normalized_execution_signing_secret:
+        if normalized_execution_signing_secret == "":
             raise RuntimeError(
                 "Trusted Agent "
                 "execution_mission_signing_secret "
                 "is required."
             )
 
-        if not normalized_control_signing_secret:
+        if normalized_control_signing_secret == "":
             raise RuntimeError(
                 "Trusted Agent "
                 "control_mission_signing_secret "
@@ -721,19 +733,6 @@ def validate_telegram_config() -> None:
         if not TODOBA_CLOUD_BASE_URL:
             errors.append(
                 "TODOBA_CLOUD_BASE_URL is required "
-                "for REMOTE_VPS."
-            )
-
-        if TODOBA_TRUSTED_AGENTS_JSON:
-            try:
-                get_execution_targets()
-            except RuntimeError as error:
-                errors.append(
-                    str(error)
-                )
-        elif not TODOBA_TRUSTED_AGENT_ID:
-            errors.append(
-                "TODOBA_TRUSTED_AGENT_ID is required "
                 "for REMOTE_VPS."
             )
 

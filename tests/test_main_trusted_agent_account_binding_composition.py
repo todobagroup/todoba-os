@@ -1,23 +1,35 @@
 """
-TODOBA Trusted Agent Multi-Agent Startup Composition Tests
+TODOBA Customer Deployment Runtime Composition Tests
 
-Locks the production composition for:
-- Trusted Agent credential registry
-- multi-Agent authentication
-- authoritative Agent-to-account ownership checks
-- fail-closed Cloud startup
+Locks the production API composition for:
+- durable customer deployment identity
+- encrypted customer deployment secrets
+- authoritative Agent-to-account ownership
+- runtime credential projection
+- runtime execution-target projection
+- explicit fail-closed startup refresh
 """
 
 import asyncio
-from pathlib import Path
 
 import pytest
 
 from backend import main
+from backend.commercial.customer_deployment_registry import (
+    CustomerDeploymentRegistry,
+)
+from backend.commercial.customer_deployment_runtime_projection import (
+    CustomerDeploymentRuntimeProjection,
+)
+from backend.commercial.customer_deployment_secret_store import (
+    CustomerDeploymentSecretStore,
+)
 from backend.config import (
-    TODOBA_TRUSTED_AGENT_ACCOUNT_FINGERPRINT,
-    TODOBA_TRUSTED_AGENT_ID,
-    TODOBA_TRUSTED_AGENT_SECRET,
+    TODOBA_CONTROL_PLANE_DATA_ROOT,
+)
+from backend.trading.execution.execution_target_registry import (
+    ExecutionTarget,
+    ExecutionTargetRegistry,
 )
 from backend.trading.execution.trusted_agent_account_binding_guard import (
     TrustedAgentAccountBindingGuard,
@@ -33,14 +45,52 @@ from backend.trading.execution.trusted_agent_credential_registry import (
 )
 
 
-def test_main_composes_trusted_agent_account_binding() -> None:
+def test_main_composes_customer_deployment_control_plane() -> None:
+    assert (
+        main.CUSTOMER_DEPLOYMENT_STORAGE_PATH
+        == (
+            TODOBA_CONTROL_PLANE_DATA_ROOT
+            / "commercial"
+            / "customer_deployments.json"
+        )
+    )
+
+    assert (
+        main.CUSTOMER_DEPLOYMENT_SECRET_STORAGE_PATH
+        == (
+            TODOBA_CONTROL_PLANE_DATA_ROOT
+            / "commercial"
+            / "customer_deployment_secrets.json"
+        )
+    )
+
     assert (
         main.TRUSTED_AGENT_ACCOUNT_BINDING_STORAGE_PATH
         == (
-            Path("data")
+            TODOBA_CONTROL_PLANE_DATA_ROOT
             / "trading"
             / "trusted_agent_account_bindings.json"
         )
+    )
+
+    assert isinstance(
+        main.customer_deployment_registry,
+        CustomerDeploymentRegistry,
+    )
+
+    assert (
+        main.customer_deployment_registry.storage_path
+        == main.CUSTOMER_DEPLOYMENT_STORAGE_PATH
+    )
+
+    assert isinstance(
+        main.customer_deployment_secret_store,
+        CustomerDeploymentSecretStore,
+    )
+
+    assert (
+        main.customer_deployment_secret_store.storage_path
+        == main.CUSTOMER_DEPLOYMENT_SECRET_STORAGE_PATH
     )
 
     assert isinstance(
@@ -63,18 +113,31 @@ def test_main_composes_trusted_agent_account_binding() -> None:
         is main.trusted_agent_account_binding_store
     )
 
-
-def test_main_composes_trusted_agent_credential_registry() -> None:
     assert isinstance(
-        main.trusted_agent_credential_registry,
-        TrustedAgentCredentialRegistry,
+        main.customer_deployment_runtime_projection,
+        CustomerDeploymentRuntimeProjection,
     )
 
     assert (
-        main.trusted_agent_credential_registry.get_secret(
-            agent_id=TODOBA_TRUSTED_AGENT_ID
-        )
-        == TODOBA_TRUSTED_AGENT_SECRET
+        main.customer_deployment_runtime_projection._deployment_registry
+        is main.customer_deployment_registry
+    )
+
+    assert (
+        main.customer_deployment_runtime_projection._secret_store
+        is main.customer_deployment_secret_store
+    )
+
+    assert (
+        main.customer_deployment_runtime_projection._account_binding_store
+        is main.trusted_agent_account_binding_store
+    )
+
+
+def test_main_composes_credentials_from_commercial_truth() -> None:
+    assert isinstance(
+        main.trusted_agent_credential_registry,
+        TrustedAgentCredentialRegistry,
     )
 
     assert isinstance(
@@ -82,70 +145,126 @@ def test_main_composes_trusted_agent_credential_registry() -> None:
         TrustedAgentAuthenticator,
     )
 
-    assert main.trusted_agent_authenticator.authenticate(
-        agent_id=TODOBA_TRUSTED_AGENT_ID,
-        authorization=(
-            f"Bearer {TODOBA_TRUSTED_AGENT_SECRET}"
-        ),
-    )
-
-
-def test_main_builds_registry_for_multiple_deployments() -> None:
     deployments = (
-        {
-            "agent_id": "trusted-agent-001",
-            "agent_secret": "secret-a",
-            "account_fingerprint": "account-a",
-        },
-        {
-            "agent_id": "trusted-agent-002",
-            "agent_secret": "secret-b",
-            "account_fingerprint": "account-b",
-        },
+        main.customer_deployment_registry.all()
     )
 
-    registry = (
-        main._build_trusted_agent_credential_registry(
-            deployments
+    assert deployments
+
+    for deployment in deployments:
+        secrets = (
+            main.customer_deployment_secret_store.get(
+                deployment_id=(
+                    deployment.deployment_id
+                )
+            )
         )
+
+        assert secrets is not None
+
+        assert (
+            main.trusted_agent_credential_registry.get_secret(
+                agent_id=deployment.agent_id
+            )
+            == secrets.agent_secret
+        )
+
+        assert main.trusted_agent_authenticator.authenticate(
+            agent_id=deployment.agent_id,
+            authorization=(
+                f"Bearer {secrets.agent_secret}"
+            ),
+        )
+
+
+def test_main_projects_execution_targets_from_commercial_truth() -> None:
+    assert isinstance(
+        main.execution_target_registry,
+        ExecutionTargetRegistry,
     )
 
-    assert registry.size() == 2
+    deployments = (
+        main.customer_deployment_registry.all()
+    )
 
     assert (
-        registry.get_secret(
-            agent_id="trusted-agent-001"
-        )
-        == "secret-a"
+        main.execution_target_registry.size()
+        == len(deployments)
     )
 
-    assert (
-        registry.get_secret(
-            agent_id="trusted-agent-002"
+    for deployment in deployments:
+        account_fingerprint = (
+            main.trusted_agent_account_binding_store
+            .get_account_fingerprint(
+                agent_id=deployment.agent_id
+            )
         )
-        == "secret-b"
+
+        assert account_fingerprint is not None
+
+        target = (
+            main.execution_target_registry.get(
+                agent_id=deployment.agent_id
+            )
+        )
+
+        assert target is not None
+
+        assert (
+            target.account_fingerprint
+            == account_fingerprint
+        )
+
+
+def test_main_refresh_boundary_projects_commercial_truth(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    def project() -> int:
+        calls.append(
+            "project"
+        )
+
+        return 7
+
+    monkeypatch.setattr(
+        main.customer_deployment_runtime_projection,
+        "project",
+        project,
     )
 
+    result = (
+        main.refresh_customer_deployment_runtime_projection()
+    )
 
-def test_main_account_binding_check_uses_all_deployments(
-    monkeypatch,
+    assert result == 7
+    assert calls == ["project"]
+
+
+def test_main_account_binding_check_uses_projected_targets(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[
         tuple[str, str]
     ] = []
 
-    deployments = (
-        {
-            "agent_id": "trusted-agent-001",
-            "agent_secret": "secret-a",
-            "account_fingerprint": "account-a",
-        },
-        {
-            "agent_id": "trusted-agent-002",
-            "agent_secret": "secret-b",
-            "account_fingerprint": "account-b",
-        },
+    targets = (
+        ExecutionTarget(
+            agent_id="trusted-agent-001",
+            account_fingerprint="account-a",
+        ),
+        ExecutionTarget(
+            agent_id="trusted-agent-002",
+            account_fingerprint="account-b",
+        ),
     )
+
+    def all_targets() -> tuple[
+        ExecutionTarget,
+        ...,
+    ]:
+        return targets
 
     def require_binding(
         *,
@@ -162,10 +281,9 @@ def test_main_account_binding_check_uses_all_deployments(
         return account_fingerprint
 
     monkeypatch.setattr(
-        main,
-        "trusted_agent_deployments",
-        deployments,
-        raising=False,
+        main.execution_target_registry,
+        "all",
+        all_targets,
     )
 
     monkeypatch.setattr(
@@ -196,9 +314,16 @@ def test_main_account_binding_check_uses_all_deployments(
 
 
 def test_main_account_binding_failure_stops_before_recovery(
-    monkeypatch,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     calls: list[str] = []
+
+    def refresh_projection() -> int:
+        calls.append(
+            "projection"
+        )
+
+        return 1
 
     def require_account_bindings() -> tuple[
         str,
@@ -218,6 +343,13 @@ def test_main_account_binding_failure_stops_before_recovery(
         )
 
         return 0
+
+    monkeypatch.setattr(
+        main,
+        "refresh_customer_deployment_runtime_projection",
+        refresh_projection,
+        raising=False,
+    )
 
     monkeypatch.setattr(
         main,
@@ -247,5 +379,6 @@ def test_main_account_binding_failure_stops_before_recovery(
         )
 
     assert calls == [
+        "projection",
         "account_bindings",
     ]

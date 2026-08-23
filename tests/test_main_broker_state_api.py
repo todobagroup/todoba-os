@@ -5,7 +5,7 @@ Proof:
 
 backend.main
 ->
-POST /broker/state
+commercial customer deployment runtime projection
 ->
 Trusted Agent authentication
 ->
@@ -14,7 +14,6 @@ authoritative account binding check
 shared BrokerStateStore
 """
 
-import os
 import sys
 from pathlib import Path
 
@@ -23,22 +22,55 @@ from fastapi.testclient import TestClient
 ROOT_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT_DIR))
 
-os.environ.setdefault(
-    "TODOBA_TRUSTED_AGENT_SECRET",
-    "proof-main-broker-state-secret",
-)
-
-os.environ.setdefault(
-    "TODOBA_EXECUTOR_SECRET",
-    "proof-main-executor-secret",
-)
-
 from backend import main
 
 
 def test_main_app_contains_broker_state_api(
     monkeypatch,
 ):
+    deployments = (
+        main.customer_deployment_registry.all()
+    )
+
+    assert deployments
+
+    deployment = deployments[0]
+
+    secrets = (
+        main.customer_deployment_secret_store.get(
+            deployment_id=(
+                deployment.deployment_id
+            )
+        )
+    )
+
+    assert secrets is not None
+
+    agent_id = deployment.agent_id
+    agent_secret = secrets.agent_secret
+
+    account_fingerprint = (
+        main.trusted_agent_account_binding_store
+        .get_account_fingerprint(
+            agent_id=agent_id
+        )
+    )
+
+    assert account_fingerprint is not None
+
+    target = (
+        main.execution_target_registry.get(
+            agent_id=agent_id
+        )
+    )
+
+    assert target is not None
+
+    assert (
+        target.account_fingerprint
+        == account_fingerprint
+    )
+
     binding_calls: list[
         tuple[str, str]
     ] = []
@@ -70,17 +102,14 @@ def test_main_app_contains_broker_state_api(
     response = client.post(
         "/broker/state",
         headers={
-            "X-TODOBA-Agent-ID": (
-                main.TODOBA_TRUSTED_AGENT_ID
-            ),
+            "X-TODOBA-Agent-ID": agent_id,
             "Authorization": (
-                "Bearer "
-                + main.TODOBA_TRUSTED_AGENT_SECRET
+                f"Bearer {agent_secret}"
             ),
         },
         json={
             "account_fingerprint": (
-                main.TODOBA_TRUSTED_AGENT_ACCOUNT_FINGERPRINT
+                account_fingerprint
             ),
             "equity": 2491.52,
             "open_position_count": 5,
@@ -96,22 +125,22 @@ def test_main_app_contains_broker_state_api(
 
     assert binding_calls == [
         (
-            main.TODOBA_TRUSTED_AGENT_ID,
-            main.TODOBA_TRUSTED_AGENT_ACCOUNT_FINGERPRINT,
+            agent_id,
+            account_fingerprint,
         )
     ]
 
     assert response.json() == {
         "status": "stored",
         "account_fingerprint": (
-            main.TODOBA_TRUSTED_AGENT_ACCOUNT_FINGERPRINT
+            account_fingerprint
         ),
         "symbol": "XAUUSD",
     }
 
     stored = main.broker_state_store.get(
         account_fingerprint=(
-            main.TODOBA_TRUSTED_AGENT_ACCOUNT_FINGERPRINT
+            account_fingerprint
         ),
         symbol="XAUUSD",
     )

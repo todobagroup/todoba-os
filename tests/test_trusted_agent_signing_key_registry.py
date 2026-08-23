@@ -109,3 +109,23 @@ def test_separate_registry_instances_isolate_signing_domains() -> None:
         )
         == "control-key-a"
     )
+
+def test_signing_secret_is_preserved_exactly() -> None:
+    registry = TrustedAgentSigningKeyRegistry()
+
+    secret = "  signing-??-secret  "
+
+    registered = registry.register(
+        agent_id="trusted-agent-opaque",
+        signing_secret=secret,
+    )
+
+    restored = registry.get_secret(
+        agent_id="trusted-agent-opaque"
+    )
+
+    assert registered == secret
+    assert restored == secret
+
+    assert registered.startswith("  ")
+    assert registered.endswith("  ")

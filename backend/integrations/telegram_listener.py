@@ -34,13 +34,18 @@ from backend.config import (
     TELEGRAM_EXECUTION_MODE,
     TELEGRAM_SIGNAL_GROUP_ID,
     TODOBA_CLOUD_BASE_URL,
+    TODOBA_CONTROL_PLANE_DATA_ROOT,
     TODOBA_EXECUTOR_ID,
     TODOBA_EXECUTOR_SECRET,
-    TODOBA_TRUSTED_AGENT_ID,
-    TODOBA_TRUSTED_AGENTS_JSON,
-    get_execution_targets,
     validate_telegram_config,
 )
+from backend.commercial.customer_deployment_execution_target_projection import (
+    CustomerDeploymentExecutionTargetProjection,
+)
+from backend.commercial.customer_deployment_registry import (
+    CustomerDeploymentRegistry,
+)
+
 from backend.integrations.telegram_client import (
     create_telegram_client,
 )
@@ -67,7 +72,10 @@ from backend.trading.execution.execution_planner import (
 )
 
 from backend.trading.execution.execution_target_registry import (
-    build_execution_target_registry,
+    ExecutionTargetRegistry,
+)
+from backend.trading.execution.trusted_agent_account_binding_store import (
+    TrustedAgentAccountBindingStore,
 )
 
 from backend.trading.execution.remote_execution_mission_http_client import (
@@ -117,6 +125,19 @@ remote_dispatch_progress_store = None
 remote_dispatch_recovery = None
 
 BROKER_STATE_MAX_AGE_SECONDS = 30.0
+
+CUSTOMER_DEPLOYMENT_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_deployments.json"
+)
+
+TRUSTED_AGENT_ACCOUNT_BINDING_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "trading"
+    / "trusted_agent_account_bindings.json"
+)
+
 TELEGRAM_DISPATCH_PROGRESS_STORAGE_PATH = (
     Path("data")
     / "trading"
@@ -173,31 +194,84 @@ else:
         )
     )
 
-    if TODOBA_TRUSTED_AGENTS_JSON:
-        remote_execution_target_registry = (
-            build_execution_target_registry(
-                get_execution_targets()
+    remote_execution_target_registry = (
+        ExecutionTargetRegistry()
+    )
+
+    remote_dispatch_progress_store = (
+        TelegramDispatchProgressStore(
+            storage_path=(
+                TELEGRAM_DISPATCH_PROGRESS_STORAGE_PATH
             )
         )
-        remote_dispatch_progress_store = (
-            TelegramDispatchProgressStore(
-                storage_path=(
-                    TELEGRAM_DISPATCH_PROGRESS_STORAGE_PATH
-                )
-            )
+    )
+
+    remote_dispatch_recovery = (
+        TelegramDispatchRecovery(
+            progress_store=(
+                remote_dispatch_progress_store
+            ),
+            execution_target_registry=(
+                remote_execution_target_registry
+            ),
+            http_client=remote_http_client,
+        )
+    )
+
+def refresh_remote_execution_targets() -> int:
+    """
+    Refresh routing targets from durable commercial truth.
+
+    Durable source registries are reconstructed on each
+    refresh so changes persisted by another process become
+    visible without reloading this module.
+
+    The runtime ExecutionTargetRegistry object is retained
+    so dispatch recovery and live fan-out continue sharing
+    the same registry reference.
+    """
+
+    if TELEGRAM_EXECUTION_MODE != "REMOTE_VPS":
+        return 0
+
+    if remote_execution_target_registry is None:
+        raise RuntimeError(
+            "REMOTE_VPS execution target registry "
+            "is not available."
         )
 
-        remote_dispatch_recovery = (
-            TelegramDispatchRecovery(
-                progress_store=(
-                    remote_dispatch_progress_store
-                ),
-                execution_target_registry=(
-                    remote_execution_target_registry
-                ),
-                http_client=remote_http_client,
-            )
+    deployment_registry = CustomerDeploymentRegistry(
+        CUSTOMER_DEPLOYMENT_STORAGE_PATH
+    )
+
+    account_binding_store = (
+        TrustedAgentAccountBindingStore(
+            TRUSTED_AGENT_ACCOUNT_BINDING_STORAGE_PATH
         )
+    )
+
+    projection = (
+        CustomerDeploymentExecutionTargetProjection(
+            deployment_registry=deployment_registry,
+            account_binding_store=(
+                account_binding_store
+            ),
+            execution_target_registry=(
+                remote_execution_target_registry
+            ),
+        )
+    )
+
+    projected_count = projection.project()
+
+    if projected_count <= 0:
+        raise RuntimeError(
+            "REMOTE_VPS commercial execution "
+            "target fleet is empty."
+        )
+
+    return projected_count
+
 
 processed_message_keys: set[
     tuple[int, int]
@@ -449,6 +523,8 @@ def process_remote_vps_signal(
         raise ValueError(
             "Telegram message_id must be positive."
         )
+
+    refresh_remote_execution_targets()
 
     if remote_execution_target_registry is not None:
         if remote_dispatch_progress_store is None:
@@ -847,121 +923,12 @@ def process_remote_vps_signal(
             "target_results": target_results,
         }
 
-    broker_state = (
-        remote_http_client.read_latest_broker_state(
-            agent_id=TODOBA_TRUSTED_AGENT_ID
-        )
+    raise RuntimeError(
+        "REMOTE_VPS execution target registry "
+        "is not available."
     )
 
-    rejection_reason = (
-        _broker_state_rejection_reason(
-            broker_state
-        )
-    )
 
-    if rejection_reason is not None:
-        return {
-            "status": "broker_state_rejected",
-            "reason": rejection_reason,
-            "broker_state": broker_state,
-        }
-
-    production = remote_task_producer.produce(
-        incoming_signal,
-        open_position_count=int(
-            broker_state["open_position_count"]
-        ),
-        pending_order_count=int(
-            broker_state["pending_order_count"]
-        ),
-        spread_ok=(
-            float(broker_state["spread_points"])
-            <= MT5_MAX_SPREAD_POINTS
-        ),
-        market_open=(
-            float(broker_state["bid"]) > 0
-            and float(broker_state["ask"]) > 0
-        ),
-        risk_ok=True,
-    )
-
-    if production.task is None:
-        return {
-            "status": production.status,
-            "production": production,
-            "broker_state": broker_state,
-        }
-
-    if production.signal is None:
-        raise RuntimeError(
-            "Approved Telegram production "
-            "does not contain a signal."
-        )
-
-    execution_plan = create_plan(
-        production.signal,
-        remote_profile,
-    )
-
-    sizing_result = (
-        PositionSizingEngine().evaluate(
-            account_equity=float(
-                broker_state["equity"]
-            ),
-        )
-    )
-
-    if not sizing_result.approved:
-        raise RuntimeError(
-            "Trade rejected by Stable Lot Policy: "
-            f"{sizing_result.reason}"
-        )
-
-    created_at = datetime.now(
-        UTC
-    )
-
-    expires_at = (
-        created_at
-        + timedelta(minutes=2)
-    )
-
-    mission = remote_mission_adapter.to_mission(
-        production.task,
-        mission_id=(
-            f"telegram-{abs(chat_id)}-{message_id}"
-        ),
-        agent_id=TODOBA_TRUSTED_AGENT_ID,
-        account_fingerprint=str(
-            broker_state["account_fingerprint"]
-        ),
-        volume=sizing_result.volume,
-        magic_number=execution_plan.magic_number,
-        comment=execution_plan.comment,
-        created_at=_to_utc_iso8601(
-            created_at
-        ),
-        expires_at=_to_utc_iso8601(
-            expires_at
-        ),
-        sequence=message_id,
-    )
-
-    cloud_response = remote_http_client.send(
-        mission
-    )
-
-    processed_message_keys.add(
-        source_key
-    )
-
-    return {
-        "status": "submitted",
-        "production": production,
-        "broker_state": broker_state,
-        "mission": mission,
-        "cloud_response": cloud_response,
-    }
 def read_demo_decision_context() -> dict:
     mt5.symbol_select(
         MT5_BROKER_GOLD_SYMBOL,
@@ -1142,10 +1109,15 @@ async def main() -> None:
 
     validate_telegram_config()
 
-    if (
-        TELEGRAM_EXECUTION_MODE == "REMOTE_VPS"
-        and remote_dispatch_recovery is not None
-    ):
+    if TELEGRAM_EXECUTION_MODE == "REMOTE_VPS":
+        refresh_remote_execution_targets()
+
+        if remote_dispatch_recovery is None:
+            raise RuntimeError(
+                "REMOTE_VPS dispatch recovery "
+                "is not available."
+            )
+
         remote_dispatch_recovery.restore()
 
     print("Starting TODOBA Telegram Listener...")

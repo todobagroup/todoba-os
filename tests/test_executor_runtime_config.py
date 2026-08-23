@@ -7,13 +7,14 @@ REMOTE_VPS
 ->
 Cloud endpoint
 +
-Trusted Agent identity
-+
 Executor authentication
 +
 authorized Telegram technicians
 ->
 validated remote Telegram runtime configuration
+
+Trusted Agent fleet readiness is owned separately by
+the commercial execution-target projection.
 """
 
 import importlib
@@ -44,15 +45,28 @@ def reload_remote_config(
         "TODOBA_CLOUD_BASE_URL": (
             "https://api.todobagroup.com"
         ),
-        "TODOBA_TRUSTED_AGENT_ID": (
-            "trusted-agent-001"
-        ),
         "TODOBA_EXECUTOR_ID": (
             "telegram-executor-proof091"
         ),
         "TODOBA_EXECUTOR_SECRET": (
             "proof091-executor-secret"
         ),
+        "TODOBA_TRUSTED_AGENT_ID": "",
+        "TODOBA_TRUSTED_AGENT_SECRET": "",
+        (
+            "TODOBA_TRUSTED_AGENT_"
+            "ACCOUNT_FINGERPRINT"
+        ): "",
+        (
+            "TODOBA_EXECUTION_MISSION_"
+            "SIGNING_SECRET"
+        ): "",
+        (
+            "TODOBA_CONTROL_MISSION_"
+            "SIGNING_SECRET"
+        ): "",
+        "TODOBA_TRUSTED_AGENTS_JSON": "",
+        "TODOBA_EXECUTION_TARGETS_JSON": "",
     }
 
     values.update(
@@ -72,7 +86,7 @@ def reload_remote_config(
     )
 
 
-def test_executor_runtime_config_loads_remote_values(
+def test_executor_runtime_config_loads_remote_system_values(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     loaded = reload_remote_config(
@@ -81,10 +95,6 @@ def test_executor_runtime_config_loads_remote_values(
 
     assert loaded.TODOBA_CLOUD_BASE_URL == (
         "https://api.todobagroup.com"
-    )
-
-    assert loaded.TODOBA_TRUSTED_AGENT_ID == (
-        "trusted-agent-001"
     )
 
     assert loaded.TODOBA_EXECUTOR_ID == (
@@ -103,8 +113,11 @@ def test_executor_runtime_config_loads_remote_values(
         )
     )
 
+    assert loaded.TODOBA_TRUSTED_AGENT_ID == ""
+    assert loaded.TODOBA_TRUSTED_AGENTS_JSON == ""
 
-def test_valid_remote_vps_config_is_accepted(
+
+def test_valid_remote_vps_config_is_accepted_without_legacy_fleet(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     loaded = reload_remote_config(
@@ -125,10 +138,6 @@ def test_valid_remote_vps_config_is_accepted(
             "TODOBA_CLOUD_BASE_URL is required",
         ),
         (
-            "TODOBA_TRUSTED_AGENT_ID",
-            "TODOBA_TRUSTED_AGENT_ID is required",
-        ),
-        (
             "TODOBA_EXECUTOR_ID",
             "TODOBA_EXECUTOR_ID is required",
         ),
@@ -145,7 +154,7 @@ def test_valid_remote_vps_config_is_accepted(
         ),
     ],
 )
-def test_remote_vps_config_rejects_missing_values(
+def test_remote_vps_config_rejects_missing_system_values(
     monkeypatch: pytest.MonkeyPatch,
     missing_name: str,
     expected_message: str,
@@ -162,6 +171,22 @@ def test_remote_vps_config_rejects_missing_values(
         match=expected_message,
     ):
         loaded.validate_telegram_config()
+
+
+def test_remote_vps_validation_does_not_parse_legacy_fleet(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    loaded = reload_remote_config(
+        monkeypatch,
+        TODOBA_TRUSTED_AGENTS_JSON=(
+            "{legacy-json-is-not-valid"
+        ),
+        TODOBA_EXECUTION_TARGETS_JSON=(
+            "{legacy-target-json-is-not-valid"
+        ),
+    )
+
+    loaded.validate_telegram_config()
 
 
 def test_config_rejects_invalid_authorized_sender_ids(

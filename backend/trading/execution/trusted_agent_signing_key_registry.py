@@ -134,11 +134,9 @@ class TrustedAgentSigningKeyRegistry:
                 "signing_secret must be str."
             )
 
-        normalized = signing_secret.strip()
-
-        if not normalized:
+        if signing_secret == "":
             raise ValueError(
                 "signing_secret is required."
             )
 
-        return normalized
+        return signing_secret

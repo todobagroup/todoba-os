@@ -69,27 +69,41 @@ def test_main_composes_separate_signing_key_domains() -> None:
         is not main.control_signing_key_registry
     )
 
-    for deployment in main.trusted_agent_deployments:
-        agent_id = deployment[
-            "agent_id"
-        ]
+    deployments = (
+        main.customer_deployment_registry.all()
+    )
+
+    assert deployments
+
+    for deployment in deployments:
+        secrets = (
+            main.customer_deployment_secret_store.get(
+                deployment_id=(
+                    deployment.deployment_id
+                )
+            )
+        )
+
+        assert secrets is not None
 
         assert (
             main.execution_signing_key_registry.get_secret(
-                agent_id=agent_id
+                agent_id=deployment.agent_id
             )
-            == deployment[
-                "execution_mission_signing_secret"
-            ]
+            == (
+                secrets
+                .execution_mission_signing_secret
+            )
         )
 
         assert (
             main.control_signing_key_registry.get_secret(
-                agent_id=agent_id
+                agent_id=deployment.agent_id
             )
-            == deployment[
-                "control_mission_signing_secret"
-            ]
+            == (
+                secrets
+                .control_mission_signing_secret
+            )
         )
 
 

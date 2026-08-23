@@ -131,11 +131,9 @@ class TrustedAgentCredentialRegistry:
                 "agent_secret must be str."
             )
 
-        normalized = agent_secret.strip()
-
-        if not normalized:
+        if agent_secret == "":
             raise ValueError(
                 "agent_secret is required."
             )
 
-        return normalized
+        return agent_secret

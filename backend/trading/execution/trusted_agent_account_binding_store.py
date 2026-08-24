@@ -104,6 +104,7 @@ class TrustedAgentAccountBindingStore:
         - first binding is accepted
         - identical retry is idempotent
         - same Agent with a different account is rejected
+        - same MT5 account cannot belong to two Agents
         - durable state is written before RAM advances
         """
 
@@ -137,6 +138,20 @@ class TrustedAgentAccountBindingStore:
                 )
 
             return existing
+
+        existing_account_owner = (
+            self.get_agent_id_for_account(
+                account_fingerprint=(
+                    normalized_account_fingerprint
+                )
+            )
+        )
+
+        if existing_account_owner is not None:
+            raise ValueError(
+                "MT5 account is already bound to a "
+                "different Trusted Agent."
+            )
 
         candidate = dict(
             self._bindings
@@ -175,6 +190,38 @@ class TrustedAgentAccountBindingStore:
         return self._bindings.get(
             normalized_agent_id
         )
+
+    def get_agent_id_for_account(
+        self,
+        *,
+        account_fingerprint: str,
+    ) -> str | None:
+        """
+        Return the authoritative Trusted Agent owner
+        for one MT5 account fingerprint.
+
+        Returns None when the account is not bound.
+        """
+
+        self._require_ready()
+
+        normalized_account_fingerprint = (
+            self._normalize_account_fingerprint(
+                account_fingerprint
+            )
+        )
+
+        for (
+            agent_id,
+            bound_account_fingerprint,
+        ) in self._bindings.items():
+            if (
+                bound_account_fingerprint
+                == normalized_account_fingerprint
+            ):
+                return agent_id
+
+        return None
 
     def owns_account(
         self,
@@ -322,6 +369,10 @@ class TrustedAgentAccountBindingStore:
             str,
         ] = {}
 
+        seen_account_fingerprints: set[
+            str
+        ] = set()
+
         for item in items:
             if not isinstance(
                 item,
@@ -365,9 +416,22 @@ class TrustedAgentAccountBindingStore:
                     "account binding."
                 )
 
+            if (
+                account_fingerprint
+                in seen_account_fingerprints
+            ):
+                raise ValueError(
+                    "MT5 account is bound to multiple "
+                    "Trusted Agents."
+                )
+
             restored[
                 agent_id
             ] = account_fingerprint
+
+            seen_account_fingerprints.add(
+                account_fingerprint
+            )
 
         self._bindings = restored
         self._ready = True

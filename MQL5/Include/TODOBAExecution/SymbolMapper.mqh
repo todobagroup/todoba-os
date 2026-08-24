@@ -5,30 +5,107 @@
 class TODOBA_SymbolMapper
 {
 
+private:
+
+   static bool IsBrokerSymbolAvailable(
+      const string symbol
+   )
+   {
+      if(
+         StringLen(
+            symbol
+         ) == 0
+      )
+      {
+         return false;
+      }
+
+      bool is_custom = false;
+
+      if(
+         !SymbolExist(
+            symbol,
+            is_custom
+         )
+      )
+      {
+         return false;
+      }
+
+      if(is_custom)
+         return false;
+
+      return true;
+   }
+
+
+   static string ResolveGold()
+   {
+      if(
+         IsBrokerSymbolAvailable(
+            "GOLD.i#"
+         )
+      )
+      {
+         return "GOLD.i#";
+      }
+
+      if(
+         IsBrokerSymbolAvailable(
+            "GOLD"
+         )
+      )
+      {
+         return "GOLD";
+      }
+
+      if(
+         IsBrokerSymbolAvailable(
+            "XAUUSD"
+         )
+      )
+      {
+         return "XAUUSD";
+      }
+
+      return "";
+   }
+
+
 public:
 
    static string Resolve(
       string symbol
    )
    {
+      if(
+         StringLen(
+            symbol
+         ) == 0
+      )
+      {
+         return "";
+      }
 
       if(
          symbol == "XAUUSD"
-      )
-      {
-         return "GOLD.i#";
-      }
-
-
-      if(
+         ||
          symbol == "GOLD"
       )
       {
-         return "GOLD.i#";
+         return ResolveGold();
       }
 
+      if(
+         IsBrokerSymbolAvailable(
+            symbol
+         )
+      )
+      {
+         return symbol;
+      }
 
-      return symbol;
+      return "";
    }
 
 };

@@ -215,6 +215,102 @@ class CustomerDeploymentRuntimeProjection:
             execution_target_registry
         )
 
+    def validate_candidate_runtime_compatibility(
+        self,
+        *,
+        deployment_id: str,
+        agent_id: str,
+        account_fingerprint: str,
+        secrets: CustomerDeploymentSecrets,
+    ) -> None:
+        """
+        Validate one not-yet-committed commercial
+        deployment against the current runtime.
+
+        This method is read-only. It exists so enrollment
+        can detect runtime credential, signing-key, and
+        execution-target conflicts before durable
+        activation begins.
+        """
+
+        if not isinstance(
+            secrets,
+            CustomerDeploymentSecrets,
+        ):
+            raise TypeError(
+                "secrets must be "
+                "CustomerDeploymentSecrets."
+            )
+
+        normalized_values: dict[str, str] = {}
+
+        for name, value in (
+            (
+                "deployment_id",
+                deployment_id,
+            ),
+            (
+                "agent_id",
+                agent_id,
+            ),
+            (
+                "account_fingerprint",
+                account_fingerprint,
+            ),
+        ):
+            if not isinstance(
+                value,
+                str,
+            ):
+                raise TypeError(
+                    f"{name} must be str."
+                )
+
+            normalized = value.strip()
+
+            if not normalized:
+                raise ValueError(
+                    f"{name} is required."
+                )
+
+            normalized_values[name] = (
+                normalized
+            )
+
+        if (
+            secrets.deployment_id
+            != normalized_values[
+                "deployment_id"
+            ]
+        ):
+            raise ValueError(
+                "Customer deployment secret identity "
+                "does not match runtime candidate."
+            )
+
+        candidate = _PreparedDeploymentProjection(
+            deployment_id=(
+                normalized_values[
+                    "deployment_id"
+                ]
+            ),
+            agent_id=(
+                normalized_values[
+                    "agent_id"
+                ]
+            ),
+            account_fingerprint=(
+                normalized_values[
+                    "account_fingerprint"
+                ]
+            ),
+            secrets=secrets,
+        )
+
+        self._validate_runtime_conflicts(
+            candidate
+        )
+
     def project(
         self,
     ) -> int:

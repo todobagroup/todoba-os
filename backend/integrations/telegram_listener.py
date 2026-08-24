@@ -67,7 +67,20 @@ from backend.integrations.telegram_task_producer import (
 from backend.integrations.telegram_trading_pipeline import (
     TelegramTradingPipeline,
 )
+from backend.trading.control.control_action import (
+    ControlAction,
+)
+from backend.trading.control.control_command_parser import (
+    parse_control_command,
+)
+from backend.trading.control.control_mission import (
+    ControlMission,
+)
+from backend.trading.control.remote_control_mission_http_client import (
+    RemoteControlMissionHttpClient,
+)
 from backend.trading.execution.execution_planner import (
+    TODOBA_MAGIC_NUMBER,
     create_plan,
 )
 
@@ -120,6 +133,7 @@ remote_profile = None
 remote_task_producer = None
 remote_mission_adapter = None
 remote_http_client = None
+remote_control_http_client = None
 remote_execution_target_registry = None
 remote_dispatch_progress_store = None
 remote_dispatch_recovery = None
@@ -188,6 +202,14 @@ else:
 
     remote_http_client = (
         RemoteExecutionMissionHttpClient(
+            cloud_base_url=TODOBA_CLOUD_BASE_URL,
+            executor_id=TODOBA_EXECUTOR_ID,
+            executor_secret=TODOBA_EXECUTOR_SECRET,
+        )
+    )
+
+    remote_control_http_client = (
+        RemoteControlMissionHttpClient(
             cloud_base_url=TODOBA_CLOUD_BASE_URL,
             executor_id=TODOBA_EXECUTOR_ID,
             executor_secret=TODOBA_EXECUTOR_SECRET,
@@ -929,6 +951,297 @@ def process_remote_vps_signal(
     )
 
 
+def process_remote_vps_control(
+    incoming_signal: IncomingSignal,
+    action: ControlAction,
+) -> dict:
+    """
+    Fan one authorized Telegram Quick Control command
+    out to the currently eligible commercial execution
+    target fleet.
+
+    Destructive control transport is intentionally not
+    automatically retried after an ambiguous HTTP failure.
+    A new operator command is required for another attempt.
+    """
+
+    if not isinstance(
+        incoming_signal,
+        IncomingSignal,
+    ):
+        raise TypeError(
+            "process_remote_vps_control requires "
+            "IncomingSignal."
+        )
+
+    if not isinstance(
+        action,
+        ControlAction,
+    ):
+        raise TypeError(
+            "process_remote_vps_control requires "
+            "ControlAction."
+        )
+
+    if not telegram_sender_authorizer.is_authorized(
+        incoming_signal.sender_id
+    ):
+        return {
+            "status": "unauthorized_sender",
+            "sender_id": incoming_signal.sender_id,
+        }
+
+    source_key = incoming_signal.source_key()
+
+    if source_key is None:
+        raise ValueError(
+            "REMOTE_VPS control requires "
+            "chat_id and message_id."
+        )
+
+    if source_key in processed_message_keys:
+        return {
+            "status": "duplicate",
+            "source_key": source_key,
+        }
+
+    if (
+        remote_profile is None
+        or remote_control_http_client is None
+        or remote_execution_target_registry is None
+    ):
+        raise RuntimeError(
+            "REMOTE_VPS control composition "
+            "is not available."
+        )
+
+    chat_id, message_id = source_key
+
+    if message_id <= 0:
+        raise ValueError(
+            "Telegram message_id must be positive."
+        )
+
+    sender_id = incoming_signal.sender_id
+
+    if (
+        not isinstance(
+            sender_id,
+            int,
+        )
+        or isinstance(
+            sender_id,
+            bool,
+        )
+        or sender_id <= 0
+    ):
+        return {
+            "status": "unauthorized_sender",
+            "sender_id": sender_id,
+        }
+
+    if not remote_profile.allowed_symbols:
+        raise RuntimeError(
+            "REMOTE_VPS control symbol "
+            "is not configured."
+        )
+
+    control_symbol = (
+        remote_profile.allowed_symbols[0]
+    )
+
+    refresh_remote_execution_targets()
+
+    targets = (
+        remote_execution_target_registry.all()
+    )
+
+    if not targets:
+        raise RuntimeError(
+            "REMOTE_VPS execution target registry "
+            "is empty."
+        )
+
+    created_at = datetime.now(
+        UTC
+    )
+
+    expires_at = (
+        created_at
+        + timedelta(minutes=2)
+    )
+
+    target_results: list[dict] = []
+
+    for target in targets:
+        try:
+            broker_state = (
+                remote_control_http_client
+                .read_latest_broker_state(
+                    agent_id=target.agent_id
+                )
+            )
+        except Exception as error:
+            target_results.append(
+                {
+                    "agent_id": target.agent_id,
+                    "status": "transport_failed",
+                    "operation": (
+                        "read_broker_state"
+                    ),
+                    "reason": str(error),
+                }
+            )
+            continue
+
+        rejection_reason = (
+            _broker_state_rejection_reason(
+                broker_state
+            )
+        )
+
+        if rejection_reason is not None:
+            target_results.append(
+                {
+                    "agent_id": target.agent_id,
+                    "status": (
+                        "broker_state_rejected"
+                    ),
+                    "reason": rejection_reason,
+                    "broker_state": broker_state,
+                }
+            )
+            continue
+
+        if (
+            str(
+                broker_state.get(
+                    "agent_id",
+                    "",
+                )
+            ).strip()
+            != target.agent_id
+        ):
+            target_results.append(
+                {
+                    "agent_id": target.agent_id,
+                    "status": (
+                        "broker_state_rejected"
+                    ),
+                    "reason": (
+                        "Broker state Agent does not "
+                        "match execution target."
+                    ),
+                    "broker_state": broker_state,
+                }
+            )
+            continue
+
+        if (
+            str(
+                broker_state.get(
+                    "account_fingerprint",
+                    "",
+                )
+            ).strip()
+            != target.account_fingerprint
+        ):
+            target_results.append(
+                {
+                    "agent_id": target.agent_id,
+                    "status": (
+                        "broker_state_rejected"
+                    ),
+                    "reason": (
+                        "Broker state account_fingerprint "
+                        "does not match execution target."
+                    ),
+                    "broker_state": broker_state,
+                }
+            )
+            continue
+
+        mission = ControlMission(
+            mission_id=(
+                f"telegram-control-{abs(chat_id)}-"
+                f"{message_id}-"
+                f"{target.agent_id}"
+            ),
+            agent_id=target.agent_id,
+            account_fingerprint=(
+                target.account_fingerprint
+            ),
+            action=action,
+            symbol=control_symbol,
+            magic_number=TODOBA_MAGIC_NUMBER,
+            requested_by_sender_id=sender_id,
+            created_at=_to_utc_iso8601(
+                created_at
+            ),
+            expires_at=_to_utc_iso8601(
+                expires_at
+            ),
+            sequence=message_id,
+        )
+
+        try:
+            cloud_response = (
+                remote_control_http_client.send(
+                    mission
+                )
+            )
+        except Exception as error:
+            target_results.append(
+                {
+                    "agent_id": target.agent_id,
+                    "status": "transport_failed",
+                    "operation": (
+                        "send_control_mission"
+                    ),
+                    "reason": str(error),
+                    "mission": mission,
+                }
+            )
+            continue
+
+        target_results.append(
+            {
+                "agent_id": target.agent_id,
+                "status": "submitted",
+                "broker_state": broker_state,
+                "mission": mission,
+                "cloud_response": cloud_response,
+            }
+        )
+
+    submitted_count = sum(
+        1
+        for result in target_results
+        if result["status"] == "submitted"
+    )
+
+    if submitted_count == len(
+        target_results
+    ):
+        overall_status = "submitted"
+    elif submitted_count > 0:
+        overall_status = (
+            "partially_submitted"
+        )
+    else:
+        overall_status = "rejected"
+
+    processed_message_keys.add(
+        source_key
+    )
+
+    return {
+        "status": overall_status,
+        "action": action.value,
+        "target_results": target_results,
+    }
+
+
 def read_demo_decision_context() -> dict:
     mt5.symbol_select(
         MT5_BROKER_GOLD_SYMBOL,
@@ -1042,6 +1355,40 @@ async def register_handlers() -> None:
                         "sender_id": (
                             incoming_signal.sender_id
                         ),
+                    },
+                )
+
+                return
+
+            control_action = parse_control_command(
+                incoming_signal.message
+            )
+
+            if control_action is not None:
+                if (
+                    TELEGRAM_EXECUTION_MODE
+                    != "REMOTE_VPS"
+                ):
+                    raise RuntimeError(
+                        "Telegram Quick Control requires "
+                        "REMOTE_VPS mode."
+                    )
+
+                result = (
+                    process_remote_vps_control(
+                        incoming_signal,
+                        control_action,
+                    )
+                )
+
+                print_result(
+                    "TODOBA TELEGRAM QUICK CONTROL",
+                    {
+                        "mode": "REMOTE_VPS",
+                        "action": (
+                            control_action.value
+                        ),
+                        "result": result,
                     },
                 )
 

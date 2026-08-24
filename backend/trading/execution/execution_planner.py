@@ -11,6 +11,9 @@ from backend.trading.models.signal import Signal
 from backend.trading.profile.trading_profile import TradingProfile
 
 
+TODOBA_MAGIC_NUMBER = 10001
+
+
 def create_plan(
     signal: Signal,
     profile: TradingProfile,
@@ -42,6 +45,6 @@ def create_plan(
         sl=signal.sl,
         tp=signal.tp,
         lot=lot,
-        magic_number=10001,
+        magic_number=TODOBA_MAGIC_NUMBER,
         comment="TODOBA",
     )

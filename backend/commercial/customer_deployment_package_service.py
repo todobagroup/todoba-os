@@ -48,6 +48,10 @@ import uuid
 from backend.commercial.customer_deployment_bootstrap_service import (
     CustomerDeploymentBootstrapResult,
 )
+from backend.commercial.customer_deployment_package_publication import (
+    CUSTOMER_DEPLOYMENT_PACKAGE_ARTIFACT_NAME,
+    CustomerDeploymentPackagePublication,
+)
 from backend.commercial.customer_deployment_registry import (
     CustomerDeployment,
 )
@@ -62,7 +66,9 @@ from scripts.provision_trusted_agent_deployment import (
 )
 
 
-_ARTIFACT_NAME = "TODOBA_Trusted_Agent.ex5"
+_ARTIFACT_NAME = (
+    CUSTOMER_DEPLOYMENT_PACKAGE_ARTIFACT_NAME
+)
 _PUBLISH_STAGING_DIRECTORY = ".staging"
 
 
@@ -251,6 +257,12 @@ class CustomerDeploymentPackageService:
             package_root.resolve()
         )
 
+        self._publication = (
+            CustomerDeploymentPackagePublication(
+                package_root=self._package_root
+            )
+        )
+
         self._compiler_runner = (
             compiler_runner
         )
@@ -294,7 +306,7 @@ class CustomerDeploymentPackageService:
 
         with self._lock:
             package_directory = (
-                self._package_directory(
+                self._publication.package_directory(
                     deployment_id=(
                         deployment.deployment_id
                     )
@@ -309,8 +321,10 @@ class CustomerDeploymentPackageService:
             # Validate any existing customer package before
             # creating build/workspace state. An unsafe
             # package must fail with zero build side-effect.
-            self._validate_existing_package_directory(
-                package_directory
+            self._publication.validate_existing_package_directory(
+                deployment_id=(
+                    deployment.deployment_id
+                )
             )
 
             self._workspace_root.mkdir(
@@ -489,7 +503,7 @@ class CustomerDeploymentPackageService:
                 publish_temp_path = (
                     staging_root
                     / (
-                        f"{self._deployment_key(deployment.deployment_id)}"
+                        f"{package_directory.name}"
                         f"-{uuid.uuid4().hex}.tmp"
                     )
                 )
@@ -534,8 +548,10 @@ class CustomerDeploymentPackageService:
                     exist_ok=True,
                 )
 
-                self._validate_existing_package_directory(
-                    package_directory
+                self._publication.validate_existing_package_directory(
+                    deployment_id=(
+                        deployment.deployment_id
+                    )
                 )
 
                 os.replace(
@@ -573,8 +589,10 @@ class CustomerDeploymentPackageService:
                         "verification failed."
                     )
 
-                self._require_ex5_only_package(
-                    package_directory
+                self._publication.require_ex5_only_package(
+                    deployment_id=(
+                        deployment.deployment_id
+                    )
                 )
 
                 return CustomerDeploymentPackageResult(
@@ -617,7 +635,8 @@ class CustomerDeploymentPackageService:
         """
         Return metadata for an already published package.
 
-        No secret store or compiler access occurs.
+        Filesystem publication truth is delegated to the
+        shared runtime-safe publication owner.
         """
 
         normalized_deployment_id = (
@@ -634,55 +653,33 @@ class CustomerDeploymentPackageService:
             )
         )
 
-        package_directory = (
-            self._package_directory(
+        published = (
+            self._publication
+            .get_published_package(
                 deployment_id=(
                     normalized_deployment_id
                 )
             )
         )
 
-        if not package_directory.exists():
+        if published is None:
             return None
-
-        self._validate_existing_package_directory(
-            package_directory
-        )
-
-        artifact_path = (
-            package_directory
-            / _ARTIFACT_NAME
-        )
-
-        if not artifact_path.is_file():
-            return None
-
-        if artifact_path.stat().st_size <= 0:
-            raise RuntimeError(
-                "Published customer EX5 is empty."
-            )
-
-        self._require_ex5_only_package(
-            package_directory
-        )
 
         return CustomerDeploymentPackageResult(
             deployment_id=(
-                normalized_deployment_id
+                published.deployment_id
             ),
             agent_id=(
                 normalized_agent_id
             ),
             artifact_path=(
-                artifact_path
+                published.artifact_path
             ),
             artifact_sha256=(
-                self._sha256(
-                    artifact_path
-                )
+                published.artifact_sha256
             ),
             artifact_size_bytes=(
-                artifact_path.stat().st_size
+                published.artifact_size_bytes
             ),
         )
 
@@ -886,90 +883,6 @@ class CustomerDeploymentPackageService:
                 "Secure build artifact directory "
                 "contains unexpected files."
             )
-
-    def _validate_existing_package_directory(
-        self,
-        package_directory: Path,
-    ) -> None:
-        if not package_directory.exists():
-            return
-
-        if not package_directory.is_dir():
-            raise RuntimeError(
-                "Customer package path is not "
-                "a directory."
-            )
-
-        allowed_name = (
-            _ARTIFACT_NAME
-        )
-
-        for item in package_directory.iterdir():
-            if (
-                not item.is_file()
-                or item.name != allowed_name
-            ):
-                raise RuntimeError(
-                    "Customer package contains "
-                    "unexpected material."
-                )
-
-    def _require_ex5_only_package(
-        self,
-        package_directory: Path,
-    ) -> None:
-        items = tuple(
-            package_directory.iterdir()
-        )
-
-        if len(items) != 1:
-            raise RuntimeError(
-                "Customer package must contain "
-                "exactly one artifact."
-            )
-
-        artifact = items[0]
-
-        if (
-            not artifact.is_file()
-            or artifact.name != _ARTIFACT_NAME
-        ):
-            raise RuntimeError(
-                "Customer package must contain only "
-                "TODOBA_Trusted_Agent.ex5."
-            )
-
-    def _package_directory(
-        self,
-        *,
-        deployment_id: str,
-    ) -> Path:
-        normalized_deployment_id = (
-            self._normalize_required_string(
-                deployment_id,
-                name="deployment_id",
-            )
-        )
-
-        return (
-            self._package_root
-            / self._deployment_key(
-                normalized_deployment_id
-            )
-        )
-
-    @staticmethod
-    def _deployment_key(
-        deployment_id: str,
-    ) -> str:
-        return (
-            "customer-deployment-"
-            + hashlib.sha256(
-                deployment_id.encode(
-                    "utf-8"
-                )
-            ).hexdigest()
-        )
 
     @staticmethod
     def _sha256(

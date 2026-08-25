@@ -40,6 +40,10 @@ _TEST_ENVIRONMENT = {
     "TODOBA_CONTROL_PLANE_DATA_ROOT": str(
         _TEST_CONTROL_PLANE_DATA_ROOT
     ),
+    "TODOBA_CUSTOMER_PACKAGE_ROOT": str(
+        _TEST_CONTROL_PLANE_DATA_ROOT
+        / "customer-packages"
+    ),
     "TODOBA_CUSTOMER_DEPLOYMENT_MASTER_KEY": (
         _TEST_CUSTOMER_DEPLOYMENT_MASTER_KEY
     ),
@@ -73,9 +77,19 @@ for environment_name, environment_value in (
 
 import pytest
 
+from backend.commercial.customer_access_credential_registry import (
+    CustomerAccessCredentialRegistry,
+)
+from backend.commercial.customer_deployment_entitlement_registry import (
+    CustomerDeploymentEntitlementRegistry,
+)
 from backend.commercial.customer_deployment_registry import (
     CustomerDeployment,
     CustomerDeploymentRegistry,
+)
+from backend.commercial.customer_identity_registry import (
+    CustomerIdentity,
+    CustomerIdentityRegistry,
 )
 from backend.commercial.customer_deployment_secret_store import (
     CustomerDeploymentSecrets,
@@ -107,6 +121,48 @@ def _initialize_test_control_plane() -> None:
             agent_id="trusted-agent-001",
         )
     )
+
+    customer_identity_registry = (
+        CustomerIdentityRegistry(
+            _TEST_CONTROL_PLANE_DATA_ROOT
+            / "commercial"
+            / "customer_identities.json"
+        )
+    )
+
+    customer_identity_registry.initialize_empty()
+
+    customer_identity_registry.register(
+        CustomerIdentity(
+            customer_id="test-customer-001"
+        )
+    )
+
+    customer_access_credential_registry = (
+        CustomerAccessCredentialRegistry(
+            _TEST_CONTROL_PLANE_DATA_ROOT
+            / "commercial"
+            / "customer_access_credentials.json",
+            customer_identity_registry=(
+                customer_identity_registry
+            ),
+        )
+    )
+
+    customer_access_credential_registry.initialize_empty()
+
+    customer_deployment_entitlement_registry = (
+        CustomerDeploymentEntitlementRegistry(
+            _TEST_CONTROL_PLANE_DATA_ROOT
+            / "commercial"
+            / "customer_deployment_entitlements.json",
+            deployment_registry=(
+                deployment_registry
+            ),
+        )
+    )
+
+    customer_deployment_entitlement_registry.initialize_empty()
 
     secret_store = (
         CustomerDeploymentSecretStore(

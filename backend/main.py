@@ -17,9 +17,37 @@ from backend.config import (
     TODOBA_EXECUTOR_ID,
     TODOBA_EXECUTOR_SECRET,
     TODOBA_RUNTIME_MODE,
+    get_customer_package_root,
+)
+from backend.commercial.customer_access_credential_registry import (
+    CustomerAccessCredentialRegistry,
+)
+from backend.commercial.customer_authentication_dependency import (
+    create_customer_authentication_dependency,
+)
+from backend.commercial.customer_authenticator import (
+    CustomerAuthenticator,
+)
+from backend.commercial.customer_deployment_authorizer import (
+    CustomerDeploymentAuthorizer,
+)
+from backend.commercial.customer_deployment_entitlement_authorizer import (
+    CustomerDeploymentEntitlementAuthorizer,
+)
+from backend.commercial.customer_deployment_entitlement_registry import (
+    CustomerDeploymentEntitlementRegistry,
+)
+from backend.commercial.customer_deployment_package_api import (
+    create_customer_deployment_package_router,
+)
+from backend.commercial.customer_deployment_package_publication import (
+    CustomerDeploymentPackagePublication,
 )
 from backend.commercial.customer_deployment_registry import (
     CustomerDeploymentRegistry,
+)
+from backend.commercial.customer_identity_registry import (
+    CustomerIdentityRegistry,
 )
 from backend.commercial.customer_deployment_runtime_projection import (
     CustomerDeploymentRuntimeProjection,
@@ -349,6 +377,24 @@ CUSTOMER_DEPLOYMENT_SECRET_STORAGE_PATH = (
     / "customer_deployment_secrets.json"
 )
 
+CUSTOMER_IDENTITY_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_identities.json"
+)
+
+CUSTOMER_ACCESS_CREDENTIAL_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_access_credentials.json"
+)
+
+CUSTOMER_DEPLOYMENT_ENTITLEMENT_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_deployment_entitlements.json"
+)
+
 TRUSTED_AGENT_ACCOUNT_BINDING_STORAGE_PATH = (
     TODOBA_CONTROL_PLANE_DATA_ROOT
     / "trading"
@@ -418,6 +464,68 @@ customer_deployment_secret_store = (
                 TODOBA_CUSTOMER_DEPLOYMENT_MASTER_KEY
             )
         ),
+    )
+)
+
+customer_identity_registry = (
+    CustomerIdentityRegistry(
+        CUSTOMER_IDENTITY_STORAGE_PATH
+    )
+)
+
+customer_access_credential_registry = (
+    CustomerAccessCredentialRegistry(
+        CUSTOMER_ACCESS_CREDENTIAL_STORAGE_PATH,
+        customer_identity_registry=(
+            customer_identity_registry
+        ),
+    )
+)
+
+customer_authenticator = (
+    CustomerAuthenticator(
+        credential_registry=(
+            customer_access_credential_registry
+        )
+    )
+)
+
+customer_authentication_dependency = (
+    create_customer_authentication_dependency(
+        customer_authenticator
+    )
+)
+
+customer_deployment_authorizer = (
+    CustomerDeploymentAuthorizer(
+        deployment_registry=(
+            customer_deployment_registry
+        )
+    )
+)
+
+customer_deployment_entitlement_registry = (
+    CustomerDeploymentEntitlementRegistry(
+        CUSTOMER_DEPLOYMENT_ENTITLEMENT_STORAGE_PATH,
+        deployment_registry=(
+            customer_deployment_registry
+        ),
+    )
+)
+
+customer_deployment_entitlement_authorizer = (
+    CustomerDeploymentEntitlementAuthorizer(
+        entitlement_registry=(
+            customer_deployment_entitlement_registry
+        )
+    )
+)
+
+customer_deployment_package_publication = (
+    CustomerDeploymentPackagePublication(
+        package_root=(
+            get_customer_package_root()
+        )
     )
 )
 
@@ -1263,6 +1371,23 @@ app.include_router(
     create_control_mission_lifecycle_router(
         control_mission_lifecycle_service,
         trusted_agent_authenticator,
+    )
+)
+
+app.include_router(
+    create_customer_deployment_package_router(
+        customer_authentication_dependency=(
+            customer_authentication_dependency
+        ),
+        deployment_authorizer=(
+            customer_deployment_authorizer
+        ),
+        entitlement_authorizer=(
+            customer_deployment_entitlement_authorizer
+        ),
+        package_publication=(
+            customer_deployment_package_publication
+        ),
     )
 )
 

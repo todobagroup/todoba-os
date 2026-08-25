@@ -43,7 +43,8 @@ from backend.commercial.customer_identity_registry import (
 )
 
 
-STORE_VERSION = 1
+_LEGACY_STORE_VERSION = 1
+STORE_VERSION = 2
 
 CUSTOMER_ACCESS_CREDENTIAL_PREFIX = "tdbca1"
 
@@ -78,6 +79,7 @@ class CustomerAccessCredentialRecord:
     customer_id: str
     verifier_sha256: str
     status: CustomerAccessCredentialStatus
+    issuance_request_id: str | None = None
 
     def __post_init__(
         self,
@@ -130,6 +132,16 @@ class CustomerAccessCredentialRecord:
                 self,
                 "status",
                 normalized_status,
+            )
+
+        if self.issuance_request_id is not None:
+            object.__setattr__(
+                self,
+                "issuance_request_id",
+                self._normalize_required_string(
+                    self.issuance_request_id,
+                    name="issuance_request_id",
+                ),
             )
 
     @staticmethod
@@ -367,6 +379,11 @@ class CustomerAccessCredentialRegistry:
             str,
         ] = {}
 
+        self._credential_id_by_issuance_request_id: dict[
+            str,
+            str,
+        ] = {}
+
         self._ready = False
         self._lock = threading.RLock()
 
@@ -390,6 +407,7 @@ class CustomerAccessCredentialRegistry:
 
             self._records = {}
             self._credential_id_by_verifier = {}
+            self._credential_id_by_issuance_request_id = {}
             self._ready = True
 
     def is_ready(
@@ -521,6 +539,218 @@ class CustomerAccessCredentialRegistry:
                 "access credential."
             )
 
+
+    def issue_for_request(
+        self,
+        *,
+        customer_id: str,
+        issuance_request_id: str,
+    ) -> IssuedCustomerAccessCredential:
+        """
+        Issue or safely rotate one credential correlated to
+        a durable non-secret issuance request identity.
+
+        First call:
+        - creates one credential_id
+        - persists request correlation with its verifier
+        - returns plaintext only after durable persistence
+
+        Retry:
+        - resolves the same credential_id
+        - generates a fresh plaintext secret
+        - atomically replaces the durable verifier
+        - invalidates any prior plaintext secret
+        - never creates a second ACTIVE credential for the
+          same issuance request
+
+        A request already explicitly REVOKED cannot be
+        reactivated through retry.
+
+        Cross-customer request reuse fails closed.
+        """
+
+        normalized_customer_id = (
+            self._normalize_required_string(
+                customer_id,
+                name="customer_id",
+            )
+        )
+
+        normalized_request_id = (
+            self._normalize_required_string(
+                issuance_request_id,
+                name="issuance_request_id",
+            )
+        )
+
+        with self._lock:
+            self._require_ready()
+
+            if not self.customer_identity_registry.contains(
+                customer_id=normalized_customer_id
+            ):
+                raise ValueError(
+                    "Unknown customer identity."
+                )
+
+            existing_credential_id = (
+                self._credential_id_by_issuance_request_id
+                .get(
+                    normalized_request_id
+                )
+            )
+
+            existing_record = None
+
+            if existing_credential_id is not None:
+                existing_record = (
+                    self._records.get(
+                        existing_credential_id
+                    )
+                )
+
+                if existing_record is None:
+                    raise RuntimeError(
+                        "Customer access credential "
+                        "issuance request index is corrupt."
+                    )
+
+                if (
+                    existing_record.customer_id
+                    != normalized_customer_id
+                ):
+                    raise ValueError(
+                        "Customer access credential "
+                        "issuance request belongs to "
+                        "another customer."
+                    )
+
+                if (
+                    existing_record.status
+                    is CustomerAccessCredentialStatus
+                    .REVOKED
+                ):
+                    raise ValueError(
+                        "Customer access credential "
+                        "issuance request is revoked."
+                    )
+
+            for _ in range(
+                _MAX_GENERATION_ATTEMPTS
+            ):
+                if existing_record is None:
+                    credential_id = (
+                        secrets.token_hex(
+                            16
+                        )
+                    )
+
+                    if (
+                        credential_id
+                        in self._records
+                    ):
+                        continue
+                else:
+                    credential_id = (
+                        existing_record.credential_id
+                    )
+
+                secret = secrets.token_urlsafe(
+                    32
+                )
+
+                access_credential = (
+                    f"{CUSTOMER_ACCESS_CREDENTIAL_PREFIX}"
+                    f".{credential_id}"
+                    f".{secret}"
+                )
+
+                verifier = (
+                    derive_customer_access_credential_verifier(
+                        access_credential
+                    )
+                )
+
+                if (
+                    verifier
+                    in self._credential_id_by_verifier
+                ):
+                    continue
+
+                record = (
+                    CustomerAccessCredentialRecord(
+                        credential_id=credential_id,
+                        customer_id=(
+                            normalized_customer_id
+                        ),
+                        verifier_sha256=verifier,
+                        status=(
+                            CustomerAccessCredentialStatus
+                            .ACTIVE
+                        ),
+                        issuance_request_id=(
+                            normalized_request_id
+                        ),
+                    )
+                )
+
+                candidate = dict(
+                    self._records
+                )
+
+                candidate[
+                    credential_id
+                ] = record
+
+                self._write_records(
+                    candidate
+                )
+
+                verifier_index = dict(
+                    self._credential_id_by_verifier
+                )
+
+                if existing_record is not None:
+                    verifier_index.pop(
+                        existing_record.verifier_sha256,
+                        None,
+                    )
+
+                verifier_index[
+                    verifier
+                ] = credential_id
+
+                request_index = dict(
+                    self._credential_id_by_issuance_request_id
+                )
+
+                request_index[
+                    normalized_request_id
+                ] = credential_id
+
+                self._records = candidate
+                self._credential_id_by_verifier = (
+                    verifier_index
+                )
+                self._credential_id_by_issuance_request_id = (
+                    request_index
+                )
+
+                return IssuedCustomerAccessCredential(
+                    credential_id=credential_id,
+                    customer_id=(
+                        normalized_customer_id
+                    ),
+                    access_credential=(
+                        access_credential
+                    ),
+                )
+
+            raise RuntimeError(
+                "Unable to generate unique customer "
+                "access credential."
+            )
+
     def revoke(
         self,
         *,
@@ -574,6 +804,9 @@ class CustomerAccessCredentialRegistry:
                     status=(
                         CustomerAccessCredentialStatus
                         .REVOKED
+                    ),
+                    issuance_request_id=(
+                        existing.issuance_request_id
                     ),
                 )
             )
@@ -731,9 +964,14 @@ class CustomerAccessCredentialRegistry:
                 "has invalid fields."
             )
 
-        if payload.get(
+        version = payload.get(
             "version"
-        ) != STORE_VERSION:
+        )
+
+        if version not in {
+            _LEGACY_STORE_VERSION,
+            STORE_VERSION,
+        }:
             raise ValueError(
                 "Unsupported customer access "
                 "credential registry version."
@@ -762,6 +1000,11 @@ class CustomerAccessCredentialRegistry:
             str,
         ] = {}
 
+        issuance_request_index: dict[
+            str,
+            str,
+        ] = {}
+
         for item in items:
             if not isinstance(
                 item,
@@ -772,14 +1015,32 @@ class CustomerAccessCredentialRegistry:
                     "must be an object."
                 )
 
-            if set(
-                item
-            ) != {
+            base_fields = {
                 "credential_id",
                 "customer_id",
                 "verifier_sha256",
                 "status",
-            }:
+            }
+
+            allowed_fields = {
+                frozenset(
+                    base_fields
+                )
+            }
+
+            if version == STORE_VERSION:
+                allowed_fields.add(
+                    frozenset(
+                        base_fields
+                        | {
+                            "issuance_request_id",
+                        }
+                    )
+                )
+
+            if frozenset(
+                item
+            ) not in allowed_fields:
                 raise ValueError(
                     "Customer access credential item "
                     "has invalid fields."
@@ -799,6 +1060,14 @@ class CustomerAccessCredentialRegistry:
                     status=item[
                         "status"
                     ],
+                    issuance_request_id=(
+                        None
+                        if version
+                        == _LEGACY_STORE_VERSION
+                        else item.get(
+                            "issuance_request_id"
+                        )
+                    ),
                 )
             )
 
@@ -833,6 +1102,17 @@ class CustomerAccessCredentialRegistry:
                     "credential verifier."
                 )
 
+            if (
+                record.issuance_request_id
+                is not None
+                and record.issuance_request_id
+                in issuance_request_index
+            ):
+                raise ValueError(
+                    "Duplicate customer access "
+                    "credential issuance request."
+                )
+
             restored[
                 record.credential_id
             ] = record
@@ -841,9 +1121,20 @@ class CustomerAccessCredentialRegistry:
                 record.verifier_sha256
             ] = record.credential_id
 
+            if (
+                record.issuance_request_id
+                is not None
+            ):
+                issuance_request_index[
+                    record.issuance_request_id
+                ] = record.credential_id
+
         self._records = restored
         self._credential_id_by_verifier = (
             verifier_index
+        )
+        self._credential_id_by_issuance_request_id = (
+            issuance_request_index
         )
         self._ready = True
 
@@ -863,21 +1154,31 @@ class CustomerAccessCredentialRegistry:
                 credential_id
             ]
 
+            item = {
+                "credential_id": (
+                    record.credential_id
+                ),
+                "customer_id": (
+                    record.customer_id
+                ),
+                "verifier_sha256": (
+                    record.verifier_sha256
+                ),
+                "status": (
+                    record.status.value
+                ),
+            }
+
+            if (
+                record.issuance_request_id
+                is not None
+            ):
+                item[
+                    "issuance_request_id"
+                ] = record.issuance_request_id
+
             items.append(
-                {
-                    "credential_id": (
-                        record.credential_id
-                    ),
-                    "customer_id": (
-                        record.customer_id
-                    ),
-                    "verifier_sha256": (
-                        record.verifier_sha256
-                    ),
-                    "status": (
-                        record.status.value
-                    ),
-                }
+                item
             )
 
         payload = {

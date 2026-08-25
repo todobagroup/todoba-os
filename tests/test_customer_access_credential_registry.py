@@ -1026,3 +1026,436 @@ def test_malformed_persistence_fails_closed(
             path,
             customer_identity_registry=identities,
         )
+
+
+def test_request_correlated_issuance_persists_non_secret_request_identity(
+    tmp_path: Path,
+) -> None:
+    registry, _ = build_credential_registry(
+        tmp_path,
+        "customer-001",
+    )
+
+    path = credential_storage_path(
+        tmp_path
+    )
+
+    issued = registry.issue_for_request(
+        customer_id="customer-001",
+        issuance_request_id="access-request-001",
+    )
+
+    persisted = path.read_text(
+        encoding="utf-8"
+    )
+
+    assert issued.access_credential not in persisted
+
+    secret_component = (
+        issued.access_credential
+        .rsplit(
+            ".",
+            1,
+        )[-1]
+    )
+
+    assert secret_component not in persisted
+
+    payload = json.loads(
+        persisted
+    )
+
+    assert (
+        payload["version"]
+        == credential_module.STORE_VERSION
+    )
+
+    item = payload[
+        "credentials"
+    ][0]
+
+    assert (
+        item["issuance_request_id"]
+        == "access-request-001"
+    )
+
+    assert (
+        item["credential_id"]
+        == issued.credential_id
+    )
+
+
+def test_request_correlated_retry_reuses_credential_id_and_rotates_secret(
+    tmp_path: Path,
+) -> None:
+    registry, _ = build_credential_registry(
+        tmp_path,
+        "customer-001",
+    )
+
+    first = registry.issue_for_request(
+        customer_id="customer-001",
+        issuance_request_id="access-request-001",
+    )
+
+    second = registry.issue_for_request(
+        customer_id="customer-001",
+        issuance_request_id="access-request-001",
+    )
+
+    assert (
+        second.credential_id
+        == first.credential_id
+    )
+
+    assert (
+        second.access_credential
+        != first.access_credential
+    )
+
+    assert registry.size() == 1
+
+    record = registry.get(
+        credential_id=second.credential_id
+    )
+
+    assert record is not None
+
+    assert (
+        record.verifier_sha256
+        == verifier_for(
+            second.access_credential
+        )
+    )
+
+    assert (
+        record.verifier_sha256
+        != verifier_for(
+            first.access_credential
+        )
+    )
+
+    assert (
+        record.issuance_request_id
+        == "access-request-001"
+    )
+
+
+def test_request_correlated_retry_survives_restart(
+    tmp_path: Path,
+) -> None:
+    registry, identities = build_credential_registry(
+        tmp_path,
+        "customer-001",
+    )
+
+    first = registry.issue_for_request(
+        customer_id="customer-001",
+        issuance_request_id="access-request-001",
+    )
+
+    restarted = CustomerAccessCredentialRegistry(
+        credential_storage_path(
+            tmp_path
+        ),
+        customer_identity_registry=(
+            identities
+        ),
+    )
+
+    second = restarted.issue_for_request(
+        customer_id="customer-001",
+        issuance_request_id="access-request-001",
+    )
+
+    assert (
+        second.credential_id
+        == first.credential_id
+    )
+
+    assert (
+        second.access_credential
+        != first.access_credential
+    )
+
+    assert restarted.size() == 1
+
+    record = restarted.get(
+        credential_id=first.credential_id
+    )
+
+    assert record is not None
+
+    assert (
+        record.verifier_sha256
+        == verifier_for(
+            second.access_credential
+        )
+    )
+
+    assert (
+        record.verifier_sha256
+        != verifier_for(
+            first.access_credential
+        )
+    )
+
+
+def test_request_correlated_issuance_rejects_cross_customer_request_reuse(
+    tmp_path: Path,
+) -> None:
+    registry, _ = build_credential_registry(
+        tmp_path,
+        "customer-001",
+        "customer-002",
+    )
+
+    first = registry.issue_for_request(
+        customer_id="customer-001",
+        issuance_request_id="access-request-001",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="belongs to another customer",
+    ):
+        registry.issue_for_request(
+            customer_id="customer-002",
+            issuance_request_id=(
+                "access-request-001"
+            ),
+        )
+
+    assert registry.size() == 1
+
+    record = registry.get(
+        credential_id=first.credential_id
+    )
+
+    assert record is not None
+    assert record.customer_id == "customer-001"
+
+
+def test_revoked_request_correlated_credential_cannot_be_reactivated_by_retry(
+    tmp_path: Path,
+) -> None:
+    registry, _ = build_credential_registry(
+        tmp_path,
+        "customer-001",
+    )
+
+    issued = registry.issue_for_request(
+        customer_id="customer-001",
+        issuance_request_id="access-request-001",
+    )
+
+    registry.revoke(
+        credential_id=issued.credential_id
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="issuance request is revoked",
+    ):
+        registry.issue_for_request(
+            customer_id="customer-001",
+            issuance_request_id=(
+                "access-request-001"
+            ),
+        )
+
+    record = registry.get(
+        credential_id=issued.credential_id
+    )
+
+    assert record is not None
+
+    assert (
+        record.status
+        is CustomerAccessCredentialStatus.REVOKED
+    )
+
+    assert (
+        record.issuance_request_id
+        == "access-request-001"
+    )
+
+    assert registry.size() == 1
+
+
+def test_duplicate_issuance_request_ids_fail_closed_on_restore(
+    tmp_path: Path,
+) -> None:
+    registry, identities = build_credential_registry(
+        tmp_path,
+        "customer-001",
+    )
+
+    registry.issue_for_request(
+        customer_id="customer-001",
+        issuance_request_id="access-request-001",
+    )
+
+    registry.issue_for_request(
+        customer_id="customer-001",
+        issuance_request_id="access-request-002",
+    )
+
+    path = credential_storage_path(
+        tmp_path
+    )
+
+    payload = json.loads(
+        path.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert len(
+        payload["credentials"]
+    ) == 2
+
+    assert {
+        item["issuance_request_id"]
+        for item in payload["credentials"]
+    } == {
+        "access-request-001",
+        "access-request-002",
+    }
+
+    payload[
+        "credentials"
+    ][1][
+        "issuance_request_id"
+    ] = payload[
+        "credentials"
+    ][0][
+        "issuance_request_id"
+    ]
+
+    path.write_text(
+        json.dumps(
+            payload,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "Duplicate customer access "
+            "credential issuance request"
+        ),
+    ):
+        CustomerAccessCredentialRegistry(
+            path,
+            customer_identity_registry=(
+                identities
+            ),
+        )
+
+
+def test_version_one_credential_store_restores_without_request_identity(
+    tmp_path: Path,
+) -> None:
+    _, identities = build_credential_registry(
+        tmp_path,
+        "customer-001",
+    )
+
+    path = credential_storage_path(
+        tmp_path
+    )
+
+    credential_id = "a" * 32
+    verifier = "b" * 64
+
+    payload = {
+        "version": 1,
+        "credentials": [
+            {
+                "credential_id": (
+                    credential_id
+                ),
+                "customer_id": (
+                    "customer-001"
+                ),
+                "verifier_sha256": verifier,
+                "status": (
+                    CustomerAccessCredentialStatus
+                    .ACTIVE.value
+                ),
+            }
+        ],
+    }
+
+    path.write_text(
+        json.dumps(
+            payload,
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    restarted = CustomerAccessCredentialRegistry(
+        path,
+        customer_identity_registry=(
+            identities
+        ),
+    )
+
+    record = restarted.get(
+        credential_id=credential_id
+    )
+
+    assert record is not None
+
+    assert (
+        record.issuance_request_id
+        is None
+    )
+
+    assert (
+        record.verifier_sha256
+        == verifier
+    )
+
+
+def test_legacy_issue_keeps_uncorrelated_persisted_schema(
+    tmp_path: Path,
+) -> None:
+    registry, _ = build_credential_registry(
+        tmp_path,
+        "customer-001",
+    )
+
+    registry.issue(
+        customer_id="customer-001"
+    )
+
+    payload = json.loads(
+        credential_storage_path(
+            tmp_path
+        ).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert (
+        payload["version"]
+        == credential_module.STORE_VERSION
+    )
+
+    assert set(
+        payload["credentials"][0]
+    ) == {
+        "credential_id",
+        "customer_id",
+        "verifier_sha256",
+        "status",
+    }

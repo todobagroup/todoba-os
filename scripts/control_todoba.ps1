@@ -79,6 +79,45 @@ function Get-TodobaRuntimeProcesses {
 }
 
 
+function Get-TodobaStartupSupervisorProcesses {
+    $startupScriptPath = (
+        Join-Path `
+        $PSScriptRoot `
+        "start_todoba.ps1"
+    )
+
+    $startupScriptPattern = (
+        [regex]::Escape(
+            $startupScriptPath
+        )
+    )
+
+    return @(
+        Get-CimInstance `
+        Win32_Process `
+        -ErrorAction SilentlyContinue |
+        Where-Object {
+            $isPowerShell = (
+                $_.Name -eq "powershell.exe"
+            ) -or (
+                $_.Name -eq "pwsh.exe"
+            )
+
+            $hasStartupScript = $false
+
+            if ($null -ne $_.CommandLine) {
+                $hasStartupScript = (
+                    $_.CommandLine -match `
+                    $startupScriptPattern
+                )
+            }
+
+            $isPowerShell -and $hasStartupScript
+        }
+    )
+}
+
+
 function Get-TodobaRuntimeStatus {
     $task = Get-ScheduledTask `
     -TaskName $taskName `
@@ -86,6 +125,10 @@ function Get-TodobaRuntimeStatus {
 
     $processes = @(
         Get-TodobaRuntimeProcesses
+    )
+
+    $supervisors = @(
+        Get-TodobaStartupSupervisorProcesses
     )
 
     $apiProcesses = @(
@@ -113,6 +156,9 @@ function Get-TodobaRuntimeStatus {
         TaskName = $task.TaskName
         TaskState = $task.State.ToString()
         TaskUser = $task.Principal.UserId
+        SupervisorProcessCount = (
+            $supervisors.Count
+        )
         RuntimeProcessCount = $processes.Count
         ApiProcessCount = $apiProcesses.Count
         ExecutorProcessCount = (
@@ -167,9 +213,17 @@ function Stop-TodobaRuntime {
     if ($task.State.ToString() -eq "Running") {
         Stop-ScheduledTask `
         -TaskName $taskName
+    }
 
-        Wait-TodobaTaskState `
-        -ExpectedState "Ready"
+    $supervisors = @(
+        Get-TodobaStartupSupervisorProcesses
+    )
+
+    foreach ($supervisor in $supervisors) {
+        Stop-Process `
+        -Id $supervisor.ProcessId `
+        -Force `
+        -ErrorAction SilentlyContinue
     }
 
     $targets = @(
@@ -189,12 +243,34 @@ function Stop-TodobaRuntime {
         $TimeoutSeconds
     )
 
+    $runtimeStopped = $false
+
     do {
-        $remaining = @(
+        $task = Get-ScheduledTask `
+        -TaskName $taskName `
+        -ErrorAction Stop
+
+        $remainingSupervisors = @(
+            Get-TodobaStartupSupervisorProcesses
+        )
+
+        $remainingProcesses = @(
             Get-TodobaRuntimeProcesses
         )
 
-        if ($remaining.Count -eq 0) {
+        $listener = Get-NetTCPConnection `
+        -LocalPort 8000 `
+        -State Listen `
+        -ErrorAction SilentlyContinue
+
+        $runtimeStopped = (
+            $task.State.ToString() -eq "Ready" -and
+            $remainingSupervisors.Count -eq 0 -and
+            $remainingProcesses.Count -eq 0 -and
+            $null -eq $listener
+        )
+
+        if ($runtimeStopped) {
             break
         }
 
@@ -205,8 +281,8 @@ function Stop-TodobaRuntime {
         (Get-Date) -lt $deadline
     )
 
-    if ($remaining.Count -gt 0) {
-        throw "TODOBA runtime processes did not stop."
+    if (-not $runtimeStopped) {
+        throw "TODOBA runtime did not stop cleanly."
     }
 
     Write-Output "TODOBA_RUNTIME_STOPPED=True"
@@ -227,7 +303,14 @@ function Start-TodobaRuntime {
             Get-TodobaRuntimeProcesses
         )
 
-        if ($existingProcesses.Count -gt 0) {
+        $existingSupervisors = @(
+            Get-TodobaStartupSupervisorProcesses
+        )
+
+        if (
+            $existingProcesses.Count -gt 0 -or
+            $existingSupervisors.Count -gt 0
+        ) {
             throw "Run Stop before Start because old TODOBA processes still exist."
         }
 

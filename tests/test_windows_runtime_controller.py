@@ -60,6 +60,12 @@ def test_controller_targets_only_todoba_runtime() -> None:
         "backend\\.start_(api|executor)"
         in controller
     )
+    assert "start_todoba.ps1" in controller
+    assert "powershell.exe" in controller
+    assert (
+        "Get-TodobaStartupSupervisorProcesses"
+        in controller
+    )
 
     assert "cloudflared.exe" not in controller.lower()
     assert "Get-Service" not in controller
@@ -72,6 +78,60 @@ def test_controller_requires_safe_runtime_state() -> None:
     assert "old TODOBA processes still exist" in controller
     assert "Get-NetTCPConnection" in controller
     assert "Port8000Listening" in controller
+    assert "SupervisorProcessCount" in controller
+    assert "TODOBA runtime did not stop cleanly." in controller
+
+
+def test_controller_stops_supervisor_before_waiting_for_clean_state() -> None:
+    controller = read_controller()
+
+    stop_body = controller.split(
+        "function Stop-TodobaRuntime {",
+        1,
+    )[1].split(
+        "function Start-TodobaRuntime {",
+        1,
+    )[0]
+
+    stop_task_index = stop_body.index(
+        "Stop-ScheduledTask"
+    )
+
+    supervisor_index = stop_body.index(
+        "Get-TodobaStartupSupervisorProcesses"
+    )
+
+    runtime_process_index = stop_body.index(
+        "Get-TodobaRuntimeProcesses"
+    )
+
+    clean_wait_index = stop_body.index(
+        "$runtimeStopped = $false"
+    )
+
+    assert (
+        stop_task_index
+        < supervisor_index
+        < runtime_process_index
+        < clean_wait_index
+    )
+
+    assert (
+        '$task.State.ToString() -eq "Ready"'
+        in stop_body
+    )
+
+    assert (
+        "$remainingSupervisors.Count -eq 0"
+        in stop_body
+    )
+
+    assert (
+        "$remainingProcesses.Count -eq 0"
+        in stop_body
+    )
+
+    assert "$null -eq $listener" in stop_body
 
 
 @pytest.mark.skipif(

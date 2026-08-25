@@ -202,6 +202,56 @@ TODOBA_CONTROL_PLANE_DATA_ROOT = Path(
     ).strip()
 )
 
+TODOBA_CUSTOMER_PACKAGE_ROOT_ENV_NAME = (
+    "TODOBA_CUSTOMER_PACKAGE_ROOT"
+)
+
+
+def get_customer_package_root() -> Path:
+    """
+    Return the explicit external root containing
+    already-published customer deployment packages.
+
+    Runtime configuration must never create this directory.
+    Package publication/build tooling owns filesystem creation.
+    """
+
+    raw_value = os.getenv(
+        TODOBA_CUSTOMER_PACKAGE_ROOT_ENV_NAME,
+        "",
+    ).strip()
+
+    if not raw_value:
+        raise RuntimeError(
+            "TODOBA_CUSTOMER_PACKAGE_ROOT is required."
+        )
+
+    configured_path = Path(
+        raw_value
+    )
+
+    if not configured_path.is_absolute():
+        raise ValueError(
+            "TODOBA_CUSTOMER_PACKAGE_ROOT must be "
+            "an absolute path."
+        )
+
+    resolved_path = (
+        configured_path.resolve()
+    )
+
+    if (
+        resolved_path == BASE_DIR
+        or BASE_DIR in resolved_path.parents
+    ):
+        raise ValueError(
+            "TODOBA_CUSTOMER_PACKAGE_ROOT must be "
+            "outside the repository."
+        )
+
+    return resolved_path
+
+
 TODOBA_CUSTOMER_DEPLOYMENT_MASTER_KEY = os.getenv(
     "TODOBA_CUSTOMER_DEPLOYMENT_MASTER_KEY",
     "",

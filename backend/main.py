@@ -8,7 +8,6 @@ from pydantic import BaseModel
 from backend.brain.memory import memory_engine
 from backend.brain.models.experience import Experience
 from backend.brain_engine import brain_engine
-import base64
 
 
 from backend.config import (
@@ -36,6 +35,9 @@ from backend.commercial.customer_deployment_entitlement_authorizer import (
 )
 from backend.commercial.customer_deployment_entitlement_registry import (
     CustomerDeploymentEntitlementRegistry,
+)
+from backend.commercial.customer_deployment_master_key import (
+    decode_customer_deployment_master_key,
 )
 from backend.commercial.customer_deployment_package_api import (
     create_customer_deployment_package_router,
@@ -402,54 +404,6 @@ TRUSTED_AGENT_ACCOUNT_BINDING_STORAGE_PATH = (
 )
 
 
-def _decode_customer_deployment_master_key(
-    encoded_master_key: str,
-) -> bytes:
-    if not isinstance(
-        encoded_master_key,
-        str,
-    ):
-        raise TypeError(
-            "Customer deployment master key "
-            "must be str."
-        )
-
-    if encoded_master_key == "":
-        raise RuntimeError(
-            "TODOBA_CUSTOMER_DEPLOYMENT_MASTER_KEY "
-            "is required."
-        )
-
-    try:
-        encoded_bytes = (
-            encoded_master_key.encode(
-                "ascii"
-            )
-        )
-
-        master_key = base64.b64decode(
-            encoded_bytes,
-            altchars=b"-_",
-            validate=True,
-        )
-    except (
-        UnicodeEncodeError,
-        ValueError,
-    ) as error:
-        raise RuntimeError(
-            "TODOBA_CUSTOMER_DEPLOYMENT_MASTER_KEY "
-            "must contain valid URL-safe base64."
-        ) from error
-
-    if len(master_key) != 32:
-        raise RuntimeError(
-            "TODOBA_CUSTOMER_DEPLOYMENT_MASTER_KEY "
-            "must decode to exactly 32 bytes."
-        )
-
-    return master_key
-
-
 customer_deployment_registry = (
     CustomerDeploymentRegistry(
         CUSTOMER_DEPLOYMENT_STORAGE_PATH
@@ -460,7 +414,7 @@ customer_deployment_secret_store = (
     CustomerDeploymentSecretStore(
         CUSTOMER_DEPLOYMENT_SECRET_STORAGE_PATH,
         master_key=(
-            _decode_customer_deployment_master_key(
+            decode_customer_deployment_master_key(
                 TODOBA_CUSTOMER_DEPLOYMENT_MASTER_KEY
             )
         ),

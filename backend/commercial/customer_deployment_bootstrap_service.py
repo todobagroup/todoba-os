@@ -13,7 +13,10 @@ Bootstrap responsibilities:
 - durably remember generated non-secret bootstrap identity
 - recover the same candidate after process restart
 - reuse existing encrypted secret material after partial work
-- invoke Customer Deployment Enrollment Service
+- prepare deployment material through Customer Deployment
+  Enrollment Service
+- activate deployment only through an explicit activation
+  step
 - prevent duplicate enrollment of the same MT5 account
 
 Bootstrap persistence never stores plaintext deployment
@@ -45,6 +48,7 @@ import uuid
 from backend.commercial.customer_deployment_enrollment_service import (
     CustomerDeploymentEnrollmentResult,
     CustomerDeploymentEnrollmentService,
+    CustomerDeploymentPreparationResult,
 )
 from backend.commercial.customer_deployment_registry import (
     CustomerDeployment,
@@ -169,6 +173,39 @@ class CustomerDeploymentBootstrapRecord:
 
         return normalized
 
+
+@dataclass(
+    frozen=True,
+    repr=False,
+)
+class CustomerDeploymentBootstrapPreparationResult:
+    """
+    Internal prepared bootstrap candidate.
+
+    This result contains the material required by the secure
+    deployment packaging layer but does not mean the
+    deployment is active.
+
+    Secret material and raw account fingerprint are never
+    emitted by repr().
+    """
+
+    enrollment_request_id: str
+    deployment: CustomerDeployment
+    secrets: CustomerDeploymentSecrets
+    account_fingerprint: str
+
+    def __repr__(
+        self,
+    ) -> str:
+        return (
+            "CustomerDeploymentBootstrapPreparationResult("
+            f"enrollment_request_id="
+            f"{self.enrollment_request_id!r}, "
+            f"deployment={self.deployment!r}, "
+            "account_fingerprint=<redacted>, "
+            "secret_material=<redacted>)"
+        )
 
 @dataclass(
     frozen=True,
@@ -757,7 +794,39 @@ class CustomerDeploymentBootstrapService:
         account_fingerprint: str,
     ) -> CustomerDeploymentBootstrapResult:
         """
-        Create or recover one customer deployment bootstrap.
+        Create or recover and activate one complete customer
+        deployment bootstrap.
+
+        Backward-compatible contract:
+
+            bootstrap()
+                = prepare_bootstrap()
+                + activate_bootstrap()
+
+        Existing offline onboarding callers therefore keep
+        their original complete-bootstrap behavior.
+        """
+
+        return self.activate_bootstrap(
+            enrollment_request_id=(
+                enrollment_request_id
+            ),
+            customer_id=customer_id,
+            account_fingerprint=(
+                account_fingerprint
+            ),
+        )
+
+    def prepare_bootstrap(
+        self,
+        *,
+        enrollment_request_id: str,
+        customer_id: str,
+        account_fingerprint: str,
+    ) -> CustomerDeploymentBootstrapPreparationResult:
+        """
+        Create or recover one durable bootstrap candidate
+        without activating its commercial deployment.
 
         A retry with the same enrollment request returns the
         same identities and secret material.
@@ -767,6 +836,11 @@ class CustomerDeploymentBootstrapService:
 
         Cross-customer reuse of an already enrolled or
         reserved MT5 account fails closed.
+
+        Preparation stages deployment secrets and Trusted
+        Agent account binding through the Enrollment Service
+        but does not cross CustomerDeploymentRegistry, the
+        durable activation barrier.
         """
 
         normalized_request_id = (
@@ -863,8 +937,8 @@ class CustomerDeploymentBootstrapService:
                     stored_secrets
                 )
 
-            enrollment_result = (
-                self._enrollment_service.enroll(
+            preparation_result = (
+                self._enrollment_service.prepare(
                     deployment=deployment,
                     secrets=deployment_secrets,
                     account_fingerprint=(
@@ -873,17 +947,93 @@ class CustomerDeploymentBootstrapService:
                 )
             )
 
-            return self._build_result(
+            return self._build_preparation_result(
                 record=record,
                 secrets=deployment_secrets,
                 account_fingerprint=(
                     normalized_account_fingerprint
                 ),
+                preparation_result=(
+                    preparation_result
+                ),
+            )
+
+    def activate_bootstrap(
+        self,
+        *,
+        enrollment_request_id: str,
+        customer_id: str,
+        account_fingerprint: str,
+    ) -> CustomerDeploymentBootstrapResult:
+        """
+        Activate one bootstrap candidate using its stable
+        authoritative request/customer/account inputs.
+
+        Preparation is rerun idempotently first so activation
+        remains recoverable after process restart or a crash
+        between preparation and activation.
+        """
+
+        with self._lock:
+            preparation = self.prepare_bootstrap(
+                enrollment_request_id=(
+                    enrollment_request_id
+                ),
+                customer_id=customer_id,
+                account_fingerprint=(
+                    account_fingerprint
+                ),
+            )
+
+            record = (
+                self._bootstrap_store.get(
+                    enrollment_request_id=(
+                        preparation.enrollment_request_id
+                    )
+                )
+            )
+
+            if record is None:
+                raise RuntimeError(
+                    "Prepared customer deployment bootstrap "
+                    "identity is missing."
+                )
+
+            if (
+                record.deployment_id
+                != preparation.deployment.deployment_id
+                or record.agent_id
+                != preparation.deployment.agent_id
+                or record.customer_id
+                != preparation.deployment.customer_id
+            ):
+                raise RuntimeError(
+                    "Prepared customer deployment bootstrap "
+                    "identity does not match durable record."
+                )
+
+            enrollment_result = (
+                self._enrollment_service.activate(
+                    deployment=(
+                        preparation.deployment
+                    ),
+                    secrets=preparation.secrets,
+                    account_fingerprint=(
+                        preparation.account_fingerprint
+                    ),
+                )
+            )
+
+            return self._build_result(
+                record=record,
+                secrets=preparation.secrets,
+                account_fingerprint=(
+                    preparation.account_fingerprint
+                ),
                 enrollment_result=(
                     enrollment_result
                 ),
             )
-
     def _resolve_existing_record(
         self,
         *,
@@ -1251,6 +1401,50 @@ class CustomerDeploymentBootstrapService:
                 "not initialized for bootstrap."
             )
 
+    @staticmethod
+    def _build_preparation_result(
+        *,
+        record: CustomerDeploymentBootstrapRecord,
+        secrets: CustomerDeploymentSecrets,
+        account_fingerprint: str,
+        preparation_result: (
+            CustomerDeploymentPreparationResult
+        ),
+    ) -> CustomerDeploymentBootstrapPreparationResult:
+        if (
+            preparation_result.deployment.deployment_id
+            != record.deployment_id
+            or preparation_result.deployment.agent_id
+            != record.agent_id
+            or preparation_result.deployment.customer_id
+            != record.customer_id
+        ):
+            raise RuntimeError(
+                "Prepared enrollment identity does not "
+                "match bootstrap identity."
+            )
+
+        if (
+            preparation_result.account_fingerprint
+            != account_fingerprint
+        ):
+            raise RuntimeError(
+                "Prepared enrollment account does not "
+                "match bootstrap account."
+            )
+
+        return CustomerDeploymentBootstrapPreparationResult(
+            enrollment_request_id=(
+                record.enrollment_request_id
+            ),
+            deployment=(
+                preparation_result.deployment
+            ),
+            secrets=secrets,
+            account_fingerprint=(
+                account_fingerprint
+            ),
+        )
     @staticmethod
     def _build_result(
         *,

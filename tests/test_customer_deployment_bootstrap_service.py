@@ -1,4 +1,4 @@
-﻿"""
+"""
 TODOBA Customer Deployment Bootstrap Service Tests
 
 Proof:
@@ -867,3 +867,386 @@ def test_orphan_account_binding_cannot_create_second_agent_ownership(
     assert context[
         "deployment_registry"
     ].size() == 0
+
+def test_prepare_bootstrap_stages_without_activation(
+    tmp_path: Path,
+) -> None:
+    context = build_system(
+        tmp_path
+    )
+
+    prepared = context[
+        "bootstrap_service"
+    ].prepare_bootstrap(
+        enrollment_request_id="request-001",
+        customer_id="customer-001",
+        account_fingerprint="account-a",
+    )
+
+    assert context[
+        "bootstrap_store"
+    ].size() == 1
+
+    assert context[
+        "deployment_registry"
+    ].size() == 0
+
+    stored_secrets = context[
+        "secret_store"
+    ].get(
+        deployment_id=(
+            prepared.deployment.deployment_id
+        )
+    )
+
+    assert stored_secrets is not None
+    assert stored_secrets.same_secret_material(
+        prepared.secrets
+    )
+
+    assert context[
+        "account_binding_store"
+    ].owns_account(
+        agent_id=(
+            prepared.deployment.agent_id
+        ),
+        account_fingerprint="account-a",
+    )
+
+    assert (
+        context[
+            "execution_target_registry"
+        ].get(
+            agent_id=(
+                prepared.deployment.agent_id
+            )
+        )
+        is None
+    )
+
+    assert (
+        context[
+            "credential_registry"
+        ].get_secret(
+            agent_id=(
+                prepared.deployment.agent_id
+            )
+        )
+        is None
+    )
+
+    assert (
+        context[
+            "execution_signing_key_registry"
+        ].get_secret(
+            agent_id=(
+                prepared.deployment.agent_id
+            )
+        )
+        is None
+    )
+
+    assert (
+        context[
+            "control_signing_key_registry"
+        ].get_secret(
+            agent_id=(
+                prepared.deployment.agent_id
+            )
+        )
+        is None
+    )
+
+    rendered = repr(
+        prepared
+    )
+
+    assert (
+        "account-a"
+        not in rendered
+    )
+
+    assert (
+        prepared.secrets.agent_secret
+        not in rendered
+    )
+
+    assert (
+        prepared.secrets
+        .execution_mission_signing_secret
+        not in rendered
+    )
+
+    assert (
+        prepared.secrets
+        .control_mission_signing_secret
+        not in rendered
+    )
+
+
+def test_identical_prepare_bootstrap_retry_is_idempotent(
+    tmp_path: Path,
+) -> None:
+    context = build_system(
+        tmp_path
+    )
+
+    first = context[
+        "bootstrap_service"
+    ].prepare_bootstrap(
+        enrollment_request_id="request-001",
+        customer_id="customer-001",
+        account_fingerprint="account-a",
+    )
+
+    retry = context[
+        "bootstrap_service"
+    ].prepare_bootstrap(
+        enrollment_request_id="request-001",
+        customer_id="customer-001",
+        account_fingerprint="account-a",
+    )
+
+    assert (
+        first.deployment
+        == retry.deployment
+    )
+
+    assert first.secrets.same_secret_material(
+        retry.secrets
+    )
+
+    assert (
+        first.account_fingerprint
+        == retry.account_fingerprint
+        == "account-a"
+    )
+
+    assert context[
+        "bootstrap_store"
+    ].size() == 1
+
+    assert context[
+        "deployment_registry"
+    ].size() == 0
+
+    assert context[
+        "execution_target_registry"
+    ].size() == 0
+
+
+def test_restart_recovers_same_prepared_bootstrap(
+    tmp_path: Path,
+) -> None:
+    first_context = build_system(
+        tmp_path
+    )
+
+    first = first_context[
+        "bootstrap_service"
+    ].prepare_bootstrap(
+        enrollment_request_id="request-001",
+        customer_id="customer-001",
+        account_fingerprint="account-a",
+    )
+
+    assert first_context[
+        "deployment_registry"
+    ].size() == 0
+
+    restarted = build_system(
+        tmp_path
+    )
+
+    recovered = restarted[
+        "bootstrap_service"
+    ].prepare_bootstrap(
+        enrollment_request_id="request-001",
+        customer_id="customer-001",
+        account_fingerprint="account-a",
+    )
+
+    assert (
+        recovered.deployment
+        == first.deployment
+    )
+
+    assert recovered.secrets.same_secret_material(
+        first.secrets
+    )
+
+    assert restarted[
+        "bootstrap_store"
+    ].size() == 1
+
+    assert restarted[
+        "deployment_registry"
+    ].size() == 0
+
+    assert restarted[
+        "account_binding_store"
+    ].owns_account(
+        agent_id=(
+            first.deployment.agent_id
+        ),
+        account_fingerprint="account-a",
+    )
+
+    assert (
+        restarted[
+            "execution_target_registry"
+        ].get(
+            agent_id=(
+                first.deployment.agent_id
+            )
+        )
+        is None
+    )
+
+
+def test_activate_bootstrap_crosses_activation_barrier(
+    tmp_path: Path,
+) -> None:
+    context = build_system(
+        tmp_path
+    )
+
+    prepared = context[
+        "bootstrap_service"
+    ].prepare_bootstrap(
+        enrollment_request_id="request-001",
+        customer_id="customer-001",
+        account_fingerprint="account-a",
+    )
+
+    assert context[
+        "deployment_registry"
+    ].size() == 0
+
+    assert (
+        context[
+            "execution_target_registry"
+        ].get(
+            agent_id=(
+                prepared.deployment.agent_id
+            )
+        )
+        is None
+    )
+
+    activated = context[
+        "bootstrap_service"
+    ].activate_bootstrap(
+        enrollment_request_id="request-001",
+        customer_id="customer-001",
+        account_fingerprint="account-a",
+    )
+
+    assert (
+        activated.deployment
+        == prepared.deployment
+    )
+
+    assert activated.secrets.same_secret_material(
+        prepared.secrets
+    )
+
+    assert (
+        activated.projected_deployment_count
+        == 1
+    )
+
+    assert (
+        context[
+            "deployment_registry"
+        ].get(
+            deployment_id=(
+                prepared.deployment.deployment_id
+            )
+        )
+        == prepared.deployment
+    )
+
+    target = context[
+        "execution_target_registry"
+    ].get(
+        agent_id=(
+            prepared.deployment.agent_id
+        )
+    )
+
+    assert target is not None
+    assert (
+        target.account_fingerprint
+        == "account-a"
+    )
+
+    assert (
+        context[
+            "credential_registry"
+        ].get_secret(
+            agent_id=(
+                prepared.deployment.agent_id
+            )
+        )
+        == prepared.secrets.agent_secret
+    )
+
+
+def test_restart_can_activate_prepared_bootstrap(
+    tmp_path: Path,
+) -> None:
+    first_context = build_system(
+        tmp_path
+    )
+
+    prepared = first_context[
+        "bootstrap_service"
+    ].prepare_bootstrap(
+        enrollment_request_id="request-001",
+        customer_id="customer-001",
+        account_fingerprint="account-a",
+    )
+
+    assert first_context[
+        "deployment_registry"
+    ].size() == 0
+
+    restarted = build_system(
+        tmp_path
+    )
+
+    activated = restarted[
+        "bootstrap_service"
+    ].activate_bootstrap(
+        enrollment_request_id="request-001",
+        customer_id="customer-001",
+        account_fingerprint="account-a",
+    )
+
+    assert (
+        activated.deployment
+        == prepared.deployment
+    )
+
+    assert activated.secrets.same_secret_material(
+        prepared.secrets
+    )
+
+    assert restarted[
+        "deployment_registry"
+    ].size() == 1
+
+    target = restarted[
+        "execution_target_registry"
+    ].get(
+        agent_id=(
+            prepared.deployment.agent_id
+        )
+    )
+
+    assert target is not None
+    assert (
+        target.account_fingerprint
+        == "account-a"
+    )

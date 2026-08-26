@@ -1,22 +1,32 @@
 """
 TODOBA Customer Deployment Enrollment Service
 
-Owns one durable commercial enrollment transaction across
-the existing deployment persistence owners.
+Owns durable preparation and activation of one commercial
+customer deployment across the existing persistence owners.
 
-Enrollment order:
+Preparation order:
 
 1. validate the complete candidate before mutation
 2. verify the existing runtime projection is healthy
-3. persist encrypted deployment secrets
-4. persist Trusted Agent account binding
-5. register commercial deployment identity last
-6. refresh runtime projection
+3. validate candidate runtime compatibility
+4. persist encrypted deployment secrets
+5. persist Trusted Agent account binding
+6. leave CustomerDeploymentRegistry unchanged
+
+Activation order:
+
+1. require the candidate to be durably prepared
+2. revalidate authoritative durable/runtime compatibility
+3. register commercial deployment identity
+4. refresh runtime projection
 
 The CustomerDeploymentRegistry is the durable enrollment
 activation barrier. Secret material and account binding may
 be safely staged before registry registration because all
 three stores accept identical retries idempotently.
+
+The legacy enroll() operation remains available and is
+defined as prepare() followed immediately by activate().
 
 This component does not:
 - generate customer, deployment, or Agent identities
@@ -49,6 +59,24 @@ from backend.trading.execution.trusted_agent_account_binding_store import (
 @dataclass(
     frozen=True,
 )
+class CustomerDeploymentPreparationResult:
+    """
+    Safe result of one durable deployment preparation.
+
+    Secret material is intentionally excluded.
+
+    The presence of this result does not mean the deployment
+    is active. CustomerDeploymentRegistry remains the
+    authoritative activation barrier.
+    """
+
+    deployment: CustomerDeployment
+    account_fingerprint: str
+
+
+@dataclass(
+    frozen=True,
+)
 class CustomerDeploymentEnrollmentResult:
     """
     Public result of one completed enrollment.
@@ -63,7 +91,8 @@ class CustomerDeploymentEnrollmentResult:
 
 class CustomerDeploymentEnrollmentService:
     """
-    Coordinate one complete customer deployment enrollment.
+    Coordinate preparation and activation of one customer
+    deployment.
 
     Durable source ownership remains with the existing
     registry, secret store, and account binding store.
@@ -133,44 +162,33 @@ class CustomerDeploymentEnrollmentService:
             runtime_projection
         )
 
-    def enroll(
+    def prepare(
         self,
         *,
         deployment: CustomerDeployment,
         secrets: CustomerDeploymentSecrets,
         account_fingerprint: str,
-    ) -> CustomerDeploymentEnrollmentResult:
+    ) -> CustomerDeploymentPreparationResult:
         """
-        Persist and activate one complete commercial
-        deployment enrollment.
+        Durably stage one deployment without activating it.
 
-        Identical retries are accepted.
+        Preparation persists only:
+        - deployment secret material
+        - Trusted Agent account binding
 
-        Identity, secret, binding, and runtime conflicts
-        fail closed.
+        CustomerDeploymentRegistry is never mutated here.
+
+        Identical retries are accepted. Identity, secret,
+        binding, and runtime conflicts fail closed.
         """
-
-        if not isinstance(
-            deployment,
-            CustomerDeployment,
-        ):
-            raise TypeError(
-                "enroll requires CustomerDeployment."
-            )
-
-        if not isinstance(
-            secrets,
-            CustomerDeploymentSecrets,
-        ):
-            raise TypeError(
-                "enroll requires "
-                "CustomerDeploymentSecrets."
-            )
 
         normalized_account_fingerprint = (
-            self._normalize_required_string(
-                account_fingerprint,
-                name="account_fingerprint",
+            self._validate_inputs(
+                deployment=deployment,
+                secrets=secrets,
+                account_fingerprint=(
+                    account_fingerprint
+                ),
             )
         )
 
@@ -185,14 +203,13 @@ class CustomerDeploymentEnrollmentService:
         )
 
         # Verify the currently committed commercial
-        # snapshot can still be projected before the new
-        # candidate mutates any durable source.
+        # snapshot is healthy before staging a candidate.
         self._runtime_projection.project()
 
-        # The candidate itself is not yet represented by
-        # the durable deployment registry, so validate its
-        # runtime compatibility explicitly before any
-        # durable source is mutated.
+        # The candidate is intentionally not represented by
+        # CustomerDeploymentRegistry during preparation.
+        # Validate its future runtime identity before any
+        # durable staging mutation occurs.
         self._runtime_projection.validate_candidate_runtime_compatibility(
             deployment_id=(
                 deployment.deployment_id
@@ -204,8 +221,6 @@ class CustomerDeploymentEnrollmentService:
             secrets=secrets,
         )
 
-        # Secrets and binding are staged first. Both stores
-        # are independently durable and idempotent.
         self._secret_store.register(
             secrets
         )
@@ -217,7 +232,78 @@ class CustomerDeploymentEnrollmentService:
             ),
         )
 
-        # Commercial identity is written last and acts as
+        # Deliberately no deployment registry write and no
+        # projection of the candidate here.
+        return CustomerDeploymentPreparationResult(
+            deployment=deployment,
+            account_fingerprint=(
+                normalized_account_fingerprint
+            ),
+        )
+
+    def activate(
+        self,
+        *,
+        deployment: CustomerDeployment,
+        secrets: CustomerDeploymentSecrets,
+        account_fingerprint: str,
+    ) -> CustomerDeploymentEnrollmentResult:
+        """
+        Activate one previously prepared deployment.
+
+        CustomerDeploymentRegistry.register() remains the
+        durable activation barrier.
+
+        Activation fails closed if the expected staged
+        secrets or account binding are absent or conflicting.
+        """
+
+        normalized_account_fingerprint = (
+            self._validate_inputs(
+                deployment=deployment,
+                secrets=secrets,
+                account_fingerprint=(
+                    account_fingerprint
+                ),
+            )
+        )
+
+        self._require_sources_ready()
+
+        self._validate_candidate(
+            deployment=deployment,
+            secrets=secrets,
+            account_fingerprint=(
+                normalized_account_fingerprint
+            ),
+        )
+
+        self._require_prepared_candidate(
+            deployment=deployment,
+            secrets=secrets,
+            account_fingerprint=(
+                normalized_account_fingerprint
+            ),
+        )
+
+        # Preparation and activation may be separated by a
+        # package-build interval. Revalidate the currently
+        # active commercial graph immediately before the
+        # activation barrier.
+        self._runtime_projection.project()
+
+        self._runtime_projection.validate_candidate_runtime_compatibility(
+            deployment_id=(
+                deployment.deployment_id
+            ),
+            agent_id=deployment.agent_id,
+            account_fingerprint=(
+                normalized_account_fingerprint
+            ),
+            secrets=secrets,
+        )
+
+        # Commercial identity is written last and remains
         # the durable activation barrier.
         stored_deployment = (
             self._deployment_registry.register(
@@ -236,6 +322,42 @@ class CustomerDeploymentEnrollmentService:
             ),
             projected_deployment_count=(
                 projected_count
+            ),
+        )
+
+    def enroll(
+        self,
+        *,
+        deployment: CustomerDeployment,
+        secrets: CustomerDeploymentSecrets,
+        account_fingerprint: str,
+    ) -> CustomerDeploymentEnrollmentResult:
+        """
+        Persist and activate one complete commercial
+        deployment enrollment.
+
+        Backward-compatible contract:
+
+            enroll()
+                = prepare()
+                + activate()
+
+        Identical retries are accepted.
+        """
+
+        preparation = self.prepare(
+            deployment=deployment,
+            secrets=secrets,
+            account_fingerprint=(
+                account_fingerprint
+            ),
+        )
+
+        return self.activate(
+            deployment=preparation.deployment,
+            secrets=secrets,
+            account_fingerprint=(
+                preparation.account_fingerprint
             ),
         )
 
@@ -343,6 +465,87 @@ class CustomerDeploymentEnrollmentService:
                 "Customer deployment enrollment "
                 "conflicts with existing account binding."
             )
+
+    def _require_prepared_candidate(
+        self,
+        *,
+        deployment: CustomerDeployment,
+        secrets: CustomerDeploymentSecrets,
+        account_fingerprint: str,
+    ) -> None:
+        stored_secrets = (
+            self._secret_store.get(
+                deployment_id=(
+                    deployment.deployment_id
+                )
+            )
+        )
+
+        if stored_secrets is None:
+            raise RuntimeError(
+                "Customer deployment is not prepared: "
+                "secret material is missing."
+            )
+
+        if not stored_secrets.same_secret_material(
+            secrets
+        ):
+            raise ValueError(
+                "Prepared customer deployment secret "
+                "material does not match activation."
+            )
+
+        stored_account_fingerprint = (
+            self._account_binding_store
+            .get_account_fingerprint(
+                agent_id=deployment.agent_id
+            )
+        )
+
+        if stored_account_fingerprint is None:
+            raise RuntimeError(
+                "Customer deployment is not prepared: "
+                "account binding is missing."
+            )
+
+        if (
+            stored_account_fingerprint
+            != account_fingerprint
+        ):
+            raise ValueError(
+                "Prepared customer deployment account "
+                "binding does not match activation."
+            )
+
+    @classmethod
+    def _validate_inputs(
+        cls,
+        *,
+        deployment: CustomerDeployment,
+        secrets: CustomerDeploymentSecrets,
+        account_fingerprint: str,
+    ) -> str:
+        if not isinstance(
+            deployment,
+            CustomerDeployment,
+        ):
+            raise TypeError(
+                "deployment must be CustomerDeployment."
+            )
+
+        if not isinstance(
+            secrets,
+            CustomerDeploymentSecrets,
+        ):
+            raise TypeError(
+                "secrets must be "
+                "CustomerDeploymentSecrets."
+            )
+
+        return cls._normalize_required_string(
+            account_fingerprint,
+            name="account_fingerprint",
+        )
 
     @staticmethod
     def _normalize_required_string(

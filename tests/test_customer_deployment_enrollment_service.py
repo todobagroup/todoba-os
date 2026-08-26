@@ -1,4 +1,4 @@
-﻿"""
+"""
 TODOBA Customer Deployment Enrollment Service Tests
 
 Proof:
@@ -606,6 +606,375 @@ def test_runtime_conflict_must_fail_before_durable_activation(
             agent_id="trusted-agent-001"
         )
         is None
+    )
+
+    assert (
+        context[
+            "execution_target_registry"
+        ].get(
+            agent_id="trusted-agent-001"
+        )
+        is None
+    )
+
+def test_prepare_stages_without_activation_or_runtime_projection(
+    tmp_path: Path,
+) -> None:
+    context = build_enrollment_system(
+        tmp_path
+    )
+
+    deployment = make_deployment()
+    secrets = make_secrets()
+
+    result = context[
+        "service"
+    ].prepare(
+        deployment=deployment,
+        secrets=secrets,
+        account_fingerprint="account-a",
+    )
+
+    assert result.deployment == deployment
+    assert (
+        result.account_fingerprint
+        == "account-a"
+    )
+
+    assert context[
+        "deployment_registry"
+    ].size() == 0
+
+    stored_secrets = context[
+        "secret_store"
+    ].get(
+        deployment_id="deployment-001"
+    )
+
+    assert stored_secrets is not None
+    assert stored_secrets.same_secret_material(
+        secrets
+    )
+
+    assert context[
+        "account_binding_store"
+    ].owns_account(
+        agent_id="trusted-agent-001",
+        account_fingerprint="account-a",
+    )
+
+    assert (
+        context[
+            "execution_target_registry"
+        ].get(
+            agent_id="trusted-agent-001"
+        )
+        is None
+    )
+
+    assert (
+        context[
+            "credential_registry"
+        ].get_secret(
+            agent_id="trusted-agent-001"
+        )
+        is None
+    )
+
+    assert (
+        context[
+            "execution_signing_key_registry"
+        ].get_secret(
+            agent_id="trusted-agent-001"
+        )
+        is None
+    )
+
+    assert (
+        context[
+            "control_signing_key_registry"
+        ].get_secret(
+            agent_id="trusted-agent-001"
+        )
+        is None
+    )
+
+
+def test_identical_prepare_retry_is_idempotent_without_activation(
+    tmp_path: Path,
+) -> None:
+    context = build_enrollment_system(
+        tmp_path
+    )
+
+    deployment = make_deployment()
+    secrets = make_secrets()
+
+    first = context[
+        "service"
+    ].prepare(
+        deployment=deployment,
+        secrets=secrets,
+        account_fingerprint="account-a",
+    )
+
+    second = context[
+        "service"
+    ].prepare(
+        deployment=deployment,
+        secrets=secrets,
+        account_fingerprint="account-a",
+    )
+
+    assert first == second
+
+    assert context[
+        "deployment_registry"
+    ].size() == 0
+
+    assert (
+        context[
+            "execution_target_registry"
+        ].size()
+        == 0
+    )
+
+    restored_secret_store = (
+        CustomerDeploymentSecretStore(
+            tmp_path
+            / "customer_deployment_secrets.json",
+            master_key=MASTER_KEY,
+        )
+    )
+
+    restored_binding_store = (
+        TrustedAgentAccountBindingStore(
+            tmp_path
+            / "trusted_agent_account_bindings.json"
+        )
+    )
+
+    restored_secrets = (
+        restored_secret_store.get(
+            deployment_id="deployment-001"
+        )
+    )
+
+    assert restored_secrets is not None
+    assert restored_secrets.same_secret_material(
+        secrets
+    )
+
+    assert restored_binding_store.owns_account(
+        agent_id="trusted-agent-001",
+        account_fingerprint="account-a",
+    )
+
+
+def test_activate_without_prepare_fails_closed(
+    tmp_path: Path,
+) -> None:
+    context = build_enrollment_system(
+        tmp_path
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="secret material is missing",
+    ):
+        context[
+            "service"
+        ].activate(
+            deployment=make_deployment(),
+            secrets=make_secrets(),
+            account_fingerprint="account-a",
+        )
+
+    assert context[
+        "deployment_registry"
+    ].size() == 0
+
+    assert (
+        context[
+            "secret_store"
+        ].get(
+            deployment_id="deployment-001"
+        )
+        is None
+    )
+
+    assert (
+        context[
+            "account_binding_store"
+        ].get_account_fingerprint(
+            agent_id="trusted-agent-001"
+        )
+        is None
+    )
+
+    assert (
+        context[
+            "execution_target_registry"
+        ].get(
+            agent_id="trusted-agent-001"
+        )
+        is None
+    )
+
+
+def test_activate_prepared_candidate_crosses_activation_barrier(
+    tmp_path: Path,
+) -> None:
+    context = build_enrollment_system(
+        tmp_path
+    )
+
+    deployment = make_deployment()
+    secrets = make_secrets()
+
+    context[
+        "service"
+    ].prepare(
+        deployment=deployment,
+        secrets=secrets,
+        account_fingerprint="account-a",
+    )
+
+    assert context[
+        "deployment_registry"
+    ].size() == 0
+
+    assert (
+        context[
+            "execution_target_registry"
+        ].get(
+            agent_id="trusted-agent-001"
+        )
+        is None
+    )
+
+    result = context[
+        "service"
+    ].activate(
+        deployment=deployment,
+        secrets=secrets,
+        account_fingerprint="account-a",
+    )
+
+    assert result.deployment == deployment
+    assert (
+        result.projected_deployment_count
+        == 1
+    )
+
+    assert (
+        context[
+            "deployment_registry"
+        ].get(
+            deployment_id="deployment-001"
+        )
+        == deployment
+    )
+
+    target = context[
+        "execution_target_registry"
+    ].get(
+        agent_id="trusted-agent-001"
+    )
+
+    assert target is not None
+    assert (
+        target.account_fingerprint
+        == "account-a"
+    )
+
+    assert (
+        context[
+            "credential_registry"
+        ].get_secret(
+            agent_id="trusted-agent-001"
+        )
+        == "agent-secret-a"
+    )
+
+    assert (
+        context[
+            "execution_signing_key_registry"
+        ].get_secret(
+            agent_id="trusted-agent-001"
+        )
+        == "execution-secret-a"
+    )
+
+    assert (
+        context[
+            "control_signing_key_registry"
+        ].get_secret(
+            agent_id="trusted-agent-001"
+        )
+        == "control-secret-a"
+    )
+
+
+def test_activate_revalidates_runtime_conflict_after_prepare(
+    tmp_path: Path,
+) -> None:
+    context = build_enrollment_system(
+        tmp_path
+    )
+
+    deployment = make_deployment()
+    secrets = make_secrets()
+
+    context[
+        "service"
+    ].prepare(
+        deployment=deployment,
+        secrets=secrets,
+        account_fingerprint="account-a",
+    )
+
+    context[
+        "credential_registry"
+    ].register(
+        agent_id="trusted-agent-001",
+        agent_secret=(
+            "conflicting-runtime-secret"
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="runtime credential",
+    ):
+        context[
+            "service"
+        ].activate(
+            deployment=deployment,
+            secrets=secrets,
+            account_fingerprint="account-a",
+        )
+
+    assert context[
+        "deployment_registry"
+    ].size() == 0
+
+    stored_secrets = context[
+        "secret_store"
+    ].get(
+        deployment_id="deployment-001"
+    )
+
+    assert stored_secrets is not None
+    assert stored_secrets.same_secret_material(
+        secrets
+    )
+
+    assert context[
+        "account_binding_store"
+    ].owns_account(
+        agent_id="trusted-agent-001",
+        account_fingerprint="account-a",
     )
 
     assert (

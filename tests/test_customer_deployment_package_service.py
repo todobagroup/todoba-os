@@ -1,8 +1,9 @@
-﻿"""
+"""
 TODOBA Customer Deployment Package Service Tests
 
 Proof:
 - one customer-safe EX5 is published
+- prepared bootstrap builds before deployment activation
 - published metadata matches the real artifact
 - repeated build atomically replaces the artifact
 - failed rebuild preserves the previously published EX5
@@ -23,6 +24,7 @@ import hashlib
 import pytest
 
 from backend.commercial.customer_deployment_bootstrap_service import (
+    CustomerDeploymentBootstrapPreparationResult,
     CustomerDeploymentBootstrapResult,
 )
 from backend.commercial.customer_deployment_package_service import (
@@ -30,6 +32,7 @@ from backend.commercial.customer_deployment_package_service import (
 )
 from backend.commercial.customer_deployment_registry import (
     CustomerDeployment,
+    CustomerDeploymentRegistry,
 )
 from backend.commercial.customer_deployment_secret_store import (
     CustomerDeploymentSecrets,
@@ -69,6 +72,27 @@ def make_bootstrap_result(
         projected_deployment_count=1,
     )
 
+
+def make_bootstrap_preparation_result(
+    *,
+    deployment_id: str = "deployment-package-prepared-001",
+    agent_id: str = "trusted-agent-package-prepared-001",
+) -> CustomerDeploymentBootstrapPreparationResult:
+    complete = make_bootstrap_result(
+        deployment_id=deployment_id,
+        agent_id=agent_id,
+    )
+
+    return CustomerDeploymentBootstrapPreparationResult(
+        enrollment_request_id=(
+            complete.enrollment_request_id
+        ),
+        deployment=complete.deployment,
+        secrets=complete.secrets,
+        account_fingerprint=(
+            complete.account_fingerprint
+        ),
+    )
 
 def prepare_roots(
     tmp_path: Path,
@@ -327,6 +351,59 @@ def build_service(
 
     return service, roots
 
+
+def test_prepared_bootstrap_builds_without_deployment_activation(
+    tmp_path: Path,
+) -> None:
+    artifact_bytes = (
+        b"TODOBA-PREPARED-CUSTOMER-EX5"
+    )
+
+    service, _ = build_service(
+        tmp_path,
+        artifact_bytes_getter=(
+            lambda: artifact_bytes
+        ),
+    )
+
+    deployment_registry = (
+        CustomerDeploymentRegistry(
+            tmp_path
+            / "customer_deployments.json"
+        )
+    )
+    deployment_registry.initialize_empty()
+
+    prepared = (
+        make_bootstrap_preparation_result()
+    )
+
+    assert deployment_registry.size() == 0
+
+    result = service.build_package(
+        bootstrap_result=prepared
+    )
+
+    assert result.artifact_path.is_file()
+
+    assert (
+        result.artifact_path.read_bytes()
+        == artifact_bytes
+    )
+
+    assert (
+        result.deployment_id
+        == prepared.deployment.deployment_id
+    )
+
+    assert (
+        result.agent_id
+        == prepared.deployment.agent_id
+    )
+
+    # Package build must not cross the commercial
+    # deployment activation barrier.
+    assert deployment_registry.size() == 0
 
 def test_build_publishes_exactly_one_customer_safe_ex5(
     tmp_path: Path,

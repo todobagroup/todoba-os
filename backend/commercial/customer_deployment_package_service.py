@@ -1,8 +1,8 @@
 """
 TODOBA Customer Deployment Package Service
 
-Builds one customer-safe Trusted Agent artifact from an
-already completed commercial bootstrap.
+Builds one customer-safe Trusted Agent artifact from a
+prepared or completed commercial bootstrap.
 
 Architecture:
 
@@ -46,6 +46,7 @@ import threading
 import uuid
 
 from backend.commercial.customer_deployment_bootstrap_service import (
+    CustomerDeploymentBootstrapPreparationResult,
     CustomerDeploymentBootstrapResult,
 )
 from backend.commercial.customer_deployment_package_publication import (
@@ -284,6 +285,7 @@ class CustomerDeploymentPackageService:
         *,
         bootstrap_result: (
             CustomerDeploymentBootstrapResult
+            | CustomerDeploymentBootstrapPreparationResult
         ),
     ) -> CustomerDeploymentPackageResult:
         """
@@ -687,6 +689,7 @@ class CustomerDeploymentPackageService:
         self,
         bootstrap_result: (
             CustomerDeploymentBootstrapResult
+            | CustomerDeploymentBootstrapPreparationResult
         ),
     ) -> tuple[
         CustomerDeployment,
@@ -695,11 +698,15 @@ class CustomerDeploymentPackageService:
     ]:
         if not isinstance(
             bootstrap_result,
-            CustomerDeploymentBootstrapResult,
+            (
+                CustomerDeploymentBootstrapResult,
+                CustomerDeploymentBootstrapPreparationResult,
+            ),
         ):
             raise TypeError(
                 "bootstrap_result must be "
-                "CustomerDeploymentBootstrapResult."
+                "CustomerDeploymentBootstrapResult or "
+                "CustomerDeploymentBootstrapPreparationResult."
             )
 
         deployment = (

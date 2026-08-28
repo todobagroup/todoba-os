@@ -5,6 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from backend.commercial.customer_deployment_package_build_request_store import (
+    CustomerDeploymentPackageBuildRequestStore,
+)
 from backend.commercial.customer_setup_activation_service import (
     CustomerSetupActivationStore,
 )
@@ -22,6 +25,10 @@ ACTIVATION_FILENAME = (
 
 HANDOFF_FILENAME = (
     "customer_setup_handoffs.json"
+)
+
+PACKAGE_BUILD_REQUEST_DIRECTORY = (
+    "customer_deployment_package_build_requests"
 )
 
 
@@ -63,7 +70,7 @@ def test_requires_explicit_runtime_stopped_confirmation(
     assert not control_plane_root.exists()
 
 
-def test_first_provisioning_creates_only_two_ready_setup_stores(
+def test_first_provisioning_creates_only_required_ready_state(
     tmp_path: Path,
 ) -> None:
     control_plane_root = (
@@ -74,6 +81,7 @@ def test_first_provisioning_creates_only_two_ready_setup_stores(
     (
         activation_path,
         handoff_path,
+        package_build_request_root,
     ) = provision_customer_setup_control_plane(
         control_plane_root=control_plane_root,
         confirm_runtime_stopped=True,
@@ -94,8 +102,17 @@ def test_first_provisioning_creates_only_two_ready_setup_stores(
         / HANDOFF_FILENAME
     )
 
+    assert package_build_request_root == (
+        commercial_root
+        / PACKAGE_BUILD_REQUEST_DIRECTORY
+    )
+
     assert activation_path.is_file()
     assert handoff_path.is_file()
+
+    assert (
+        package_build_request_root.is_dir()
+    )
 
     files = {
         path.name
@@ -106,6 +123,16 @@ def test_first_provisioning_creates_only_two_ready_setup_stores(
     assert files == {
         ACTIVATION_FILENAME,
         HANDOFF_FILENAME,
+    }
+
+    directories = {
+        path.name
+        for path in commercial_root.iterdir()
+        if path.is_dir()
+    }
+
+    assert directories == {
+        PACKAGE_BUILD_REQUEST_DIRECTORY,
     }
 
     activation_store = (
@@ -120,11 +147,26 @@ def test_first_provisioning_creates_only_two_ready_setup_stores(
         )
     )
 
+    package_build_request_store = (
+        CustomerDeploymentPackageBuildRequestStore(
+            package_build_request_root
+        )
+    )
+
     assert activation_store.is_ready()
     assert handoff_store.is_ready()
 
+    assert (
+        package_build_request_store.is_ready()
+    )
 
-def test_retry_is_byte_for_byte_idempotent(
+    assert (
+        package_build_request_store.size()
+        == 0
+    )
+
+
+def test_retry_is_byte_for_byte_and_queue_idempotent(
     tmp_path: Path,
 ) -> None:
     control_plane_root = (
@@ -147,6 +189,10 @@ def test_retry_is_byte_for_byte_idempotent(
         first_result[1].read_bytes()
     )
 
+    first_queue_entries = tuple(
+        first_result[2].iterdir()
+    )
+
     second_result = (
         provision_customer_setup_control_plane(
             control_plane_root=control_plane_root,
@@ -166,18 +212,34 @@ def test_retry_is_byte_for_byte_idempotent(
         == first_handoff_bytes
     )
 
+    assert tuple(
+        second_result[2].iterdir()
+    ) == first_queue_entries
+
+    commercial_root = (
+        control_plane_root
+        / "commercial"
+    )
+
     commercial_files = {
         path.name
-        for path in (
-            control_plane_root
-            / "commercial"
-        ).iterdir()
+        for path in commercial_root.iterdir()
         if path.is_file()
     }
 
     assert commercial_files == {
         ACTIVATION_FILENAME,
         HANDOFF_FILENAME,
+    }
+
+    commercial_directories = {
+        path.name
+        for path in commercial_root.iterdir()
+        if path.is_dir()
+    }
+
+    assert commercial_directories == {
+        PACKAGE_BUILD_REQUEST_DIRECTORY,
     }
 
 
@@ -238,6 +300,11 @@ def test_provisioner_has_store_only_commercial_surface() -> None:
     assert commercial_imports == {
         (
             "backend.commercial."
+            "customer_deployment_package_build_request_store",
+            "CustomerDeploymentPackageBuildRequestStore",
+        ),
+        (
+            "backend.commercial."
             "customer_setup_activation_service",
             "CustomerSetupActivationStore",
         ),
@@ -252,7 +319,7 @@ def test_provisioner_has_store_only_commercial_surface() -> None:
         called_attributes.count(
             "initialize_empty"
         )
-        == 2
+        == 3
     )
 
     forbidden_business_actions = {
@@ -262,9 +329,11 @@ def test_provisioner_has_store_only_commercial_surface() -> None:
         "suspend",
         "reactivate",
         "revoke",
+        "register",
         "enroll",
         "onboard",
         "build_package",
+        "acquire",
     }
 
     assert (

@@ -1104,6 +1104,266 @@ def test_restart_recovers_same_prepared_bootstrap(
     )
 
 
+def test_recover_prepared_bootstrap_after_restart_from_request_id_only(
+    tmp_path: Path,
+) -> None:
+    first_context = build_system(
+        tmp_path
+    )
+
+    prepared = first_context[
+        "bootstrap_service"
+    ].prepare_bootstrap(
+        enrollment_request_id="request-001",
+        customer_id="customer-001",
+        account_fingerprint="account-a",
+    )
+
+    assert first_context[
+        "deployment_registry"
+    ].size() == 0
+
+    restarted = build_system(
+        tmp_path
+    )
+
+    recovered = restarted[
+        "bootstrap_service"
+    ].recover_prepared_bootstrap(
+        enrollment_request_id="request-001"
+    )
+
+    assert (
+        recovered.enrollment_request_id
+        == "request-001"
+    )
+
+    assert (
+        recovered.deployment
+        == prepared.deployment
+    )
+
+    assert recovered.secrets.same_secret_material(
+        prepared.secrets
+    )
+
+    assert (
+        recovered.account_fingerprint
+        == "account-a"
+    )
+
+    assert restarted[
+        "bootstrap_store"
+    ].size() == 1
+
+    assert restarted[
+        "deployment_registry"
+    ].size() == 0
+
+    assert (
+        restarted[
+            "execution_target_registry"
+        ].get(
+            agent_id=(
+                prepared.deployment.agent_id
+            )
+        )
+        is None
+    )
+
+
+def test_recover_prepared_bootstrap_missing_record_fails_closed(
+    tmp_path: Path,
+) -> None:
+    context = build_system(
+        tmp_path
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="identity is missing",
+    ):
+        context[
+            "bootstrap_service"
+        ].recover_prepared_bootstrap(
+            enrollment_request_id="missing-request"
+        )
+
+    assert context[
+        "bootstrap_store"
+    ].size() == 0
+
+    assert context[
+        "deployment_registry"
+    ].size() == 0
+
+
+def test_recover_prepared_bootstrap_missing_secret_fails_closed(
+    tmp_path: Path,
+) -> None:
+    context = build_system(
+        tmp_path
+    )
+
+    record = seed_bootstrap_record(
+        context
+    )
+
+    context[
+        "account_binding_store"
+    ].bind(
+        agent_id=record.agent_id,
+        account_fingerprint="account-a",
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="secret material is missing",
+    ):
+        context[
+            "bootstrap_service"
+        ].recover_prepared_bootstrap(
+            enrollment_request_id="request-001"
+        )
+
+    assert (
+        context[
+            "secret_store"
+        ].get(
+            deployment_id=(
+                record.deployment_id
+            )
+        )
+        is None
+    )
+
+    assert context[
+        "deployment_registry"
+    ].size() == 0
+
+
+def test_recover_prepared_bootstrap_missing_binding_fails_closed(
+    tmp_path: Path,
+) -> None:
+    context = build_system(
+        tmp_path
+    )
+
+    record = seed_bootstrap_record(
+        context
+    )
+
+    staged = make_staged_secrets()
+
+    context[
+        "secret_store"
+    ].register(
+        staged
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="account binding is missing",
+    ):
+        context[
+            "bootstrap_service"
+        ].recover_prepared_bootstrap(
+            enrollment_request_id="request-001"
+        )
+
+    assert (
+        context[
+            "account_binding_store"
+        ].get_account_fingerprint(
+            agent_id=record.agent_id
+        )
+        is None
+    )
+
+    assert context[
+        "deployment_registry"
+    ].size() == 0
+
+
+def test_recover_prepared_bootstrap_binding_digest_mismatch_fails_closed(
+    tmp_path: Path,
+) -> None:
+    context = build_system(
+        tmp_path
+    )
+
+    record = seed_bootstrap_record(
+        context,
+        account_fingerprint="account-a",
+    )
+
+    staged = make_staged_secrets()
+
+    context[
+        "secret_store"
+    ].register(
+        staged
+    )
+
+    context[
+        "account_binding_store"
+    ].bind(
+        agent_id=record.agent_id,
+        account_fingerprint="account-b",
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "account binding does not match "
+            "durable identity"
+        ),
+    ):
+        context[
+            "bootstrap_service"
+        ].recover_prepared_bootstrap(
+            enrollment_request_id="request-001"
+        )
+
+    assert context[
+        "deployment_registry"
+    ].size() == 0
+
+
+def test_recover_prepared_bootstrap_rejects_active_deployment(
+    tmp_path: Path,
+) -> None:
+    context = build_system(
+        tmp_path
+    )
+
+    activated = context[
+        "bootstrap_service"
+    ].bootstrap(
+        enrollment_request_id="request-001",
+        customer_id="customer-001",
+        account_fingerprint="account-a",
+    )
+
+    assert context[
+        "deployment_registry"
+    ].get(
+        deployment_id=(
+            activated.deployment.deployment_id
+        )
+    ) is not None
+
+    with pytest.raises(
+        RuntimeError,
+        match="already active",
+    ):
+        context[
+            "bootstrap_service"
+        ].recover_prepared_bootstrap(
+            enrollment_request_id="request-001"
+        )
+
+
 def test_activate_bootstrap_crosses_activation_barrier(
     tmp_path: Path,
 ) -> None:

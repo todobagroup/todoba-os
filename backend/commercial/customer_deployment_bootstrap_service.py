@@ -958,6 +958,142 @@ class CustomerDeploymentBootstrapService:
                 ),
             )
 
+    def recover_prepared_bootstrap(
+        self,
+        *,
+        enrollment_request_id: str,
+    ) -> CustomerDeploymentBootstrapPreparationResult:
+        """
+        Recover one already-prepared bootstrap exclusively
+        from its durable enrollment request identity.
+
+        Recovery never generates replacement identity,
+        secret material, or account ownership.
+
+        The durable bootstrap record, deployment secret
+        material, and Trusted Agent account binding must all
+        already exist and agree.
+
+        An already-active deployment is not a prepared
+        candidate and therefore fails closed here.
+        """
+
+        normalized_request_id = (
+            self._normalize_required_string(
+                enrollment_request_id,
+                name="enrollment_request_id",
+            )
+        )
+
+        with self._lock:
+            self._require_sources_ready()
+
+            record = self._bootstrap_store.get(
+                enrollment_request_id=(
+                    normalized_request_id
+                )
+            )
+
+            if record is None:
+                raise RuntimeError(
+                    "Prepared customer deployment bootstrap "
+                    "identity is missing."
+                )
+
+            deployment = CustomerDeployment(
+                customer_id=record.customer_id,
+                deployment_id=(
+                    record.deployment_id
+                ),
+                agent_id=record.agent_id,
+            )
+
+            active_deployment = (
+                self._deployment_registry.get(
+                    deployment_id=(
+                        record.deployment_id
+                    )
+                )
+            )
+
+            if active_deployment is not None:
+                raise RuntimeError(
+                    "Prepared customer deployment bootstrap "
+                    "is already active."
+                )
+
+            stored_secrets = self._secret_store.get(
+                deployment_id=(
+                    record.deployment_id
+                )
+            )
+
+            if stored_secrets is None:
+                raise RuntimeError(
+                    "Prepared customer deployment bootstrap "
+                    "secret material is missing."
+                )
+
+            if (
+                stored_secrets.deployment_id
+                != record.deployment_id
+            ):
+                raise RuntimeError(
+                    "Prepared customer deployment bootstrap "
+                    "secret identity does not match durable "
+                    "identity."
+                )
+
+            account_fingerprint = (
+                self._account_binding_store
+                .get_account_fingerprint(
+                    agent_id=record.agent_id
+                )
+            )
+
+            if account_fingerprint is None:
+                raise RuntimeError(
+                    "Prepared customer deployment bootstrap "
+                    "account binding is missing."
+                )
+
+            account_digest = (
+                self._account_fingerprint_digest(
+                    account_fingerprint
+                )
+            )
+
+            if (
+                account_digest
+                != record.account_fingerprint_digest
+            ):
+                raise RuntimeError(
+                    "Prepared customer deployment bootstrap "
+                    "account binding does not match durable "
+                    "identity."
+                )
+
+            preparation_result = (
+                self._enrollment_service.prepare(
+                    deployment=deployment,
+                    secrets=stored_secrets,
+                    account_fingerprint=(
+                        account_fingerprint
+                    ),
+                )
+            )
+
+            return self._build_preparation_result(
+                record=record,
+                secrets=stored_secrets,
+                account_fingerprint=(
+                    account_fingerprint
+                ),
+                preparation_result=(
+                    preparation_result
+                ),
+            )
+
     def activate_bootstrap(
         self,
         *,

@@ -30,6 +30,33 @@ from backend.commercial.customer_authenticator import (
 from backend.commercial.customer_deployment_authorizer import (
     CustomerDeploymentAuthorizer,
 )
+from backend.commercial.customer_deployment_bootstrap_service import (
+    CustomerDeploymentBootstrapService,
+    CustomerDeploymentBootstrapStore,
+)
+from backend.commercial.customer_deployment_enrollment_service import (
+    CustomerDeploymentEnrollmentService,
+)
+from backend.commercial.customer_deployment_package_build_request_store import (
+    CustomerDeploymentPackageBuildRequestStore,
+)
+from backend.commercial.customer_setup_activation_service import (
+    CustomerSetupActivationService,
+    CustomerSetupActivationStore,
+)
+from backend.commercial.customer_setup_handoff_authorizer import (
+    CustomerSetupHandoffAuthorizer,
+)
+from backend.commercial.customer_setup_handoff_service import (
+    CustomerSetupHandoffService,
+    CustomerSetupHandoffStore,
+)
+from backend.commercial.customer_setup_package_api import (
+    create_customer_setup_package_router,
+)
+from backend.commercial.customer_setup_provisioning_api import (
+    create_customer_setup_provisioning_router,
+)
 from backend.commercial.customer_deployment_entitlement_authorizer import (
     CustomerDeploymentEntitlementAuthorizer,
 )
@@ -397,6 +424,30 @@ CUSTOMER_DEPLOYMENT_ENTITLEMENT_STORAGE_PATH = (
     / "customer_deployment_entitlements.json"
 )
 
+CUSTOMER_SETUP_ACTIVATION_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_setup_activations.json"
+)
+
+CUSTOMER_SETUP_HANDOFF_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_setup_handoffs.json"
+)
+
+CUSTOMER_DEPLOYMENT_BOOTSTRAP_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_deployment_bootstraps.json"
+)
+
+CUSTOMER_DEPLOYMENT_PACKAGE_BUILD_REQUEST_STORAGE_ROOT = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_deployment_package_build_requests"
+)
+
 TRUSTED_AGENT_ACCOUNT_BINDING_STORAGE_PATH = (
     TODOBA_CONTROL_PLANE_DATA_ROOT
     / "trading"
@@ -538,6 +589,235 @@ customer_deployment_runtime_projection = (
 )
 
 
+_customer_setup_runtime_composed = False
+
+customer_setup_activation_store = None
+customer_setup_handoff_store = None
+customer_deployment_bootstrap_store = None
+customer_deployment_package_build_request_store = None
+customer_setup_activation_service = None
+customer_setup_handoff_service = None
+customer_setup_handoff_authorizer = None
+customer_deployment_enrollment_service = None
+customer_deployment_bootstrap_service = None
+
+
+def _compose_customer_setup_runtime(
+    app: FastAPI,
+) -> None:
+    global _customer_setup_runtime_composed
+    global customer_setup_activation_store
+    global customer_setup_handoff_store
+    global customer_deployment_bootstrap_store
+    global customer_deployment_package_build_request_store
+    global customer_setup_activation_service
+    global customer_setup_handoff_service
+    global customer_setup_handoff_authorizer
+    global customer_deployment_enrollment_service
+    global customer_deployment_bootstrap_service
+
+    if _customer_setup_runtime_composed:
+        return
+
+    activation_store = (
+        CustomerSetupActivationStore(
+            CUSTOMER_SETUP_ACTIVATION_STORAGE_PATH
+        )
+    )
+
+    handoff_store = (
+        CustomerSetupHandoffStore(
+            CUSTOMER_SETUP_HANDOFF_STORAGE_PATH
+        )
+    )
+
+    bootstrap_store = (
+        CustomerDeploymentBootstrapStore(
+            CUSTOMER_DEPLOYMENT_BOOTSTRAP_STORAGE_PATH
+        )
+    )
+
+    build_request_store = (
+        CustomerDeploymentPackageBuildRequestStore(
+            CUSTOMER_DEPLOYMENT_PACKAGE_BUILD_REQUEST_STORAGE_ROOT
+        )
+    )
+
+    required_owners = (
+        (
+            "Customer setup activation store",
+            activation_store,
+        ),
+        (
+            "Customer setup handoff store",
+            handoff_store,
+        ),
+        (
+            "Customer deployment bootstrap store",
+            bootstrap_store,
+        ),
+        (
+            "Customer deployment package build request store",
+            build_request_store,
+        ),
+    )
+
+    for owner_name, owner in required_owners:
+        if not owner.is_ready():
+            raise RuntimeError(
+                f"{owner_name} is not initialized."
+            )
+
+    activation_service = (
+        CustomerSetupActivationService(
+            activation_store=(
+                activation_store
+            ),
+            customer_identity_registry=(
+                customer_identity_registry
+            ),
+            deployment_registry=(
+                customer_deployment_registry
+            ),
+        )
+    )
+
+    handoff_service = (
+        CustomerSetupHandoffService(
+            handoff_store=(
+                handoff_store
+            ),
+            setup_activation_store=(
+                activation_store
+            ),
+        )
+    )
+
+    handoff_authorizer = (
+        CustomerSetupHandoffAuthorizer(
+            handoff_service=(
+                handoff_service
+            )
+        )
+    )
+
+    enrollment_service = (
+        CustomerDeploymentEnrollmentService(
+            deployment_registry=(
+                customer_deployment_registry
+            ),
+            secret_store=(
+                customer_deployment_secret_store
+            ),
+            account_binding_store=(
+                trusted_agent_account_binding_store
+            ),
+            runtime_projection=(
+                customer_deployment_runtime_projection
+            ),
+        )
+    )
+
+    bootstrap_service = (
+        CustomerDeploymentBootstrapService(
+            bootstrap_store=(
+                bootstrap_store
+            ),
+            deployment_registry=(
+                customer_deployment_registry
+            ),
+            secret_store=(
+                customer_deployment_secret_store
+            ),
+            account_binding_store=(
+                trusted_agent_account_binding_store
+            ),
+            enrollment_service=(
+                enrollment_service
+            ),
+        )
+    )
+
+    provisioning_router = (
+        create_customer_setup_provisioning_router(
+            authorize_setup_handoff=(
+                handoff_authorizer.authorize
+            ),
+            bootstrap_service=(
+                bootstrap_service
+            ),
+            build_request_store=(
+                build_request_store
+            ),
+            package_publication=(
+                customer_deployment_package_publication
+            ),
+            entitlement_registry=(
+                customer_deployment_entitlement_registry
+            ),
+            setup_activation_service=(
+                activation_service
+            ),
+        )
+    )
+
+    package_router = (
+        create_customer_setup_package_router(
+            authorize_setup_handoff=(
+                handoff_authorizer.authorize
+            ),
+            authorize_deployment=(
+                customer_deployment_authorizer.authorize
+            ),
+            authorize_entitlement=(
+                customer_deployment_entitlement_authorizer
+                .authorize
+            ),
+            package_publication=(
+                customer_deployment_package_publication
+            ),
+        )
+    )
+
+    app.include_router(
+        provisioning_router
+    )
+
+    app.include_router(
+        package_router
+    )
+
+    customer_setup_activation_store = (
+        activation_store
+    )
+    customer_setup_handoff_store = (
+        handoff_store
+    )
+    customer_deployment_bootstrap_store = (
+        bootstrap_store
+    )
+    customer_deployment_package_build_request_store = (
+        build_request_store
+    )
+    customer_setup_activation_service = (
+        activation_service
+    )
+    customer_setup_handoff_service = (
+        handoff_service
+    )
+    customer_setup_handoff_authorizer = (
+        handoff_authorizer
+    )
+    customer_deployment_enrollment_service = (
+        enrollment_service
+    )
+    customer_deployment_bootstrap_service = (
+        bootstrap_service
+    )
+
+    _customer_setup_runtime_composed = True
+
+
 def refresh_customer_deployment_runtime_projection(
 ) -> int:
     return (
@@ -644,6 +924,10 @@ async def lifespan(
     refresh_customer_deployment_runtime_projection()
 
     _require_trusted_agent_account_bindings()
+
+    _compose_customer_setup_runtime(
+        app
+    )
 
     execution_mission_record_recovery.restore()
 

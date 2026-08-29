@@ -20,6 +20,15 @@ def test_main_converges_evidence_before_mission_delivery(
             "test-account",
         )
 
+    def compose_customer_setup_runtime(
+        app,
+    ) -> None:
+        assert app is main.app
+
+        calls.append(
+            "customer_setup"
+        )
+
     def restore_records() -> int:
         calls.append(
             "records"
@@ -94,6 +103,12 @@ def test_main_converges_evidence_before_mission_delivery(
     )
 
     monkeypatch.setattr(
+        main,
+        "_compose_customer_setup_runtime",
+        compose_customer_setup_runtime,
+    )
+
+    monkeypatch.setattr(
         main.execution_mission_record_recovery,
         "restore",
         restore_records,
@@ -141,6 +156,7 @@ def test_main_converges_evidence_before_mission_delivery(
         ):
             assert calls == [
                 "account_bindings",
+                "customer_setup",
                 "records",
                 "delivery_leases",
                 "evidence",
@@ -155,6 +171,7 @@ def test_main_converges_evidence_before_mission_delivery(
 
     assert calls == [
         "account_bindings",
+        "customer_setup",
         "records",
         "delivery_leases",
         "evidence",

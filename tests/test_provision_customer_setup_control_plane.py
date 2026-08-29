@@ -5,6 +5,9 @@ from pathlib import Path
 
 import pytest
 
+from backend.commercial.customer_deployment_bootstrap_service import (
+    CustomerDeploymentBootstrapStore,
+)
 from backend.commercial.customer_deployment_package_build_request_store import (
     CustomerDeploymentPackageBuildRequestStore,
 )
@@ -25,6 +28,10 @@ ACTIVATION_FILENAME = (
 
 HANDOFF_FILENAME = (
     "customer_setup_handoffs.json"
+)
+
+BOOTSTRAP_FILENAME = (
+    "customer_deployment_bootstraps.json"
 )
 
 PACKAGE_BUILD_REQUEST_DIRECTORY = (
@@ -81,6 +88,7 @@ def test_first_provisioning_creates_only_required_ready_state(
     (
         activation_path,
         handoff_path,
+        bootstrap_path,
         package_build_request_root,
     ) = provision_customer_setup_control_plane(
         control_plane_root=control_plane_root,
@@ -102,6 +110,11 @@ def test_first_provisioning_creates_only_required_ready_state(
         / HANDOFF_FILENAME
     )
 
+    assert bootstrap_path == (
+        commercial_root
+        / BOOTSTRAP_FILENAME
+    )
+
     assert package_build_request_root == (
         commercial_root
         / PACKAGE_BUILD_REQUEST_DIRECTORY
@@ -109,6 +122,7 @@ def test_first_provisioning_creates_only_required_ready_state(
 
     assert activation_path.is_file()
     assert handoff_path.is_file()
+    assert bootstrap_path.is_file()
 
     assert (
         package_build_request_root.is_dir()
@@ -123,6 +137,7 @@ def test_first_provisioning_creates_only_required_ready_state(
     assert files == {
         ACTIVATION_FILENAME,
         HANDOFF_FILENAME,
+        BOOTSTRAP_FILENAME,
     }
 
     directories = {
@@ -147,6 +162,12 @@ def test_first_provisioning_creates_only_required_ready_state(
         )
     )
 
+    bootstrap_store = (
+        CustomerDeploymentBootstrapStore(
+            bootstrap_path
+        )
+    )
+
     package_build_request_store = (
         CustomerDeploymentPackageBuildRequestStore(
             package_build_request_root
@@ -155,6 +176,7 @@ def test_first_provisioning_creates_only_required_ready_state(
 
     assert activation_store.is_ready()
     assert handoff_store.is_ready()
+    assert bootstrap_store.is_ready()
 
     assert (
         package_build_request_store.is_ready()
@@ -189,8 +211,12 @@ def test_retry_is_byte_for_byte_and_queue_idempotent(
         first_result[1].read_bytes()
     )
 
+    first_bootstrap_bytes = (
+        first_result[2].read_bytes()
+    )
+
     first_queue_entries = tuple(
-        first_result[2].iterdir()
+        first_result[3].iterdir()
     )
 
     second_result = (
@@ -212,8 +238,13 @@ def test_retry_is_byte_for_byte_and_queue_idempotent(
         == first_handoff_bytes
     )
 
+    assert (
+        second_result[2].read_bytes()
+        == first_bootstrap_bytes
+    )
+
     assert tuple(
-        second_result[2].iterdir()
+        second_result[3].iterdir()
     ) == first_queue_entries
 
     commercial_root = (
@@ -230,6 +261,7 @@ def test_retry_is_byte_for_byte_and_queue_idempotent(
     assert commercial_files == {
         ACTIVATION_FILENAME,
         HANDOFF_FILENAME,
+        BOOTSTRAP_FILENAME,
     }
 
     commercial_directories = {
@@ -300,6 +332,11 @@ def test_provisioner_has_store_only_commercial_surface() -> None:
     assert commercial_imports == {
         (
             "backend.commercial."
+            "customer_deployment_bootstrap_service",
+            "CustomerDeploymentBootstrapStore",
+        ),
+        (
+            "backend.commercial."
             "customer_deployment_package_build_request_store",
             "CustomerDeploymentPackageBuildRequestStore",
         ),
@@ -319,7 +356,7 @@ def test_provisioner_has_store_only_commercial_surface() -> None:
         called_attributes.count(
             "initialize_empty"
         )
-        == 3
+        == 4
     )
 
     forbidden_business_actions = {

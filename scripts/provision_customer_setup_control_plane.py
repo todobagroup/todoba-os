@@ -8,6 +8,7 @@ package-build flow:
 
 - customer_setup_activations.json
 - customer_setup_handoffs.json
+- customer_deployment_bootstraps.json
 - customer_deployment_package_build_requests/
 
 Safety contract:
@@ -30,6 +31,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from backend.commercial.customer_deployment_bootstrap_service import (
+    CustomerDeploymentBootstrapStore,
+)
 from backend.commercial.customer_deployment_package_build_request_store import (
     CustomerDeploymentPackageBuildRequestStore,
 )
@@ -49,6 +53,10 @@ _CUSTOMER_SETUP_HANDOFF_FILENAME = (
     "customer_setup_handoffs.json"
 )
 
+_CUSTOMER_DEPLOYMENT_BOOTSTRAP_FILENAME = (
+    "customer_deployment_bootstraps.json"
+)
+
 _CUSTOMER_PACKAGE_BUILD_REQUEST_DIRECTORY = (
     "customer_deployment_package_build_requests"
 )
@@ -59,6 +67,7 @@ def provision_customer_setup_control_plane(
     control_plane_root: Path,
     confirm_runtime_stopped: bool,
 ) -> tuple[
+    Path,
     Path,
     Path,
     Path,
@@ -103,6 +112,11 @@ def provision_customer_setup_control_plane(
         / _CUSTOMER_SETUP_HANDOFF_FILENAME
     )
 
+    bootstrap_storage_path = (
+        commercial_root
+        / _CUSTOMER_DEPLOYMENT_BOOTSTRAP_FILENAME
+    )
+
     package_build_request_storage_root = (
         commercial_root
         / _CUSTOMER_PACKAGE_BUILD_REQUEST_DIRECTORY
@@ -120,6 +134,12 @@ def provision_customer_setup_control_plane(
         )
     )
 
+    bootstrap_store = (
+        CustomerDeploymentBootstrapStore(
+            bootstrap_storage_path
+        )
+    )
+
     package_build_request_store = (
         CustomerDeploymentPackageBuildRequestStore(
             package_build_request_storage_root
@@ -131,6 +151,9 @@ def provision_customer_setup_control_plane(
 
     if not handoff_store.is_ready():
         handoff_store.initialize_empty()
+
+    if not bootstrap_store.is_ready():
+        bootstrap_store.initialize_empty()
 
     if not package_build_request_store.is_ready():
         package_build_request_store.initialize_empty()
@@ -147,6 +170,12 @@ def provision_customer_setup_control_plane(
             "become ready."
         )
 
+    if not bootstrap_store.is_ready():
+        raise RuntimeError(
+            "Customer deployment bootstrap store did not "
+            "become ready."
+        )
+
     if not package_build_request_store.is_ready():
         raise RuntimeError(
             "Customer deployment package build request "
@@ -156,6 +185,7 @@ def provision_customer_setup_control_plane(
     return (
         activation_storage_path,
         handoff_storage_path,
+        bootstrap_storage_path,
         package_build_request_storage_root,
     )
 
@@ -198,6 +228,7 @@ def main() -> int:
     (
         activation_storage_path,
         handoff_storage_path,
+        bootstrap_storage_path,
         package_build_request_storage_root,
     ) = provision_customer_setup_control_plane(
         control_plane_root=(
@@ -217,6 +248,10 @@ def main() -> int:
     )
 
     print(
+        "CUSTOMER_DEPLOYMENT_BOOTSTRAP_STORE=READY"
+    )
+
+    print(
         "CUSTOMER_PACKAGE_BUILD_REQUEST_STORE=READY"
     )
 
@@ -228,6 +263,11 @@ def main() -> int:
     print(
         "CUSTOMER_SETUP_HANDOFF_PATH="
         f"{handoff_storage_path}"
+    )
+
+    print(
+        "CUSTOMER_DEPLOYMENT_BOOTSTRAP_PATH="
+        f"{bootstrap_storage_path}"
     )
 
     print(

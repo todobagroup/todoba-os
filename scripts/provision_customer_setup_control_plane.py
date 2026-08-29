@@ -6,6 +6,7 @@ This script exists only to initialize the authoritative
 durable domains required by the customer setup and customer
 package-build flow:
 
+- customer_registrations.json
 - customer_setup_activations.json
 - customer_setup_handoffs.json
 - customer_deployment_bootstraps.json
@@ -16,6 +17,7 @@ Safety contract:
 - existing valid durable state is preserved
 - missing stores are initialized empty
 - retries are idempotent
+- no customer registration is created
 - no setup activation is granted
 - no setup handoff credential is issued
 - no customer package build request is registered
@@ -37,6 +39,9 @@ from backend.commercial.customer_deployment_bootstrap_service import (
 from backend.commercial.customer_deployment_package_build_request_store import (
     CustomerDeploymentPackageBuildRequestStore,
 )
+from backend.commercial.customer_registration_service import (
+    CustomerRegistrationStore,
+)
 from backend.commercial.customer_setup_activation_service import (
     CustomerSetupActivationStore,
 )
@@ -44,6 +49,10 @@ from backend.commercial.customer_setup_handoff_service import (
     CustomerSetupHandoffStore,
 )
 
+
+_CUSTOMER_REGISTRATION_FILENAME = (
+    "customer_registrations.json"
+)
 
 _CUSTOMER_SETUP_ACTIVATION_FILENAME = (
     "customer_setup_activations.json"
@@ -67,6 +76,7 @@ def provision_customer_setup_control_plane(
     control_plane_root: Path,
     confirm_runtime_stopped: bool,
 ) -> tuple[
+    Path,
     Path,
     Path,
     Path,
@@ -102,6 +112,11 @@ def provision_customer_setup_control_plane(
         / "commercial"
     )
 
+    registration_storage_path = (
+        commercial_root
+        / _CUSTOMER_REGISTRATION_FILENAME
+    )
+
     activation_storage_path = (
         commercial_root
         / _CUSTOMER_SETUP_ACTIVATION_FILENAME
@@ -120,6 +135,12 @@ def provision_customer_setup_control_plane(
     package_build_request_storage_root = (
         commercial_root
         / _CUSTOMER_PACKAGE_BUILD_REQUEST_DIRECTORY
+    )
+
+    registration_store = (
+        CustomerRegistrationStore(
+            registration_storage_path
+        )
     )
 
     activation_store = (
@@ -146,6 +167,9 @@ def provision_customer_setup_control_plane(
         )
     )
 
+    if not registration_store.is_ready():
+        registration_store.initialize_empty()
+
     if not activation_store.is_ready():
         activation_store.initialize_empty()
 
@@ -157,6 +181,12 @@ def provision_customer_setup_control_plane(
 
     if not package_build_request_store.is_ready():
         package_build_request_store.initialize_empty()
+
+    if not registration_store.is_ready():
+        raise RuntimeError(
+            "Customer registration store did not "
+            "become ready."
+        )
 
     if not activation_store.is_ready():
         raise RuntimeError(
@@ -187,6 +217,7 @@ def provision_customer_setup_control_plane(
         handoff_storage_path,
         bootstrap_storage_path,
         package_build_request_storage_root,
+        registration_storage_path,
     )
 
 
@@ -230,6 +261,7 @@ def main() -> int:
         handoff_storage_path,
         bootstrap_storage_path,
         package_build_request_storage_root,
+        registration_storage_path,
     ) = provision_customer_setup_control_plane(
         control_plane_root=(
             args.control_plane_root
@@ -237,6 +269,10 @@ def main() -> int:
         confirm_runtime_stopped=(
             args.confirm_runtime_stopped
         ),
+    )
+
+    print(
+        "CUSTOMER_REGISTRATION_STORE=READY"
     )
 
     print(
@@ -253,6 +289,11 @@ def main() -> int:
 
     print(
         "CUSTOMER_PACKAGE_BUILD_REQUEST_STORE=READY"
+    )
+
+    print(
+        "CUSTOMER_REGISTRATION_PATH="
+        f"{registration_storage_path}"
     )
 
     print(

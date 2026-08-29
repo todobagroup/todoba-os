@@ -11,6 +11,9 @@ from backend.commercial.customer_deployment_bootstrap_service import (
 from backend.commercial.customer_deployment_package_build_request_store import (
     CustomerDeploymentPackageBuildRequestStore,
 )
+from backend.commercial.customer_registration_service import (
+    CustomerRegistrationStore,
+)
 from backend.commercial.customer_setup_activation_service import (
     CustomerSetupActivationStore,
 )
@@ -21,6 +24,10 @@ from scripts.provision_customer_setup_control_plane import (
     provision_customer_setup_control_plane,
 )
 
+
+REGISTRATION_FILENAME = (
+    "customer_registrations.json"
+)
 
 ACTIVATION_FILENAME = (
     "customer_setup_activations.json"
@@ -90,6 +97,7 @@ def test_first_provisioning_creates_only_required_ready_state(
         handoff_path,
         bootstrap_path,
         package_build_request_root,
+        registration_path,
     ) = provision_customer_setup_control_plane(
         control_plane_root=control_plane_root,
         confirm_runtime_stopped=True,
@@ -98,6 +106,11 @@ def test_first_provisioning_creates_only_required_ready_state(
     commercial_root = (
         control_plane_root
         / "commercial"
+    )
+
+    assert registration_path == (
+        commercial_root
+        / REGISTRATION_FILENAME
     )
 
     assert activation_path == (
@@ -120,6 +133,7 @@ def test_first_provisioning_creates_only_required_ready_state(
         / PACKAGE_BUILD_REQUEST_DIRECTORY
     )
 
+    assert registration_path.is_file()
     assert activation_path.is_file()
     assert handoff_path.is_file()
     assert bootstrap_path.is_file()
@@ -135,6 +149,7 @@ def test_first_provisioning_creates_only_required_ready_state(
     }
 
     assert files == {
+        REGISTRATION_FILENAME,
         ACTIVATION_FILENAME,
         HANDOFF_FILENAME,
         BOOTSTRAP_FILENAME,
@@ -149,6 +164,12 @@ def test_first_provisioning_creates_only_required_ready_state(
     assert directories == {
         PACKAGE_BUILD_REQUEST_DIRECTORY,
     }
+
+    registration_store = (
+        CustomerRegistrationStore(
+            registration_path
+        )
+    )
 
     activation_store = (
         CustomerSetupActivationStore(
@@ -173,6 +194,9 @@ def test_first_provisioning_creates_only_required_ready_state(
             package_build_request_root
         )
     )
+
+    assert registration_store.is_ready()
+    assert registration_store.size() == 0
 
     assert activation_store.is_ready()
     assert handoff_store.is_ready()
@@ -219,6 +243,10 @@ def test_retry_is_byte_for_byte_and_queue_idempotent(
         first_result[3].iterdir()
     )
 
+    first_registration_bytes = (
+        first_result[4].read_bytes()
+    )
+
     second_result = (
         provision_customer_setup_control_plane(
             control_plane_root=control_plane_root,
@@ -247,6 +275,11 @@ def test_retry_is_byte_for_byte_and_queue_idempotent(
         second_result[3].iterdir()
     ) == first_queue_entries
 
+    assert (
+        second_result[4].read_bytes()
+        == first_registration_bytes
+    )
+
     commercial_root = (
         control_plane_root
         / "commercial"
@@ -259,6 +292,7 @@ def test_retry_is_byte_for_byte_and_queue_idempotent(
     }
 
     assert commercial_files == {
+        REGISTRATION_FILENAME,
         ACTIVATION_FILENAME,
         HANDOFF_FILENAME,
         BOOTSTRAP_FILENAME,
@@ -342,6 +376,11 @@ def test_provisioner_has_store_only_commercial_surface() -> None:
         ),
         (
             "backend.commercial."
+            "customer_registration_service",
+            "CustomerRegistrationStore",
+        ),
+        (
+            "backend.commercial."
             "customer_setup_activation_service",
             "CustomerSetupActivationStore",
         ),
@@ -356,7 +395,7 @@ def test_provisioner_has_store_only_commercial_surface() -> None:
         called_attributes.count(
             "initialize_empty"
         )
-        == 4
+        == 5
     )
 
     forbidden_business_actions = {

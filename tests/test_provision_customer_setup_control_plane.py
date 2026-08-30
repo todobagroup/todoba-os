@@ -11,6 +11,9 @@ from backend.commercial.customer_deployment_bootstrap_service import (
 from backend.commercial.customer_deployment_package_build_request_store import (
     CustomerDeploymentPackageBuildRequestStore,
 )
+from backend.commercial.customer_identity_registry import (
+    CustomerIdentityRegistry,
+)
 from backend.commercial.customer_registration_service import (
     CustomerRegistrationStore,
 )
@@ -20,10 +23,17 @@ from backend.commercial.customer_setup_activation_service import (
 from backend.commercial.customer_setup_handoff_service import (
     CustomerSetupHandoffStore,
 )
+from backend.commercial.customer_setup_launch_credential_service import (
+    CustomerSetupLaunchCredentialStore,
+)
 from scripts.provision_customer_setup_control_plane import (
     provision_customer_setup_control_plane,
 )
 
+
+IDENTITY_FILENAME = (
+    "customer_identities.json"
+)
 
 REGISTRATION_FILENAME = (
     "customer_registrations.json"
@@ -37,6 +47,10 @@ HANDOFF_FILENAME = (
     "customer_setup_handoffs.json"
 )
 
+LAUNCH_CREDENTIAL_FILENAME = (
+    "customer_setup_launch_credentials.json"
+)
+
 BOOTSTRAP_FILENAME = (
     "customer_deployment_bootstraps.json"
 )
@@ -44,6 +58,18 @@ BOOTSTRAP_FILENAME = (
 PACKAGE_BUILD_REQUEST_DIRECTORY = (
     "customer_deployment_package_build_requests"
 )
+
+
+def _prepare_authoritative_identity_store(
+    control_plane_root: Path,
+) -> CustomerIdentityRegistry:
+    registry = CustomerIdentityRegistry(
+        control_plane_root
+        / "commercial"
+        / IDENTITY_FILENAME
+    )
+    registry.initialize_empty()
+    return registry
 
 
 def test_requires_path_control_plane_root(
@@ -84,12 +110,38 @@ def test_requires_explicit_runtime_stopped_confirmation(
     assert not control_plane_root.exists()
 
 
+def test_requires_existing_authoritative_identity_store(
+    tmp_path: Path,
+) -> None:
+    control_plane_root = (
+        tmp_path
+        / "control-plane"
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Customer identity registry must already exist",
+    ):
+        provision_customer_setup_control_plane(
+            control_plane_root=control_plane_root,
+            confirm_runtime_stopped=True,
+        )
+
+    assert not control_plane_root.exists()
+
+
 def test_first_provisioning_creates_only_required_ready_state(
     tmp_path: Path,
 ) -> None:
     control_plane_root = (
         tmp_path
         / "control-plane"
+    )
+
+    identity_registry = (
+        _prepare_authoritative_identity_store(
+            control_plane_root
+        )
     )
 
     (
@@ -123,6 +175,11 @@ def test_first_provisioning_creates_only_required_ready_state(
         / HANDOFF_FILENAME
     )
 
+    launch_credential_path = (
+        commercial_root
+        / LAUNCH_CREDENTIAL_FILENAME
+    )
+
     assert bootstrap_path == (
         commercial_root
         / BOOTSTRAP_FILENAME
@@ -136,6 +193,7 @@ def test_first_provisioning_creates_only_required_ready_state(
     assert registration_path.is_file()
     assert activation_path.is_file()
     assert handoff_path.is_file()
+    assert launch_credential_path.is_file()
     assert bootstrap_path.is_file()
 
     assert (
@@ -149,9 +207,11 @@ def test_first_provisioning_creates_only_required_ready_state(
     }
 
     assert files == {
+        IDENTITY_FILENAME,
         REGISTRATION_FILENAME,
         ACTIVATION_FILENAME,
         HANDOFF_FILENAME,
+        LAUNCH_CREDENTIAL_FILENAME,
         BOOTSTRAP_FILENAME,
     }
 
@@ -183,6 +243,16 @@ def test_first_provisioning_creates_only_required_ready_state(
         )
     )
 
+    launch_credential_store = (
+        CustomerSetupLaunchCredentialStore(
+            launch_credential_path,
+            customer_identity_registry=(
+                identity_registry
+            ),
+        )
+    )
+    launch_credential_store.open_existing()
+
     bootstrap_store = (
         CustomerDeploymentBootstrapStore(
             bootstrap_path
@@ -200,6 +270,8 @@ def test_first_provisioning_creates_only_required_ready_state(
 
     assert activation_store.is_ready()
     assert handoff_store.is_ready()
+    assert launch_credential_store.is_ready()
+    assert launch_credential_store.size() == 0
     assert bootstrap_store.is_ready()
 
     assert (
@@ -220,6 +292,14 @@ def test_retry_is_byte_for_byte_and_queue_idempotent(
         / "control-plane"
     )
 
+    identity_registry = (
+        _prepare_authoritative_identity_store(
+            control_plane_root
+        )
+    )
+    identity_path = identity_registry.storage_path
+    first_identity_bytes = identity_path.read_bytes()
+
     first_result = (
         provision_customer_setup_control_plane(
             control_plane_root=control_plane_root,
@@ -233,6 +313,15 @@ def test_retry_is_byte_for_byte_and_queue_idempotent(
 
     first_handoff_bytes = (
         first_result[1].read_bytes()
+    )
+
+    launch_credential_path = (
+        control_plane_root
+        / "commercial"
+        / LAUNCH_CREDENTIAL_FILENAME
+    )
+    first_launch_bytes = (
+        launch_credential_path.read_bytes()
     )
 
     first_bootstrap_bytes = (
@@ -267,6 +356,16 @@ def test_retry_is_byte_for_byte_and_queue_idempotent(
     )
 
     assert (
+        launch_credential_path.read_bytes()
+        == first_launch_bytes
+    )
+
+    assert (
+        identity_path.read_bytes()
+        == first_identity_bytes
+    )
+
+    assert (
         second_result[2].read_bytes()
         == first_bootstrap_bytes
     )
@@ -292,9 +391,11 @@ def test_retry_is_byte_for_byte_and_queue_idempotent(
     }
 
     assert commercial_files == {
+        IDENTITY_FILENAME,
         REGISTRATION_FILENAME,
         ACTIVATION_FILENAME,
         HANDOFF_FILENAME,
+        LAUNCH_CREDENTIAL_FILENAME,
         BOOTSTRAP_FILENAME,
     }
 
@@ -376,6 +477,11 @@ def test_provisioner_has_store_only_commercial_surface() -> None:
         ),
         (
             "backend.commercial."
+            "customer_identity_registry",
+            "CustomerIdentityRegistry",
+        ),
+        (
+            "backend.commercial."
             "customer_registration_service",
             "CustomerRegistrationStore",
         ),
@@ -389,13 +495,18 @@ def test_provisioner_has_store_only_commercial_surface() -> None:
             "customer_setup_handoff_service",
             "CustomerSetupHandoffStore",
         ),
+        (
+            "backend.commercial."
+            "customer_setup_launch_credential_service",
+            "CustomerSetupLaunchCredentialStore",
+        ),
     }
 
     assert (
         called_attributes.count(
             "initialize_empty"
         )
-        == 5
+        == 6
     )
 
     forbidden_business_actions = {

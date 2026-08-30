@@ -9,6 +9,7 @@ package-build flow:
 - customer_registrations.json
 - customer_setup_activations.json
 - customer_setup_handoffs.json
+- customer_setup_launch_credentials.json
 - customer_deployment_bootstraps.json
 - customer_deployment_package_build_requests/
 
@@ -20,6 +21,7 @@ Safety contract:
 - no customer registration is created
 - no setup activation is granted
 - no setup handoff credential is issued
+- no setup launch credential is issued
 - no customer package build request is registered
 - no customer, deployment, account, payment, package, secret,
   entitlement, or runtime state is mutated
@@ -39,6 +41,9 @@ from backend.commercial.customer_deployment_bootstrap_service import (
 from backend.commercial.customer_deployment_package_build_request_store import (
     CustomerDeploymentPackageBuildRequestStore,
 )
+from backend.commercial.customer_identity_registry import (
+    CustomerIdentityRegistry,
+)
 from backend.commercial.customer_registration_service import (
     CustomerRegistrationStore,
 )
@@ -48,7 +53,14 @@ from backend.commercial.customer_setup_activation_service import (
 from backend.commercial.customer_setup_handoff_service import (
     CustomerSetupHandoffStore,
 )
+from backend.commercial.customer_setup_launch_credential_service import (
+    CustomerSetupLaunchCredentialStore,
+)
 
+
+_CUSTOMER_IDENTITY_FILENAME = (
+    "customer_identities.json"
+)
 
 _CUSTOMER_REGISTRATION_FILENAME = (
     "customer_registrations.json"
@@ -60,6 +72,10 @@ _CUSTOMER_SETUP_ACTIVATION_FILENAME = (
 
 _CUSTOMER_SETUP_HANDOFF_FILENAME = (
     "customer_setup_handoffs.json"
+)
+
+_CUSTOMER_SETUP_LAUNCH_CREDENTIAL_FILENAME = (
+    "customer_setup_launch_credentials.json"
 )
 
 _CUSTOMER_DEPLOYMENT_BOOTSTRAP_FILENAME = (
@@ -112,6 +128,11 @@ def provision_customer_setup_control_plane(
         / "commercial"
     )
 
+    identity_storage_path = (
+        commercial_root
+        / _CUSTOMER_IDENTITY_FILENAME
+    )
+
     registration_storage_path = (
         commercial_root
         / _CUSTOMER_REGISTRATION_FILENAME
@@ -127,6 +148,11 @@ def provision_customer_setup_control_plane(
         / _CUSTOMER_SETUP_HANDOFF_FILENAME
     )
 
+    launch_credential_storage_path = (
+        commercial_root
+        / _CUSTOMER_SETUP_LAUNCH_CREDENTIAL_FILENAME
+    )
+
     bootstrap_storage_path = (
         commercial_root
         / _CUSTOMER_DEPLOYMENT_BOOTSTRAP_FILENAME
@@ -136,6 +162,19 @@ def provision_customer_setup_control_plane(
         commercial_root
         / _CUSTOMER_PACKAGE_BUILD_REQUEST_DIRECTORY
     )
+
+    customer_identity_registry = (
+        CustomerIdentityRegistry(
+            identity_storage_path
+        )
+    )
+
+    if not customer_identity_registry.is_ready():
+        raise RuntimeError(
+            "Customer identity registry must already "
+            "exist before customer setup control-plane "
+            "provisioning."
+        )
 
     registration_store = (
         CustomerRegistrationStore(
@@ -152,6 +191,15 @@ def provision_customer_setup_control_plane(
     handoff_store = (
         CustomerSetupHandoffStore(
             handoff_storage_path
+        )
+    )
+
+    launch_credential_store = (
+        CustomerSetupLaunchCredentialStore(
+            launch_credential_storage_path,
+            customer_identity_registry=(
+                customer_identity_registry
+            ),
         )
     )
 
@@ -176,6 +224,11 @@ def provision_customer_setup_control_plane(
     if not handoff_store.is_ready():
         handoff_store.initialize_empty()
 
+    if launch_credential_storage_path.exists():
+        launch_credential_store.open_existing()
+    else:
+        launch_credential_store.initialize_empty()
+
     if not bootstrap_store.is_ready():
         bootstrap_store.initialize_empty()
 
@@ -198,6 +251,12 @@ def provision_customer_setup_control_plane(
         raise RuntimeError(
             "Customer setup handoff store did not "
             "become ready."
+        )
+
+    if not launch_credential_store.is_ready():
+        raise RuntimeError(
+            "Customer setup launch credential store did "
+            "not become ready."
         )
 
     if not bootstrap_store.is_ready():
@@ -284,6 +343,10 @@ def main() -> int:
     )
 
     print(
+        "CUSTOMER_SETUP_LAUNCH_CREDENTIAL_STORE=READY"
+    )
+
+    print(
         "CUSTOMER_DEPLOYMENT_BOOTSTRAP_STORE=READY"
     )
 
@@ -304,6 +367,17 @@ def main() -> int:
     print(
         "CUSTOMER_SETUP_HANDOFF_PATH="
         f"{handoff_storage_path}"
+    )
+
+    launch_credential_storage_path = (
+        args.control_plane_root
+        / "commercial"
+        / _CUSTOMER_SETUP_LAUNCH_CREDENTIAL_FILENAME
+    )
+
+    print(
+        "CUSTOMER_SETUP_LAUNCH_CREDENTIAL_PATH="
+        f"{launch_credential_storage_path}"
     )
 
     print(

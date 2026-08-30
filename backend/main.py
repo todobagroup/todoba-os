@@ -47,6 +47,16 @@ from backend.commercial.customer_registration_service import (
     CustomerRegistrationService,
     CustomerRegistrationStore,
 )
+from backend.commercial.customer_setup_entry_api import (
+    create_customer_setup_entry_router,
+)
+from backend.commercial.customer_setup_entry_grant_service import (
+    CustomerSetupEntryGrantService,
+)
+from backend.commercial.customer_setup_launch_credential_service import (
+    CustomerSetupLaunchCredentialService,
+    CustomerSetupLaunchCredentialStore,
+)
 from backend.commercial.customer_setup_activation_service import (
     CustomerSetupActivationService,
     CustomerSetupActivationStore,
@@ -425,6 +435,12 @@ CUSTOMER_REGISTRATION_STORAGE_PATH = (
     / "customer_registrations.json"
 )
 
+CUSTOMER_SETUP_LAUNCH_CREDENTIAL_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_setup_launch_credentials.json"
+)
+
 CUSTOMER_ACCESS_CREDENTIAL_STORAGE_PATH = (
     TODOBA_CONTROL_PLANE_DATA_ROOT
     / "commercial"
@@ -605,11 +621,14 @@ customer_deployment_runtime_projection = (
 _customer_setup_runtime_composed = False
 
 customer_registration_store = None
+customer_setup_launch_credential_store = None
 customer_setup_activation_store = None
 customer_setup_handoff_store = None
 customer_deployment_bootstrap_store = None
 customer_deployment_package_build_request_store = None
 customer_registration_service = None
+customer_setup_launch_credential_service = None
+customer_setup_entry_grant_service = None
 customer_setup_activation_service = None
 customer_setup_handoff_service = None
 customer_setup_handoff_authorizer = None
@@ -622,11 +641,14 @@ def _compose_customer_setup_runtime(
 ) -> None:
     global _customer_setup_runtime_composed
     global customer_registration_store
+    global customer_setup_launch_credential_store
     global customer_setup_activation_store
     global customer_setup_handoff_store
     global customer_deployment_bootstrap_store
     global customer_deployment_package_build_request_store
     global customer_registration_service
+    global customer_setup_launch_credential_service
+    global customer_setup_entry_grant_service
     global customer_setup_activation_service
     global customer_setup_handoff_service
     global customer_setup_handoff_authorizer
@@ -641,6 +663,16 @@ def _compose_customer_setup_runtime(
             CUSTOMER_REGISTRATION_STORAGE_PATH
         )
     )
+
+    launch_store = (
+        CustomerSetupLaunchCredentialStore(
+            CUSTOMER_SETUP_LAUNCH_CREDENTIAL_STORAGE_PATH,
+            customer_identity_registry=(
+                customer_identity_registry
+            ),
+        )
+    )
+    launch_store.open_existing()
 
     activation_store = (
         CustomerSetupActivationStore(
@@ -670,6 +702,10 @@ def _compose_customer_setup_runtime(
         (
             "Customer registration store",
             registration_store,
+        ),
+        (
+            "Customer setup launch credential store",
+            launch_store,
         ),
         (
             "Customer setup activation store",
@@ -739,6 +775,31 @@ def _compose_customer_setup_runtime(
         )
     )
 
+    launch_service = (
+        CustomerSetupLaunchCredentialService(
+            launch_store=(
+                launch_store
+            ),
+            customer_identity_registry=(
+                customer_identity_registry
+            ),
+        )
+    )
+
+    entry_grant_service = (
+        CustomerSetupEntryGrantService(
+            registration_store=(
+                registration_store
+            ),
+            setup_activation_service=(
+                activation_service
+            ),
+            handoff_service=(
+                handoff_service
+            ),
+        )
+    )
+
     enrollment_service = (
         CustomerDeploymentEnrollmentService(
             deployment_registry=(
@@ -780,6 +841,17 @@ def _compose_customer_setup_runtime(
         create_customer_registration_router(
             registration_service=(
                 registration_service
+            ),
+        )
+    )
+
+    entry_router = (
+        create_customer_setup_entry_router(
+            authorize_setup_launch=(
+                launch_service.authorize
+            ),
+            grant_setup_entry=(
+                entry_grant_service.grant
             ),
         )
     )
@@ -830,6 +902,10 @@ def _compose_customer_setup_runtime(
     )
 
     app.include_router(
+        entry_router
+    )
+
+    app.include_router(
         provisioning_router
     )
 
@@ -839,6 +915,9 @@ def _compose_customer_setup_runtime(
 
     customer_registration_store = (
         registration_store
+    )
+    customer_setup_launch_credential_store = (
+        launch_store
     )
     customer_setup_activation_store = (
         activation_store
@@ -854,6 +933,12 @@ def _compose_customer_setup_runtime(
     )
     customer_registration_service = (
         registration_service
+    )
+    customer_setup_launch_credential_service = (
+        launch_service
+    )
+    customer_setup_entry_grant_service = (
+        entry_grant_service
     )
     customer_setup_activation_service = (
         activation_service

@@ -758,3 +758,375 @@ def test_registration_composition_owns_no_setup_authorization(
     assert keyword_names == {
         "registration_service",
     }
+
+
+
+def test_setup_entry_exchange_composition_reopens_launch_store(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    compose_source = ast.get_source_segment(
+        SOURCE,
+        compose,
+    )
+
+    assert compose_source is not None
+
+    assert (
+        "CUSTOMER_SETUP_LAUNCH_CREDENTIAL_STORAGE_PATH"
+        in SOURCE
+    )
+
+    assert (
+        "customer_setup_launch_credentials.json"
+        in SOURCE
+    )
+
+    assert len(
+        _calls_named(
+            compose,
+            "CustomerSetupLaunchCredentialStore",
+        )
+    ) == 1
+
+    assert (
+        compose_source.count(
+            "launch_store.open_existing()"
+        )
+        == 1
+    )
+
+    assert (
+        "initialize_empty("
+        not in compose_source
+    )
+
+
+def test_setup_entry_exchange_launch_store_reuses_identity_owner(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    call = _calls_named(
+        compose,
+        "CustomerSetupLaunchCredentialStore",
+    )[0]
+
+    assert len(
+        call.args
+    ) == 1
+
+    assert _is_name(
+        call.args[0],
+        "CUSTOMER_SETUP_LAUNCH_CREDENTIAL_STORAGE_PATH",
+    )
+
+    assert _is_name(
+        _keyword(
+            call,
+            "customer_identity_registry",
+        ),
+        "customer_identity_registry",
+    )
+
+
+def test_setup_entry_exchange_launch_store_is_required_ready(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    compose_source = ast.get_source_segment(
+        SOURCE,
+        compose,
+    )
+
+    assert compose_source is not None
+
+    assert (
+        "Customer setup launch credential store"
+        in compose_source
+    )
+
+    assert compose_source.index(
+        "launch_store.open_existing()"
+    ) < compose_source.index(
+        "required_owners = ("
+    )
+
+    assert compose_source.index(
+        '"Customer setup launch credential store"'
+    ) < compose_source.index(
+        "registration_service = ("
+    )
+
+
+def test_setup_entry_exchange_services_reuse_authoritative_owners(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    launch_call = _calls_named(
+        compose,
+        "CustomerSetupLaunchCredentialService",
+    )[0]
+
+    assert _is_name(
+        _keyword(
+            launch_call,
+            "launch_store",
+        ),
+        "launch_store",
+    )
+
+    assert _is_name(
+        _keyword(
+            launch_call,
+            "customer_identity_registry",
+        ),
+        "customer_identity_registry",
+    )
+
+    grant_call = _calls_named(
+        compose,
+        "CustomerSetupEntryGrantService",
+    )[0]
+
+    assert _is_name(
+        _keyword(
+            grant_call,
+            "registration_store",
+        ),
+        "registration_store",
+    )
+
+    assert _is_name(
+        _keyword(
+            grant_call,
+            "setup_activation_service",
+        ),
+        "activation_service",
+    )
+
+    assert _is_name(
+        _keyword(
+            grant_call,
+            "handoff_service",
+        ),
+        "handoff_service",
+    )
+
+
+def test_setup_entry_exchange_router_reuses_only_entry_authorities(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    call = _calls_named(
+        compose,
+        "create_customer_setup_entry_router",
+    )[0]
+
+    keyword_names = {
+        keyword.arg
+        for keyword in call.keywords
+    }
+
+    assert keyword_names == {
+        "authorize_setup_launch",
+        "grant_setup_entry",
+    }
+
+    assert _is_method(
+        _keyword(
+            call,
+            "authorize_setup_launch",
+        ),
+        owner="launch_service",
+        method="authorize",
+    )
+
+    assert _is_method(
+        _keyword(
+            call,
+            "grant_setup_entry",
+        ),
+        owner="entry_grant_service",
+        method="grant",
+    )
+
+
+def test_setup_entry_exchange_router_is_included_once(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    include_calls = [
+        node
+        for node in ast.walk(
+            compose
+        )
+        if (
+            isinstance(
+                node,
+                ast.Call,
+            )
+            and isinstance(
+                node.func,
+                ast.Attribute,
+            )
+            and node.func.attr
+            == "include_router"
+            and isinstance(
+                node.func.value,
+                ast.Name,
+            )
+            and node.func.value.id == "app"
+        )
+    ]
+
+    entry_includes = [
+        call
+        for call in include_calls
+        if (
+            len(
+                call.args
+            ) == 1
+            and _is_name(
+                call.args[0],
+                "entry_router",
+            )
+        )
+    ]
+
+    assert len(
+        entry_includes
+    ) == 1
+
+
+def test_setup_entry_exchange_dependency_order_is_safe(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    compose_source = ast.get_source_segment(
+        SOURCE,
+        compose,
+    )
+
+    assert compose_source is not None
+
+    assert compose_source.index(
+        "launch_store = ("
+    ) < compose_source.index(
+        "launch_store.open_existing()"
+    )
+
+    assert compose_source.index(
+        "launch_store.open_existing()"
+    ) < compose_source.index(
+        "launch_service = ("
+    )
+
+    assert compose_source.index(
+        "activation_service = ("
+    ) < compose_source.index(
+        "entry_grant_service = ("
+    )
+
+    assert compose_source.index(
+        "handoff_service = ("
+    ) < compose_source.index(
+        "entry_grant_service = ("
+    )
+
+    assert compose_source.index(
+        "launch_service = ("
+    ) < compose_source.index(
+        "entry_router = ("
+    )
+
+    assert compose_source.index(
+        "entry_grant_service = ("
+    ) < compose_source.index(
+        "entry_router = ("
+    )
+
+    assert compose_source.index(
+        "entry_router = ("
+    ) < compose_source.index(
+        "app.include_router(\n"
+        "        entry_router"
+    )
+
+
+def test_setup_entry_exchange_is_lifespan_owned_only(
+) -> None:
+    forbidden_top_level_calls = {
+        "CustomerSetupLaunchCredentialStore",
+        "CustomerSetupLaunchCredentialService",
+        "CustomerSetupEntryGrantService",
+        "create_customer_setup_entry_router",
+    }
+
+    for node in TREE.body:
+        if not isinstance(
+            node,
+            ast.Assign,
+        ):
+            continue
+
+        if not isinstance(
+            node.value,
+            ast.Call,
+        ):
+            continue
+
+        if not isinstance(
+            node.value.func,
+            ast.Name,
+        ):
+            continue
+
+        assert (
+            node.value.func.id
+            not in forbidden_top_level_calls
+        )
+
+
+def test_setup_entry_exchange_runtime_exports_are_present(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    compose_source = ast.get_source_segment(
+        SOURCE,
+        compose,
+    )
+
+    assert compose_source is not None
+
+    expected = (
+        "customer_setup_launch_credential_store",
+        "customer_setup_launch_credential_service",
+        "customer_setup_entry_grant_service",
+    )
+
+    for name in expected:
+        assert (
+            f"global {name}"
+            in compose_source
+        )
+
+        assert (
+            f"{name} = ("
+            in compose_source
+        )

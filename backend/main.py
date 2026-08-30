@@ -40,6 +40,13 @@ from backend.commercial.customer_deployment_enrollment_service import (
 from backend.commercial.customer_deployment_package_build_request_store import (
     CustomerDeploymentPackageBuildRequestStore,
 )
+from backend.commercial.customer_registration_api import (
+    create_customer_registration_router,
+)
+from backend.commercial.customer_registration_service import (
+    CustomerRegistrationService,
+    CustomerRegistrationStore,
+)
 from backend.commercial.customer_setup_activation_service import (
     CustomerSetupActivationService,
     CustomerSetupActivationStore,
@@ -412,6 +419,12 @@ CUSTOMER_IDENTITY_STORAGE_PATH = (
     / "customer_identities.json"
 )
 
+CUSTOMER_REGISTRATION_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_registrations.json"
+)
+
 CUSTOMER_ACCESS_CREDENTIAL_STORAGE_PATH = (
     TODOBA_CONTROL_PLANE_DATA_ROOT
     / "commercial"
@@ -591,10 +604,12 @@ customer_deployment_runtime_projection = (
 
 _customer_setup_runtime_composed = False
 
+customer_registration_store = None
 customer_setup_activation_store = None
 customer_setup_handoff_store = None
 customer_deployment_bootstrap_store = None
 customer_deployment_package_build_request_store = None
+customer_registration_service = None
 customer_setup_activation_service = None
 customer_setup_handoff_service = None
 customer_setup_handoff_authorizer = None
@@ -606,10 +621,12 @@ def _compose_customer_setup_runtime(
     app: FastAPI,
 ) -> None:
     global _customer_setup_runtime_composed
+    global customer_registration_store
     global customer_setup_activation_store
     global customer_setup_handoff_store
     global customer_deployment_bootstrap_store
     global customer_deployment_package_build_request_store
+    global customer_registration_service
     global customer_setup_activation_service
     global customer_setup_handoff_service
     global customer_setup_handoff_authorizer
@@ -618,6 +635,12 @@ def _compose_customer_setup_runtime(
 
     if _customer_setup_runtime_composed:
         return
+
+    registration_store = (
+        CustomerRegistrationStore(
+            CUSTOMER_REGISTRATION_STORAGE_PATH
+        )
+    )
 
     activation_store = (
         CustomerSetupActivationStore(
@@ -645,6 +668,10 @@ def _compose_customer_setup_runtime(
 
     required_owners = (
         (
+            "Customer registration store",
+            registration_store,
+        ),
+        (
             "Customer setup activation store",
             activation_store,
         ),
@@ -667,6 +694,17 @@ def _compose_customer_setup_runtime(
             raise RuntimeError(
                 f"{owner_name} is not initialized."
             )
+
+    registration_service = (
+        CustomerRegistrationService(
+            registration_store=(
+                registration_store
+            ),
+            customer_identity_registry=(
+                customer_identity_registry
+            ),
+        )
+    )
 
     activation_service = (
         CustomerSetupActivationService(
@@ -738,6 +776,14 @@ def _compose_customer_setup_runtime(
         )
     )
 
+    registration_router = (
+        create_customer_registration_router(
+            registration_service=(
+                registration_service
+            ),
+        )
+    )
+
     provisioning_router = (
         create_customer_setup_provisioning_router(
             authorize_setup_handoff=(
@@ -780,6 +826,10 @@ def _compose_customer_setup_runtime(
     )
 
     app.include_router(
+        registration_router
+    )
+
+    app.include_router(
         provisioning_router
     )
 
@@ -787,6 +837,9 @@ def _compose_customer_setup_runtime(
         package_router
     )
 
+    customer_registration_store = (
+        registration_store
+    )
     customer_setup_activation_store = (
         activation_store
     )
@@ -798,6 +851,9 @@ def _compose_customer_setup_runtime(
     )
     customer_deployment_package_build_request_store = (
         build_request_store
+    )
+    customer_registration_service = (
+        registration_service
     )
     customer_setup_activation_service = (
         activation_service

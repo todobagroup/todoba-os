@@ -500,3 +500,261 @@ def test_setup_dependency_order_is_safe(
     ) < compose_source.index(
         "bootstrap_service = ("
     )
+
+
+
+def test_registration_composition_uses_authoritative_runtime_owner(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    assert (
+        "CUSTOMER_REGISTRATION_STORAGE_PATH"
+        in SOURCE
+    )
+
+    assert (
+        "customer_registrations.json"
+        in SOURCE
+    )
+
+    assert len(
+        _calls_named(
+            compose,
+            "CustomerRegistrationStore",
+        )
+    ) == 1
+
+    assert len(
+        _calls_named(
+            compose,
+            "CustomerRegistrationService",
+        )
+    ) == 1
+
+    assert len(
+        _calls_named(
+            compose,
+            "create_customer_registration_router",
+        )
+    ) == 1
+
+
+def test_registration_composition_is_lifespan_owned_only(
+) -> None:
+    forbidden_top_level_calls = {
+        "CustomerRegistrationStore",
+        "CustomerRegistrationService",
+        "create_customer_registration_router",
+    }
+
+    for node in TREE.body:
+        if not isinstance(
+            node,
+            ast.Assign,
+        ):
+            continue
+
+        if not isinstance(
+            node.value,
+            ast.Call,
+        ):
+            continue
+
+        if not isinstance(
+            node.value.func,
+            ast.Name,
+        ):
+            continue
+
+        assert (
+            node.value.func.id
+            not in forbidden_top_level_calls
+        )
+
+
+def test_registration_startup_requires_durable_store_ready(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    compose_source = ast.get_source_segment(
+        SOURCE,
+        compose,
+    )
+
+    assert compose_source is not None
+
+    assert (
+        "Customer registration store"
+        in compose_source
+    )
+
+    assert (
+        "registration_store"
+        in compose_source
+    )
+
+    assert (
+        ".is_ready()"
+        in compose_source
+    )
+
+
+def test_registration_service_reuses_authoritative_identity_owner(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    call = _calls_named(
+        compose,
+        "CustomerRegistrationService",
+    )[0]
+
+    assert _is_name(
+        _keyword(
+            call,
+            "registration_store",
+        ),
+        "registration_store",
+    )
+
+    assert _is_name(
+        _keyword(
+            call,
+            "customer_identity_registry",
+        ),
+        "customer_identity_registry",
+    )
+
+
+def test_registration_router_reuses_registration_service(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    call = _calls_named(
+        compose,
+        "create_customer_registration_router",
+    )[0]
+
+    assert _is_name(
+        _keyword(
+            call,
+            "registration_service",
+        ),
+        "registration_service",
+    )
+
+
+def test_registration_router_is_included_once(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    include_calls = [
+        node
+        for node in ast.walk(
+            compose
+        )
+        if (
+            isinstance(
+                node,
+                ast.Call,
+            )
+            and isinstance(
+                node.func,
+                ast.Attribute,
+            )
+            and node.func.attr
+            == "include_router"
+            and isinstance(
+                node.func.value,
+                ast.Name,
+            )
+            and node.func.value.id == "app"
+        )
+    ]
+
+    registration_includes = [
+        call
+        for call in include_calls
+        if (
+            len(
+                call.args
+            ) == 1
+            and _is_name(
+                call.args[0],
+                "registration_router",
+            )
+        )
+    ]
+
+    assert len(
+        registration_includes
+    ) == 1
+
+
+def test_registration_composition_dependency_order_is_safe(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    compose_source = ast.get_source_segment(
+        SOURCE,
+        compose,
+    )
+
+    assert compose_source is not None
+
+    assert compose_source.index(
+        "registration_store = ("
+    ) < compose_source.index(
+        "required_owners = ("
+    )
+
+    assert compose_source.index(
+        "required_owners = ("
+    ) < compose_source.index(
+        "registration_service = ("
+    )
+
+    assert compose_source.index(
+        "registration_service = ("
+    ) < compose_source.index(
+        "registration_router = ("
+    )
+
+    assert compose_source.index(
+        "registration_router = ("
+    ) < compose_source.index(
+        "app.include_router(\n"
+        "        registration_router"
+    )
+
+
+def test_registration_composition_owns_no_setup_authorization(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    registration_call = _calls_named(
+        compose,
+        "create_customer_registration_router",
+    )[0]
+
+    keyword_names = {
+        keyword.arg
+        for keyword in registration_call.keywords
+    }
+
+    assert keyword_names == {
+        "registration_service",
+    }

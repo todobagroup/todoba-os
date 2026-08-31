@@ -1478,6 +1478,162 @@ class CustomerSetupBootstrapAuthorizationService:
                 )
             )
 
+    def recover_consumed_redemption(
+        self,
+        *,
+        authorization_code: str,
+        code_verifier: str,
+        current_time: datetime,
+    ) -> CustomerSetupBootstrapAuthorizationRedemption:
+        """
+        Recover authoritative identity from an already
+        consumed bootstrap authorization.
+
+        This recovery path exists only for retry after a
+        downstream failure or process interruption.
+
+        It:
+        - requires the same authorization code
+        - requires the same PKCE verifier
+        - requires durable CONSUMED state
+        - requires the authorization to remain unexpired
+        - never mutates durable authorization state
+        - never creates or reactivates an authorization
+        """
+
+        (
+            normalized_code,
+            authorization_id,
+        ) = self._parse_authorization_code(
+            authorization_code
+        )
+
+        normalized_code_verifier = (
+            _normalize_code_verifier(
+                code_verifier
+            )
+        )
+
+        normalized_current_time = (
+            _normalize_datetime(
+                current_time
+            )
+        )
+
+        with self._lock:
+            self._require_sources_ready()
+
+            record = (
+                self._authorization_store.get(
+                    authorization_id=(
+                        authorization_id
+                    )
+                )
+            )
+
+            if record is None:
+                raise ValueError(
+                    "Invalid bootstrap authorization."
+                )
+
+            supplied_authorization_verifier = (
+                derive_customer_setup_bootstrap_authorization_verifier(
+                    normalized_code
+                )
+            )
+
+            if not compare_digest(
+                supplied_authorization_verifier,
+                record.authorization_verifier_sha256,
+            ):
+                raise ValueError(
+                    "Invalid bootstrap authorization."
+                )
+
+            if (
+                record.status
+                is not
+                CustomerSetupBootstrapAuthorizationStatus
+                .CONSUMED
+            ):
+                raise ValueError(
+                    "Bootstrap authorization "
+                    "is not consumed."
+                )
+
+            if self._is_expired(
+                record,
+                normalized_current_time,
+            ):
+                raise ValueError(
+                    "Bootstrap authorization "
+                    "is expired."
+                )
+
+            supplied_challenge = (
+                derive_pkce_s256_code_challenge(
+                    normalized_code_verifier
+                )
+            )
+
+            if not compare_digest(
+                supplied_challenge,
+                record.code_challenge_s256,
+            ):
+                raise ValueError(
+                    "Invalid PKCE verifier."
+                )
+
+            identity = (
+                self._customer_identity_registry.get(
+                    customer_id=(
+                        record.customer_id
+                    )
+                )
+            )
+
+            if identity is None:
+                raise ValueError(
+                    "Unknown customer identity."
+                )
+
+            if record.consumed_at is None:
+                raise RuntimeError(
+                    "Consumed bootstrap authorization "
+                    "is missing consumed_at."
+                )
+
+            consumed_at = _parse_timestamp(
+                record.consumed_at,
+                name="consumed_at",
+            )
+
+            if (
+                normalized_current_time
+                < consumed_at
+            ):
+                raise ValueError(
+                    "Recovery time cannot precede "
+                    "bootstrap authorization consumption."
+                )
+
+            return (
+                CustomerSetupBootstrapAuthorizationRedemption(
+                    authorization_id=(
+                        record.authorization_id
+                    ),
+                    customer_id=(
+                        identity.customer_id
+                    ),
+                    consumed_at=(
+                        record.consumed_at
+                    ),
+                    customer_identity=(
+                        identity
+                    ),
+                )
+            )
+
     def _issue_new(
         self,
         *,

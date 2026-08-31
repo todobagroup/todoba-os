@@ -1123,6 +1123,315 @@ def test_service_requires_ready_authorization_store(
         )
 
 
+def test_consumed_redemption_can_be_recovered(
+    tmp_path,
+) -> None:
+    (
+        identity_registry,
+        _,
+        service,
+    ) = _build_service(
+        tmp_path
+    )
+
+    issued = _issue(
+        service
+    )
+
+    first = service.redeem(
+        authorization_code=(
+            issued.authorization_code
+        ),
+        code_verifier=_CODE_VERIFIER,
+        current_time=(
+            _NOW
+            + timedelta(
+                seconds=1
+            )
+        ),
+    )
+
+    recovered = (
+        service.recover_consumed_redemption(
+            authorization_code=(
+                issued.authorization_code
+            ),
+            code_verifier=_CODE_VERIFIER,
+            current_time=(
+                _NOW
+                + timedelta(
+                    seconds=2
+                )
+            ),
+        )
+    )
+
+    assert (
+        recovered.authorization_id
+        == first.authorization_id
+    )
+
+    assert (
+        recovered.customer_id
+        == first.customer_id
+    )
+
+    assert (
+        recovered.consumed_at
+        == first.consumed_at
+    )
+
+    assert (
+        recovered.customer_identity
+        is identity_registry.get(
+            customer_id=_CUSTOMER_ID
+        )
+    )
+
+
+def test_consumed_redemption_recovery_does_not_mutate_store(
+    tmp_path,
+) -> None:
+    (
+        _,
+        store,
+        service,
+    ) = _build_service(
+        tmp_path
+    )
+
+    issued = _issue(
+        service
+    )
+
+    service.redeem(
+        authorization_code=(
+            issued.authorization_code
+        ),
+        code_verifier=_CODE_VERIFIER,
+        current_time=(
+            _NOW
+            + timedelta(
+                seconds=1
+            )
+        ),
+    )
+
+    before = store.storage_path.read_bytes()
+
+    service.recover_consumed_redemption(
+        authorization_code=(
+            issued.authorization_code
+        ),
+        code_verifier=_CODE_VERIFIER,
+        current_time=(
+            _NOW
+            + timedelta(
+                seconds=2
+            )
+        ),
+    )
+
+    after = store.storage_path.read_bytes()
+
+    assert after == before
+
+
+def test_active_authorization_cannot_use_recovery_path(
+    tmp_path,
+) -> None:
+    (
+        _,
+        _,
+        service,
+    ) = _build_service(
+        tmp_path
+    )
+
+    issued = _issue(
+        service
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="is not consumed",
+    ):
+        service.recover_consumed_redemption(
+            authorization_code=(
+                issued.authorization_code
+            ),
+            code_verifier=_CODE_VERIFIER,
+            current_time=(
+                _NOW
+                + timedelta(
+                    seconds=1
+                )
+            ),
+        )
+
+
+def test_consumed_recovery_rejects_wrong_authorization_code(
+    tmp_path,
+) -> None:
+    (
+        _,
+        _,
+        service,
+    ) = _build_service(
+        tmp_path
+    )
+
+    issued = _issue(
+        service
+    )
+
+    service.redeem(
+        authorization_code=(
+            issued.authorization_code
+        ),
+        code_verifier=_CODE_VERIFIER,
+        current_time=(
+            _NOW
+            + timedelta(
+                seconds=1
+            )
+        ),
+    )
+
+    replacement = (
+        "A"
+        if not issued.authorization_code.endswith(
+            "A"
+        )
+        else "B"
+    )
+
+    wrong_code = (
+        issued.authorization_code[
+            :-1
+        ]
+        + replacement
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Invalid bootstrap authorization",
+    ):
+        service.recover_consumed_redemption(
+            authorization_code=wrong_code,
+            code_verifier=_CODE_VERIFIER,
+            current_time=(
+                _NOW
+                + timedelta(
+                    seconds=2
+                )
+            ),
+        )
+
+
+def test_consumed_recovery_rejects_wrong_pkce_verifier(
+    tmp_path,
+) -> None:
+    (
+        _,
+        _,
+        service,
+    ) = _build_service(
+        tmp_path
+    )
+
+    issued = _issue(
+        service
+    )
+
+    service.redeem(
+        authorization_code=(
+            issued.authorization_code
+        ),
+        code_verifier=_CODE_VERIFIER,
+        current_time=(
+            _NOW
+            + timedelta(
+                seconds=1
+            )
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Invalid PKCE verifier",
+    ):
+        service.recover_consumed_redemption(
+            authorization_code=(
+                issued.authorization_code
+            ),
+            code_verifier=(
+                "Z"
+                * 43
+            ),
+            current_time=(
+                _NOW
+                + timedelta(
+                    seconds=2
+                )
+            ),
+        )
+
+
+def test_consumed_recovery_rejects_expired_authorization(
+    tmp_path,
+) -> None:
+    (
+        _,
+        store,
+        service,
+    ) = _build_service(
+        tmp_path
+    )
+
+    issued = _issue(
+        service
+    )
+
+    service.redeem(
+        authorization_code=(
+            issued.authorization_code
+        ),
+        code_verifier=_CODE_VERIFIER,
+        current_time=(
+            _NOW
+            + timedelta(
+                seconds=1
+            )
+        ),
+    )
+
+    record = store.get(
+        authorization_id=(
+            issued.authorization_id
+        )
+    )
+
+    expires_at = datetime.fromisoformat(
+        record.expires_at.replace(
+            "Z",
+            "+00:00",
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="is expired",
+    ):
+        service.recover_consumed_redemption(
+            authorization_code=(
+                issued.authorization_code
+            ),
+            code_verifier=_CODE_VERIFIER,
+            current_time=expires_at,
+        )
+
+
 def test_owner_has_no_http_browser_or_main_dependency(
 ) -> None:
     source_path = (

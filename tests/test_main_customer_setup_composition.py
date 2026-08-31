@@ -1130,3 +1130,294 @@ def test_setup_entry_exchange_runtime_exports_are_present(
             f"{name} = ("
             in compose_source
         )
+def test_bootstrap_authorization_runtime_composition_reopens_provisioned_store(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    compose_source = ast.get_source_segment(
+        SOURCE,
+        compose,
+    )
+
+    assert compose_source is not None
+
+    assert (
+        "CUSTOMER_SETUP_BOOTSTRAP_AUTHORIZATION_STORAGE_PATH"
+        in SOURCE
+    )
+
+    assert (
+        "customer_setup_bootstrap_authorizations.json"
+        in SOURCE
+    )
+
+    assert len(
+        _calls_named(
+            compose,
+            "CustomerSetupBootstrapAuthorizationStore",
+        )
+    ) == 1
+
+    store_call = _calls_named(
+        compose,
+        "CustomerSetupBootstrapAuthorizationStore",
+    )[0]
+
+    assert len(
+        store_call.args
+    ) == 1
+
+    assert _is_name(
+        store_call.args[0],
+        "CUSTOMER_SETUP_BOOTSTRAP_AUTHORIZATION_STORAGE_PATH",
+    )
+
+    assert _is_name(
+        _keyword(
+            store_call,
+            "customer_identity_registry",
+        ),
+        "customer_identity_registry",
+    )
+
+    assert (
+        compose_source.count(
+            "bootstrap_authorization_store.open_existing()"
+        )
+        == 1
+    )
+
+    assert (
+        "bootstrap_authorization_store.initialize_empty()"
+        not in compose_source
+    )
+
+
+def test_bootstrap_authorization_runtime_composition_is_required_ready(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    compose_source = ast.get_source_segment(
+        SOURCE,
+        compose,
+    )
+
+    assert compose_source is not None
+
+    assert (
+        "Customer setup bootstrap authorization store"
+        in compose_source
+    )
+
+    assert compose_source.index(
+        "bootstrap_authorization_store.open_existing()"
+    ) < compose_source.index(
+        "required_owners = ("
+    )
+
+    assert compose_source.index(
+        '"Customer setup bootstrap authorization store"'
+    ) < compose_source.index(
+        "registration_service = ("
+    )
+
+
+def test_bootstrap_authorization_service_reuses_authoritative_owners(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    calls = _calls_named(
+        compose,
+        "CustomerSetupBootstrapAuthorizationService",
+    )
+
+    assert len(calls) == 1
+
+    call = calls[0]
+
+    assert _is_name(
+        _keyword(
+            call,
+            "authorization_store",
+        ),
+        "bootstrap_authorization_store",
+    )
+
+    assert _is_name(
+        _keyword(
+            call,
+            "customer_identity_registry",
+        ),
+        "customer_identity_registry",
+    )
+
+
+def test_bootstrap_launch_grant_service_reuses_authoritative_owners(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    calls = _calls_named(
+        compose,
+        "CustomerSetupBootstrapLaunchGrantService",
+    )
+
+    assert len(calls) == 1
+
+    call = calls[0]
+
+    assert _is_name(
+        _keyword(
+            call,
+            "bootstrap_authorization_service",
+        ),
+        "bootstrap_authorization_service",
+    )
+
+    assert _is_name(
+        _keyword(
+            call,
+            "launch_credential_service",
+        ),
+        "launch_service",
+    )
+
+
+def test_bootstrap_runtime_composition_dependency_order_is_fail_closed(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    compose_source = ast.get_source_segment(
+        SOURCE,
+        compose,
+    )
+
+    assert compose_source is not None
+
+    assert compose_source.index(
+        "bootstrap_authorization_store = ("
+    ) < compose_source.index(
+        "bootstrap_authorization_store.open_existing()"
+    )
+
+    assert compose_source.index(
+        "bootstrap_authorization_store.open_existing()"
+    ) < compose_source.index(
+        "required_owners = ("
+    )
+
+    assert compose_source.index(
+        "required_owners = ("
+    ) < compose_source.index(
+        "bootstrap_authorization_service = ("
+    )
+
+    assert compose_source.index(
+        "launch_service = ("
+    ) < compose_source.index(
+        "bootstrap_launch_grant_service = ("
+    )
+
+    assert compose_source.index(
+        "bootstrap_authorization_service = ("
+    ) < compose_source.index(
+        "bootstrap_launch_grant_service = ("
+    )
+
+
+def test_bootstrap_runtime_composition_has_no_external_transport_boundary(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    compose_source = ast.get_source_segment(
+        SOURCE,
+        compose,
+    )
+
+    assert compose_source is not None
+
+    forbidden = (
+        "create_customer_setup_bootstrap",
+        "bootstrap_authorization_service.issue(",
+        "bootstrap_authorization_service.redeem(",
+        "recover_consumed_redemption(",
+        "bootstrap_launch_grant_service.grant(",
+    )
+
+    for value in forbidden:
+        assert value not in compose_source
+
+
+def test_bootstrap_runtime_composition_is_lifespan_owned_only(
+) -> None:
+    forbidden_top_level_calls = {
+        "CustomerSetupBootstrapAuthorizationStore",
+        "CustomerSetupBootstrapAuthorizationService",
+        "CustomerSetupBootstrapLaunchGrantService",
+    }
+
+    for node in TREE.body:
+        if not isinstance(
+            node,
+            ast.Assign,
+        ):
+            continue
+
+        if not isinstance(
+            node.value,
+            ast.Call,
+        ):
+            continue
+
+        if not isinstance(
+            node.value.func,
+            ast.Name,
+        ):
+            continue
+
+        assert (
+            node.value.func.id
+            not in forbidden_top_level_calls
+        )
+
+
+def test_bootstrap_runtime_exports_are_present(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    compose_source = ast.get_source_segment(
+        SOURCE,
+        compose,
+    )
+
+    assert compose_source is not None
+
+    expected = (
+        "customer_setup_bootstrap_authorization_store",
+        "customer_setup_bootstrap_authorization_service",
+        "customer_setup_bootstrap_launch_grant_service",
+    )
+
+    for name in expected:
+        assert (
+            f"global {name}"
+            in compose_source
+        )
+
+        assert (
+            f"{name} = ("
+            in compose_source
+        )

@@ -1,4 +1,12 @@
+import json
 from pathlib import Path
+from threading import Event
+from threading import Thread
+from threading import current_thread
+
+import pytest
+
+import backend.trading.execution.execution_mission_evidence_persistence as evidence_persistence_module
 
 from backend.trading.execution.broker_execution_evidence import (
     BrokerExecutionEvidence,
@@ -264,3 +272,215 @@ def test_persistence_remove_missing_evidence_returns_false(
 
     assert removed is False
     assert persistence.size() == 0
+
+
+class CoordinatedEvidencePersistence(
+    ExecutionMissionEvidencePersistence
+):
+    def __init__(
+        self,
+        storage_path: Path,
+    ) -> None:
+        super().__init__(
+            storage_path
+        )
+
+        self.first_read_complete = Event()
+        self.release_first_read = Event()
+        self.second_write_complete = Event()
+
+    def _read_payload(self):
+        payload = super()._read_payload()
+
+        if current_thread().name == "first-save":
+            self.first_read_complete.set()
+
+            if not self.release_first_read.wait(
+                timeout=5.0
+            ):
+                raise TimeoutError(
+                    "Timed out waiting to release first read."
+                )
+
+        return payload
+
+    def _write_payload(
+        self,
+        payload,
+    ) -> None:
+        super()._write_payload(
+            payload
+        )
+
+        if current_thread().name == "second-save":
+            self.second_write_complete.set()
+
+
+def test_persistence_serializes_concurrent_read_modify_write(
+    tmp_path: Path,
+) -> None:
+    persistence = CoordinatedEvidencePersistence(
+        tmp_path / "execution_mission_evidence.json"
+    )
+
+    first = ExecutionMissionCompleted(
+        mission_id="mission-concurrent-001",
+        agent_id=AGENT_ID,
+        sequence=1,
+        completed_at="2026-08-07T00:00:01Z",
+    )
+
+    second = ExecutionMissionCompleted(
+        mission_id="mission-concurrent-002",
+        agent_id=AGENT_ID,
+        sequence=2,
+        completed_at="2026-08-07T00:00:02Z",
+    )
+
+    failures = []
+
+    def save_evidence(evidence):
+        try:
+            persistence.save(
+                evidence
+            )
+        except Exception as exc:
+            failures.append(
+                exc
+            )
+
+    first_thread = Thread(
+        target=save_evidence,
+        args=(first,),
+        name="first-save",
+    )
+
+    second_thread = Thread(
+        target=save_evidence,
+        args=(second,),
+        name="second-save",
+    )
+
+    first_thread.start()
+
+    assert persistence.first_read_complete.wait(
+        timeout=2.0
+    )
+
+    second_thread.start()
+
+    second_finished_before_release = (
+        persistence.second_write_complete.wait(
+            timeout=0.5
+        )
+    )
+
+    persistence.release_first_read.set()
+
+    first_thread.join(
+        timeout=5.0
+    )
+
+    second_thread.join(
+        timeout=5.0
+    )
+
+    assert not first_thread.is_alive()
+    assert not second_thread.is_alive()
+    assert failures == []
+
+    assert second_finished_before_release is False
+
+    payload = json.loads(
+        persistence.storage_path.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    mission_ids = {
+        item["payload"]["mission_id"]
+        for item in payload
+    }
+
+    assert mission_ids == {
+        "mission-concurrent-001",
+        "mission-concurrent-002",
+    }
+
+
+def test_persistence_failed_atomic_replace_preserves_previous_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage_path = (
+        tmp_path / "execution_mission_evidence.json"
+    )
+
+    persistence = ExecutionMissionEvidencePersistence(
+        storage_path
+    )
+
+    first = ExecutionMissionCompleted(
+        mission_id="mission-atomic-001",
+        agent_id=AGENT_ID,
+        sequence=1,
+        completed_at="2026-08-07T00:00:01Z",
+    )
+
+    second = ExecutionMissionCompleted(
+        mission_id="mission-atomic-002",
+        agent_id=AGENT_ID,
+        sequence=2,
+        completed_at="2026-08-07T00:00:02Z",
+    )
+
+    persistence.save(
+        first
+    )
+
+    previous_bytes = storage_path.read_bytes()
+
+    def fail_replace(
+        source,
+        destination,
+    ):
+        raise OSError(
+            "simulated atomic replace failure"
+        )
+
+    monkeypatch.setattr(
+        evidence_persistence_module.os,
+        "replace",
+        fail_replace,
+    )
+
+    with pytest.raises(
+        OSError,
+        match="simulated atomic replace failure",
+    ):
+        persistence.save(
+            second
+        )
+
+    assert storage_path.read_bytes() == previous_bytes
+
+    payload = json.loads(
+        storage_path.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert len(payload) == 1
+
+    assert (
+        payload[0]["payload"]["mission_id"]
+        == "mission-atomic-001"
+    )
+
+    temporary_files = list(
+        tmp_path.glob(
+            ".execution_mission_evidence.json.*.tmp"
+        )
+    )
+
+    assert temporary_files == []

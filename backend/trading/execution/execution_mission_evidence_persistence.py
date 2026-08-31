@@ -16,8 +16,11 @@ This component does not:
 """
 
 import json
+import os
 from dataclasses import asdict
 from pathlib import Path
+from tempfile import NamedTemporaryFile
+from threading import RLock
 from typing import Any
 from typing import Optional
 
@@ -91,6 +94,8 @@ class ExecutionMissionEvidencePersistence:
 
         self.storage_path = storage_path
 
+        self._mutation_lock = RLock()
+
     def save(
         self,
         evidence: object,
@@ -103,15 +108,16 @@ class ExecutionMissionEvidencePersistence:
             evidence
         )
 
-        payload = self._read_payload()
+        with self._mutation_lock:
+            payload = self._read_payload()
 
-        payload.append(
-            item
-        )
+            payload.append(
+                item
+            )
 
-        self._write_payload(
-            payload
-        )
+            self._write_payload(
+                payload
+            )
 
     def remove(
         self,
@@ -127,21 +133,22 @@ class ExecutionMissionEvidencePersistence:
             evidence
         )
 
-        payload = self._read_payload()
+        with self._mutation_lock:
+            payload = self._read_payload()
 
-        for index, item in enumerate(
-            payload
-        ):
-            if item == expected:
-                del payload[index]
+            for index, item in enumerate(
+                payload
+            ):
+                if item == expected:
+                    del payload[index]
 
-                self._write_payload(
-                    payload
-                )
+                    self._write_payload(
+                        payload
+                    )
 
-                return True
+                    return True
 
-        return False
+            return False
 
     def restore(
         self,
@@ -463,13 +470,51 @@ class ExecutionMissionEvidencePersistence:
             exist_ok=True,
         )
 
-        self.storage_path.write_text(
-            json.dumps(
-                payload,
-                indent=2,
-            ),
-            encoding="utf-8",
+        serialized_payload = json.dumps(
+            payload,
+            indent=2,
         )
+
+        temporary_path: Optional[Path] = None
+
+        try:
+            with NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=self.storage_path.parent,
+                prefix=f".{self.storage_path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as temporary_file:
+                temporary_path = Path(
+                    temporary_file.name
+                )
+
+                temporary_file.write(
+                    serialized_payload
+                )
+
+                temporary_file.flush()
+
+                os.fsync(
+                    temporary_file.fileno()
+                )
+
+            os.replace(
+                temporary_path,
+                self.storage_path,
+            )
+
+        except Exception:
+            if temporary_path is not None:
+                try:
+                    temporary_path.unlink(
+                        missing_ok=True
+                    )
+                except OSError:
+                    pass
+
+            raise
 
     def _validate_stores(
         self,

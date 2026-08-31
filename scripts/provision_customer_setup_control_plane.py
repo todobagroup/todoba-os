@@ -10,6 +10,7 @@ package-build flow:
 - customer_setup_activations.json
 - customer_setup_handoffs.json
 - customer_setup_launch_credentials.json
+- customer_setup_bootstrap_authorizations.json
 - customer_deployment_bootstraps.json
 - customer_deployment_package_build_requests/
 
@@ -22,6 +23,7 @@ Safety contract:
 - no setup activation is granted
 - no setup handoff credential is issued
 - no setup launch credential is issued
+- no setup bootstrap authorization is issued
 - no customer package build request is registered
 - no customer, deployment, account, payment, package, secret,
   entitlement, or runtime state is mutated
@@ -53,6 +55,9 @@ from backend.commercial.customer_setup_activation_service import (
 from backend.commercial.customer_setup_handoff_service import (
     CustomerSetupHandoffStore,
 )
+from backend.commercial.customer_setup_bootstrap_authorization_service import (
+    CustomerSetupBootstrapAuthorizationStore,
+)
 from backend.commercial.customer_setup_launch_credential_service import (
     CustomerSetupLaunchCredentialStore,
 )
@@ -76,6 +81,10 @@ _CUSTOMER_SETUP_HANDOFF_FILENAME = (
 
 _CUSTOMER_SETUP_LAUNCH_CREDENTIAL_FILENAME = (
     "customer_setup_launch_credentials.json"
+)
+
+_CUSTOMER_SETUP_BOOTSTRAP_AUTHORIZATION_FILENAME = (
+    "customer_setup_bootstrap_authorizations.json"
 )
 
 _CUSTOMER_DEPLOYMENT_BOOTSTRAP_FILENAME = (
@@ -153,6 +162,11 @@ def provision_customer_setup_control_plane(
         / _CUSTOMER_SETUP_LAUNCH_CREDENTIAL_FILENAME
     )
 
+    bootstrap_authorization_storage_path = (
+        commercial_root
+        / _CUSTOMER_SETUP_BOOTSTRAP_AUTHORIZATION_FILENAME
+    )
+
     bootstrap_storage_path = (
         commercial_root
         / _CUSTOMER_DEPLOYMENT_BOOTSTRAP_FILENAME
@@ -203,6 +217,15 @@ def provision_customer_setup_control_plane(
         )
     )
 
+    bootstrap_authorization_store = (
+        CustomerSetupBootstrapAuthorizationStore(
+            bootstrap_authorization_storage_path,
+            customer_identity_registry=(
+                customer_identity_registry
+            ),
+        )
+    )
+
     bootstrap_store = (
         CustomerDeploymentBootstrapStore(
             bootstrap_storage_path
@@ -228,6 +251,11 @@ def provision_customer_setup_control_plane(
         launch_credential_store.open_existing()
     else:
         launch_credential_store.initialize_empty()
+
+    if bootstrap_authorization_storage_path.exists():
+        bootstrap_authorization_store.open_existing()
+    else:
+        bootstrap_authorization_store.initialize_empty()
 
     if not bootstrap_store.is_ready():
         bootstrap_store.initialize_empty()
@@ -257,6 +285,12 @@ def provision_customer_setup_control_plane(
         raise RuntimeError(
             "Customer setup launch credential store did "
             "not become ready."
+        )
+
+    if not bootstrap_authorization_store.is_ready():
+        raise RuntimeError(
+            "Customer setup bootstrap authorization "
+            "store did not become ready."
         )
 
     if not bootstrap_store.is_ready():
@@ -347,6 +381,10 @@ def main() -> int:
     )
 
     print(
+        "CUSTOMER_SETUP_BOOTSTRAP_AUTHORIZATION_STORE=READY"
+    )
+
+    print(
         "CUSTOMER_DEPLOYMENT_BOOTSTRAP_STORE=READY"
     )
 
@@ -378,6 +416,17 @@ def main() -> int:
     print(
         "CUSTOMER_SETUP_LAUNCH_CREDENTIAL_PATH="
         f"{launch_credential_storage_path}"
+    )
+
+    bootstrap_authorization_storage_path = (
+        args.control_plane_root
+        / "commercial"
+        / _CUSTOMER_SETUP_BOOTSTRAP_AUTHORIZATION_FILENAME
+    )
+
+    print(
+        "CUSTOMER_SETUP_BOOTSTRAP_AUTHORIZATION_PATH="
+        f"{bootstrap_authorization_storage_path}"
     )
 
     print(

@@ -23,6 +23,9 @@ from backend.commercial.customer_setup_activation_service import (
 from backend.commercial.customer_setup_handoff_service import (
     CustomerSetupHandoffStore,
 )
+from backend.commercial.customer_setup_bootstrap_authorization_service import (
+    CustomerSetupBootstrapAuthorizationStore,
+)
 from backend.commercial.customer_setup_launch_credential_service import (
     CustomerSetupLaunchCredentialStore,
 )
@@ -49,6 +52,10 @@ HANDOFF_FILENAME = (
 
 LAUNCH_CREDENTIAL_FILENAME = (
     "customer_setup_launch_credentials.json"
+)
+
+BOOTSTRAP_AUTHORIZATION_FILENAME = (
+    "customer_setup_bootstrap_authorizations.json"
 )
 
 BOOTSTRAP_FILENAME = (
@@ -180,6 +187,11 @@ def test_first_provisioning_creates_only_required_ready_state(
         / LAUNCH_CREDENTIAL_FILENAME
     )
 
+    bootstrap_authorization_path = (
+        commercial_root
+        / BOOTSTRAP_AUTHORIZATION_FILENAME
+    )
+
     assert bootstrap_path == (
         commercial_root
         / BOOTSTRAP_FILENAME
@@ -194,6 +206,7 @@ def test_first_provisioning_creates_only_required_ready_state(
     assert activation_path.is_file()
     assert handoff_path.is_file()
     assert launch_credential_path.is_file()
+    assert bootstrap_authorization_path.is_file()
     assert bootstrap_path.is_file()
 
     assert (
@@ -212,6 +225,7 @@ def test_first_provisioning_creates_only_required_ready_state(
         ACTIVATION_FILENAME,
         HANDOFF_FILENAME,
         LAUNCH_CREDENTIAL_FILENAME,
+        BOOTSTRAP_AUTHORIZATION_FILENAME,
         BOOTSTRAP_FILENAME,
     }
 
@@ -253,6 +267,16 @@ def test_first_provisioning_creates_only_required_ready_state(
     )
     launch_credential_store.open_existing()
 
+    bootstrap_authorization_store = (
+        CustomerSetupBootstrapAuthorizationStore(
+            bootstrap_authorization_path,
+            customer_identity_registry=(
+                identity_registry
+            ),
+        )
+    )
+    bootstrap_authorization_store.open_existing()
+
     bootstrap_store = (
         CustomerDeploymentBootstrapStore(
             bootstrap_path
@@ -272,6 +296,9 @@ def test_first_provisioning_creates_only_required_ready_state(
     assert handoff_store.is_ready()
     assert launch_credential_store.is_ready()
     assert launch_credential_store.size() == 0
+
+    assert bootstrap_authorization_store.is_ready()
+
     assert bootstrap_store.is_ready()
 
     assert (
@@ -324,6 +351,15 @@ def test_retry_is_byte_for_byte_and_queue_idempotent(
         launch_credential_path.read_bytes()
     )
 
+    bootstrap_authorization_path = (
+        control_plane_root
+        / "commercial"
+        / BOOTSTRAP_AUTHORIZATION_FILENAME
+    )
+    first_bootstrap_authorization_bytes = (
+        bootstrap_authorization_path.read_bytes()
+    )
+
     first_bootstrap_bytes = (
         first_result[2].read_bytes()
     )
@@ -358,6 +394,11 @@ def test_retry_is_byte_for_byte_and_queue_idempotent(
     assert (
         launch_credential_path.read_bytes()
         == first_launch_bytes
+    )
+
+    assert (
+        bootstrap_authorization_path.read_bytes()
+        == first_bootstrap_authorization_bytes
     )
 
     assert (
@@ -396,6 +437,7 @@ def test_retry_is_byte_for_byte_and_queue_idempotent(
         ACTIVATION_FILENAME,
         HANDOFF_FILENAME,
         LAUNCH_CREDENTIAL_FILENAME,
+        BOOTSTRAP_AUTHORIZATION_FILENAME,
         BOOTSTRAP_FILENAME,
     }
 
@@ -497,6 +539,11 @@ def test_provisioner_has_store_only_commercial_surface() -> None:
         ),
         (
             "backend.commercial."
+            "customer_setup_bootstrap_authorization_service",
+            "CustomerSetupBootstrapAuthorizationStore",
+        ),
+        (
+            "backend.commercial."
             "customer_setup_launch_credential_service",
             "CustomerSetupLaunchCredentialStore",
         ),
@@ -506,7 +553,7 @@ def test_provisioner_has_store_only_commercial_surface() -> None:
         called_attributes.count(
             "initialize_empty"
         )
-        == 6
+        == 7
     )
 
     forbidden_business_actions = {

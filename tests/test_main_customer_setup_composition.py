@@ -1334,7 +1334,7 @@ def test_bootstrap_runtime_composition_dependency_order_is_fail_closed(
     )
 
 
-def test_bootstrap_runtime_composition_has_no_external_transport_boundary(
+def test_bootstrap_runtime_composition_owns_only_minimal_external_transport_boundary(
 ) -> None:
     compose = _function(
         "_compose_customer_setup_runtime"
@@ -1347,12 +1347,19 @@ def test_bootstrap_runtime_composition_has_no_external_transport_boundary(
 
     assert compose_source is not None
 
+    assert len(
+        _calls_named(
+            compose,
+            "create_customer_setup_bootstrap_router",
+        )
+    ) == 1
+
     forbidden = (
-        "create_customer_setup_bootstrap",
         "bootstrap_authorization_service.issue(",
         "bootstrap_authorization_service.redeem(",
         "recover_consumed_redemption(",
-        "bootstrap_launch_grant_service.grant(",
+        "authorization_code=",
+        "code_verifier=",
     )
 
     for value in forbidden:
@@ -1421,3 +1428,226 @@ def test_bootstrap_runtime_exports_are_present(
             f"{name} = ("
             in compose_source
         )
+
+def test_bootstrap_router_reuses_only_bootstrap_launch_grant_authority(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    calls = _calls_named(
+        compose,
+        "create_customer_setup_bootstrap_router",
+    )
+
+    assert len(calls) == 1
+
+    call = calls[0]
+
+    keyword_names = {
+        keyword.arg
+        for keyword in call.keywords
+    }
+
+    assert keyword_names == {
+        "grant_setup_launch",
+    }
+
+    assert _is_method(
+        _keyword(
+            call,
+            "grant_setup_launch",
+        ),
+        owner="bootstrap_launch_grant_service",
+        method="grant",
+    )
+
+
+def test_bootstrap_router_is_included_once(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    include_calls = [
+        node
+        for node in ast.walk(
+            compose
+        )
+        if (
+            isinstance(
+                node,
+                ast.Call,
+            )
+            and isinstance(
+                node.func,
+                ast.Attribute,
+            )
+            and node.func.attr
+            == "include_router"
+            and isinstance(
+                node.func.value,
+                ast.Name,
+            )
+            and node.func.value.id == "app"
+        )
+    ]
+
+    bootstrap_includes = [
+        call
+        for call in include_calls
+        if (
+            len(
+                call.args
+            ) == 1
+            and _is_name(
+                call.args[0],
+                "bootstrap_router",
+            )
+        )
+    ]
+
+    assert len(
+        bootstrap_includes
+    ) == 1
+
+
+def test_bootstrap_router_dependency_order_is_safe(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    compose_source = ast.get_source_segment(
+        SOURCE,
+        compose,
+    )
+
+    assert compose_source is not None
+
+    assert compose_source.index(
+        "bootstrap_authorization_service = ("
+    ) < compose_source.index(
+        "bootstrap_launch_grant_service = ("
+    )
+
+    assert compose_source.index(
+        "launch_service = ("
+    ) < compose_source.index(
+        "bootstrap_launch_grant_service = ("
+    )
+
+    assert compose_source.index(
+        "bootstrap_launch_grant_service = ("
+    ) < compose_source.index(
+        "bootstrap_router = ("
+    )
+
+    assert compose_source.index(
+        "bootstrap_router = ("
+    ) < compose_source.index(
+        "app.include_router(\n"
+        "        bootstrap_router"
+    )
+
+
+def test_bootstrap_and_entry_routers_remain_distinct_boundaries(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    bootstrap_call = _calls_named(
+        compose,
+        "create_customer_setup_bootstrap_router",
+    )[0]
+
+    entry_call = _calls_named(
+        compose,
+        "create_customer_setup_entry_router",
+    )[0]
+
+    bootstrap_keywords = {
+        keyword.arg
+        for keyword in bootstrap_call.keywords
+    }
+
+    entry_keywords = {
+        keyword.arg
+        for keyword in entry_call.keywords
+    }
+
+    assert bootstrap_keywords == {
+        "grant_setup_launch",
+    }
+
+    assert entry_keywords == {
+        "authorize_setup_launch",
+        "grant_setup_entry",
+    }
+
+    assert bootstrap_keywords.isdisjoint(
+        entry_keywords
+    )
+
+
+def test_bootstrap_router_composition_is_lifespan_owned_only(
+) -> None:
+    forbidden_top_level_calls = {
+        "create_customer_setup_bootstrap_router",
+    }
+
+    for node in TREE.body:
+        if not isinstance(
+            node,
+            ast.Assign,
+        ):
+            continue
+
+        if not isinstance(
+            node.value,
+            ast.Call,
+        ):
+            continue
+
+        if not isinstance(
+            node.value.func,
+            ast.Name,
+        ):
+            continue
+
+        assert (
+            node.value.func.id
+            not in forbidden_top_level_calls
+        )
+
+
+def test_bootstrap_router_composition_passes_no_customer_controlled_identity(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    call = _calls_named(
+        compose,
+        "create_customer_setup_bootstrap_router",
+    )[0]
+
+    keyword_names = {
+        keyword.arg
+        for keyword in call.keywords
+    }
+
+    forbidden = {
+        "customer_id",
+        "deployment_id",
+        "agent_id",
+        "authorization_code",
+        "code_verifier",
+        "authorization_store",
+        "launch_store",
+    }
+
+    assert forbidden.isdisjoint(
+        keyword_names
+    )

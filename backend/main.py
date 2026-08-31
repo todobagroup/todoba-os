@@ -47,6 +47,9 @@ from backend.commercial.customer_registration_service import (
     CustomerRegistrationService,
     CustomerRegistrationStore,
 )
+from backend.commercial.customer_setup_bootstrap_api import (
+    create_customer_setup_bootstrap_router,
+)
 from backend.commercial.customer_setup_entry_api import (
     create_customer_setup_entry_router,
 )
@@ -900,6 +903,14 @@ def _compose_customer_setup_runtime(
         )
     )
 
+    bootstrap_router = (
+        create_customer_setup_bootstrap_router(
+            grant_setup_launch=(
+                bootstrap_launch_grant_service.grant
+            ),
+        )
+    )
+
     entry_router = (
         create_customer_setup_entry_router(
             authorize_setup_launch=(
@@ -954,6 +965,10 @@ def _compose_customer_setup_runtime(
 
     app.include_router(
         registration_router
+    )
+
+    app.include_router(
+        bootstrap_router
     )
 
     app.include_router(

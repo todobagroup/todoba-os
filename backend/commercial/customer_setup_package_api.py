@@ -5,8 +5,8 @@ Short-lived installer package-delivery boundary.
 
 Trust flow:
 
-    Authorization: Bearer <customer setup handoff>
-        -> authoritative R3 handoff authorization
+    Authorization: Bearer <setup handoff or build continuation>
+        -> authoritative credential-specific setup authorization
         -> BOUND setup activation deployment identity
         -> customer-to-deployment authorization
         -> deployment entitlement authorization
@@ -20,7 +20,7 @@ Security rules:
 - account fingerprint is never accepted by this route
 - package path is never accepted from the HTTP caller
 - Customer Access Credential is not issued or accepted
-- setup handoff authorization owns customer/setup identity
+- setup handoff/continuation authority owns customer/setup identity
 - BOUND setup activation owns deployment identity
 - commercial deployment owner validates customer ownership
 - ACTIVE deployment entitlement is required
@@ -41,6 +41,8 @@ This component does not:
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
+from datetime import timezone
 
 from fastapi import APIRouter
 from fastapi import Header
@@ -54,12 +56,17 @@ from backend.commercial.customer_deployment_package_publication import (
 from backend.commercial.customer_identity_registry import (
     CustomerIdentity,
 )
+from backend.commercial.customer_setup_build_continuation_service import (
+    CustomerSetupBuildContinuationAuthorization,
+)
 from backend.commercial.customer_setup_handoff_service import (
     CustomerSetupHandoffAuthorization,
 )
 
 
 _SETUP_PACKAGE_PATH = "/customer/setup/package"
+
+_CONTINUATION_PREFIX = "tdbsc1."
 
 _AUTHENTICATION_DETAIL = (
     "Customer setup authentication failed."
@@ -84,13 +91,19 @@ def create_customer_setup_package_router(
     authorize_deployment: Callable,
     authorize_entitlement: Callable,
     package_publication: CustomerDeploymentPackagePublication,
+    continuation_service=None,
+    setup_activation_service=None,
+    clock: Callable[[], datetime] = (
+        lambda: datetime.now(timezone.utc)
+    ),
 ) -> APIRouter:
     """
-    Create the short-lived setup-handoff package router.
+    Create the customer setup package delivery router.
 
-    Time/lifetime enforcement remains outside this HTTP
-    owner. authorize_setup_handoff must already encapsulate
-    the authoritative R3 clock boundary.
+    Handoff lifetime remains delegated to the authoritative
+    handoff owner. Optional build-continuation lifetime is
+    checked by the injected continuation owner using this
+    boundary's trusted UTC clock.
     """
 
     _require_callable(
@@ -114,6 +127,39 @@ def create_customer_setup_package_router(
         method_name="get_published_package",
     )
 
+    continuation_enabled = (
+        continuation_service is not None
+        or setup_activation_service is not None
+    )
+
+    if continuation_enabled:
+        if (
+            continuation_service is None
+            or setup_activation_service is None
+        ):
+            raise TypeError(
+                "continuation_service and "
+                "setup_activation_service must be "
+                "provided together."
+            )
+
+        _require_owner_method(
+            continuation_service,
+            owner_name="continuation_service",
+            method_name="authorize",
+        )
+
+        _require_owner_method(
+            setup_activation_service,
+            owner_name="setup_activation_service",
+            method_name="get",
+        )
+
+        _require_callable(
+            clock,
+            name="clock",
+        )
+
     router = APIRouter()
 
     @router.get(
@@ -126,29 +172,73 @@ def create_customer_setup_package_router(
             alias="Authorization",
         ),
     ) -> FileResponse:
-        handoff_credential = (
+        setup_credential = (
             _extract_bearer_credential(
                 authorization
             )
         )
 
-        try:
-            setup_authorization = (
-                authorize_setup_handoff(
-                    handoff_credential
-                )
-            )
-        except ValueError as exc:
-            raise _authentication_error() from exc
-
-        if not isinstance(
-            setup_authorization,
-            CustomerSetupHandoffAuthorization,
+        if setup_credential.startswith(
+            _CONTINUATION_PREFIX
         ):
-            raise RuntimeError(
-                "Setup handoff authorizer returned "
-                "invalid result."
+            if (
+                continuation_service is None
+                or setup_activation_service is None
+            ):
+                raise _authentication_error()
+
+            current_time = _read_clock(
+                clock
             )
+
+            try:
+                setup_authorization = (
+                    continuation_service.authorize(
+                        continuation_credential=(
+                            setup_credential
+                        ),
+                        current_time=current_time,
+                    )
+                )
+            except ValueError as exc:
+                raise _authentication_error() from exc
+
+            if not isinstance(
+                setup_authorization,
+                CustomerSetupBuildContinuationAuthorization,
+            ):
+                raise RuntimeError(
+                    "Setup build continuation authorizer "
+                    "returned invalid result."
+                )
+
+            _require_bound_continuation_activation(
+                setup_activation_service=(
+                    setup_activation_service
+                ),
+                authorization=(
+                    setup_authorization
+                ),
+            )
+
+        else:
+            try:
+                setup_authorization = (
+                    authorize_setup_handoff(
+                        setup_credential
+                    )
+                )
+            except ValueError as exc:
+                raise _authentication_error() from exc
+
+            if not isinstance(
+                setup_authorization,
+                CustomerSetupHandoffAuthorization,
+            ):
+                raise RuntimeError(
+                    "Setup handoff authorizer returned "
+                    "invalid result."
+                )
 
         deployment_id = (
             setup_authorization.deployment_id
@@ -279,6 +369,140 @@ def create_customer_setup_package_router(
         )
 
     return router
+
+
+def _require_bound_continuation_activation(
+    *,
+    setup_activation_service,
+    authorization: CustomerSetupBuildContinuationAuthorization,
+) -> None:
+    activation = (
+        setup_activation_service.get(
+            setup_activation_id=(
+                authorization.setup_activation_id
+            )
+        )
+    )
+
+    if activation is None:
+        raise RuntimeError(
+            "Authorized build continuation is missing "
+            "customer setup activation."
+        )
+
+    activation_id = getattr(
+        activation,
+        "setup_activation_id",
+        None,
+    )
+
+    if (
+        activation_id
+        != authorization.setup_activation_id
+    ):
+        raise RuntimeError(
+            "Build continuation setup activation "
+            "identity mismatch."
+        )
+
+    activation_customer_id = getattr(
+        activation,
+        "customer_id",
+        None,
+    )
+
+    if (
+        activation_customer_id
+        != authorization.customer_id
+    ):
+        raise RuntimeError(
+            "Build continuation customer identity "
+            "mismatch."
+        )
+
+    status = _status_value(
+        getattr(
+            activation,
+            "status",
+            None,
+        )
+    )
+
+    if status == "SUSPENDED":
+        raise _authentication_error()
+
+    if status == "ACTIVE":
+        raise HTTPException(
+            status_code=409,
+            detail=_NOT_READY_DETAIL,
+        )
+
+    if status != "BOUND":
+        raise RuntimeError(
+            "Authorized build continuation setup "
+            "activation has unsupported status."
+        )
+
+    activation_deployment_id = getattr(
+        activation,
+        "deployment_id",
+        None,
+    )
+
+    if (
+        activation_deployment_id
+        != authorization.deployment_id
+    ):
+        raise RuntimeError(
+            "Build continuation deployment identity "
+            "mismatch."
+        )
+
+
+def _status_value(
+    value,
+) -> str | None:
+    direct = getattr(
+        value,
+        "value",
+        value,
+    )
+
+    if not isinstance(
+        direct,
+        str,
+    ):
+        return None
+
+    return direct
+
+
+def _read_clock(
+    clock: Callable[[], datetime],
+) -> datetime:
+    value = clock()
+
+    if not isinstance(
+        value,
+        datetime,
+    ):
+        raise RuntimeError(
+            "Customer setup package clock returned "
+            "invalid value."
+        )
+
+    if (
+        value.tzinfo is None
+        or value.utcoffset() is None
+    ):
+        raise RuntimeError(
+            "Customer setup package clock must return "
+            "timezone-aware datetime."
+        )
+
+    return value.astimezone(
+        timezone.utc
+    )
 
 
 def _extract_bearer_credential(

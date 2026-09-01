@@ -2,7 +2,7 @@
 Owner tests for Customer Setup Package API.
 
 Proves:
-- one setup-handoff-only GET route
+- one setup package GET route with handoff/continuation authority
 - no caller-controlled commercial identity
 - malformed/missing setup bearer returns 401
 - R3 authorization failures return 401
@@ -20,6 +20,9 @@ Proves:
 from __future__ import annotations
 
 import inspect
+from datetime import datetime
+from datetime import timezone
+
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -31,6 +34,9 @@ import pytest
 from backend.commercial.customer_deployment_package_publication import (
     CustomerDeploymentPublishedPackage,
 )
+from backend.commercial.customer_setup_build_continuation_service import (
+    CustomerSetupBuildContinuationAuthorization,
+)
 from backend.commercial.customer_setup_handoff_service import (
     CustomerSetupHandoffAuthorization,
 )
@@ -41,6 +47,25 @@ from backend.commercial.customer_setup_package_api import (
 
 HANDOFF_ID = (
     "a" * 32
+)
+
+CONTINUATION_ID = (
+    "c" * 32
+)
+
+CONTINUATION_CREDENTIAL = (
+    f"tdbsc1.{CONTINUATION_ID}."
+    "continuation-secret-value"
+)
+
+NOW = datetime(
+    2026,
+    9,
+    1,
+    4,
+    41,
+    53,
+    tzinfo=timezone.utc,
 )
 
 SETUP_ACTIVATION_ID = (
@@ -258,6 +283,131 @@ def bearer_header(
         "Authorization": (
             f"Bearer {credential}"
         )
+    }
+
+
+def make_continuation_authorization(
+    *,
+    setup_activation_id: str = SETUP_ACTIVATION_ID,
+    customer_id: str = CUSTOMER_ID,
+    deployment_id: str = DEPLOYMENT_ID,
+) -> CustomerSetupBuildContinuationAuthorization:
+    return CustomerSetupBuildContinuationAuthorization(
+        continuation_id=CONTINUATION_ID,
+        setup_activation_id=setup_activation_id,
+        customer_id=customer_id,
+        deployment_id=deployment_id,
+    )
+
+
+def make_continuation_activation(
+    *,
+    status: str = "BOUND",
+    setup_activation_id: str = SETUP_ACTIVATION_ID,
+    customer_id: str = CUSTOMER_ID,
+    deployment_id=DEPLOYMENT_ID,
+):
+    return SimpleNamespace(
+        setup_activation_id=setup_activation_id,
+        customer_id=customer_id,
+        status=SimpleNamespace(
+            value=status
+        ),
+        deployment_id=deployment_id,
+    )
+
+
+def make_continuation_router(
+    environment,
+    *,
+    continuation_service,
+    setup_activation_service,
+    clock=lambda: NOW,
+):
+    return create_customer_setup_package_router(
+        authorize_setup_handoff=(
+            environment[
+                "authorize_setup_handoff"
+            ]
+        ),
+        authorize_deployment=(
+            environment[
+                "authorize_deployment"
+            ]
+        ),
+        authorize_entitlement=(
+            environment[
+                "authorize_entitlement"
+            ]
+        ),
+        package_publication=(
+            environment[
+                "package_publication"
+            ]
+        ),
+        continuation_service=(
+            continuation_service
+        ),
+        setup_activation_service=(
+            setup_activation_service
+        ),
+        clock=clock,
+    )
+
+
+def make_continuation_client(
+    environment,
+    *,
+    authorization_result=None,
+    activation=None,
+    clock=lambda: NOW,
+):
+    if authorization_result is None:
+        authorization_result = (
+            make_continuation_authorization()
+        )
+
+    if activation is None:
+        activation = (
+            make_continuation_activation()
+        )
+
+    continuation_service = Mock()
+    continuation_service.authorize.return_value = (
+        authorization_result
+    )
+
+    setup_activation_service = Mock()
+    setup_activation_service.get.return_value = (
+        activation
+    )
+
+    app = FastAPI()
+
+    app.include_router(
+        make_continuation_router(
+            environment,
+            continuation_service=(
+                continuation_service
+            ),
+            setup_activation_service=(
+                setup_activation_service
+            ),
+            clock=clock,
+        )
+    )
+
+    return {
+        "client": TestClient(
+            app,
+            raise_server_exceptions=False,
+        ),
+        "continuation_service": (
+            continuation_service
+        ),
+        "setup_activation_service": (
+            setup_activation_service
+        ),
     }
 
 
@@ -975,6 +1125,539 @@ def test_router_factory_requires_all_authorization_owners(
             ),
             package_publication=object(),
         )
+
+
+
+def test_continuation_bearer_without_optional_owners_returns_401(
+    tmp_path: Path,
+) -> None:
+    environment = build_dependencies(
+        tmp_path
+    )
+
+    response = make_client(
+        environment
+    ).get(
+        "/customer/setup/package",
+        headers=bearer_header(
+            CONTINUATION_CREDENTIAL
+        ),
+    )
+
+    assert response.status_code == 401
+
+    environment[
+        "authorize_setup_handoff"
+    ].assert_not_called()
+
+    environment[
+        "authorize_deployment"
+    ].assert_not_called()
+
+    environment[
+        "authorize_entitlement"
+    ].assert_not_called()
+
+    environment[
+        "package_publication"
+    ].get_published_package.assert_not_called()
+
+
+def test_bound_continuation_downloads_published_package(
+    tmp_path: Path,
+) -> None:
+    environment = build_dependencies(
+        tmp_path
+    )
+
+    continuation = (
+        make_continuation_client(
+            environment
+        )
+    )
+
+    response = continuation[
+        "client"
+    ].get(
+        "/customer/setup/package",
+        headers=bearer_header(
+            CONTINUATION_CREDENTIAL
+        ),
+    )
+
+    assert response.status_code == 200
+
+    assert (
+        response.content
+        == environment[
+            "artifact"
+        ].read_bytes()
+    )
+
+    environment[
+        "authorize_setup_handoff"
+    ].assert_not_called()
+
+    continuation[
+        "continuation_service"
+    ].authorize.assert_called_once_with(
+        continuation_credential=(
+            CONTINUATION_CREDENTIAL
+        ),
+        current_time=NOW,
+    )
+
+    continuation[
+        "setup_activation_service"
+    ].get.assert_called_once_with(
+        setup_activation_id=(
+            SETUP_ACTIVATION_ID
+        )
+    )
+
+    environment[
+        "authorize_deployment"
+    ].assert_called_once()
+
+    environment[
+        "authorize_entitlement"
+    ].assert_called_once()
+
+    environment[
+        "package_publication"
+    ].get_published_package.assert_called_once_with(
+        deployment_id=DEPLOYMENT_ID
+    )
+
+
+def test_active_continuation_setup_is_not_ready_for_delivery(
+    tmp_path: Path,
+) -> None:
+    environment = build_dependencies(
+        tmp_path
+    )
+
+    continuation = (
+        make_continuation_client(
+            environment,
+            activation=(
+                make_continuation_activation(
+                    status="ACTIVE",
+                    deployment_id=None,
+                )
+            ),
+        )
+    )
+
+    response = continuation[
+        "client"
+    ].get(
+        "/customer/setup/package",
+        headers=bearer_header(
+            CONTINUATION_CREDENTIAL
+        ),
+    )
+
+    assert response.status_code == 409
+
+    assert response.json() == {
+        "detail": (
+            "Customer setup package is not ready."
+        )
+    }
+
+    environment[
+        "authorize_setup_handoff"
+    ].assert_not_called()
+
+    environment[
+        "authorize_deployment"
+    ].assert_not_called()
+
+    environment[
+        "authorize_entitlement"
+    ].assert_not_called()
+
+    environment[
+        "package_publication"
+    ].get_published_package.assert_not_called()
+
+
+def test_suspended_continuation_setup_fails_closed(
+    tmp_path: Path,
+) -> None:
+    environment = build_dependencies(
+        tmp_path
+    )
+
+    continuation = (
+        make_continuation_client(
+            environment,
+            activation=(
+                make_continuation_activation(
+                    status="SUSPENDED",
+                )
+            ),
+        )
+    )
+
+    response = continuation[
+        "client"
+    ].get(
+        "/customer/setup/package",
+        headers=bearer_header(
+            CONTINUATION_CREDENTIAL
+        ),
+    )
+
+    assert response.status_code == 401
+
+    environment[
+        "authorize_setup_handoff"
+    ].assert_not_called()
+
+    environment[
+        "authorize_deployment"
+    ].assert_not_called()
+
+    environment[
+        "authorize_entitlement"
+    ].assert_not_called()
+
+    environment[
+        "package_publication"
+    ].get_published_package.assert_not_called()
+
+
+def test_invalid_continuation_returns_401_without_handoff_fallback(
+    tmp_path: Path,
+) -> None:
+    environment = build_dependencies(
+        tmp_path
+    )
+
+    continuation = (
+        make_continuation_client(
+            environment
+        )
+    )
+
+    continuation[
+        "continuation_service"
+    ].authorize.side_effect = ValueError(
+        "invalid continuation"
+    )
+
+    response = continuation[
+        "client"
+    ].get(
+        "/customer/setup/package",
+        headers=bearer_header(
+            CONTINUATION_CREDENTIAL
+        ),
+    )
+
+    assert response.status_code == 401
+
+    environment[
+        "authorize_setup_handoff"
+    ].assert_not_called()
+
+    continuation[
+        "setup_activation_service"
+    ].get.assert_not_called()
+
+    environment[
+        "authorize_deployment"
+    ].assert_not_called()
+
+
+def test_continuation_infrastructure_fault_is_not_auth_failure(
+    tmp_path: Path,
+) -> None:
+    environment = build_dependencies(
+        tmp_path
+    )
+
+    continuation = (
+        make_continuation_client(
+            environment
+        )
+    )
+
+    continuation[
+        "continuation_service"
+    ].authorize.side_effect = RuntimeError(
+        "continuation store failure"
+    )
+
+    response = continuation[
+        "client"
+    ].get(
+        "/customer/setup/package",
+        headers=bearer_header(
+            CONTINUATION_CREDENTIAL
+        ),
+    )
+
+    assert response.status_code == 500
+
+    environment[
+        "authorize_setup_handoff"
+    ].assert_not_called()
+
+    continuation[
+        "setup_activation_service"
+    ].get.assert_not_called()
+
+
+def test_invalid_continuation_authorization_result_fails_closed(
+    tmp_path: Path,
+) -> None:
+    environment = build_dependencies(
+        tmp_path
+    )
+
+    continuation = (
+        make_continuation_client(
+            environment
+        )
+    )
+
+    continuation[
+        "continuation_service"
+    ].authorize.return_value = (
+        SimpleNamespace(
+            customer_id=CUSTOMER_ID,
+            deployment_id=DEPLOYMENT_ID,
+        )
+    )
+
+    response = continuation[
+        "client"
+    ].get(
+        "/customer/setup/package",
+        headers=bearer_header(
+            CONTINUATION_CREDENTIAL
+        ),
+    )
+
+    assert response.status_code == 500
+
+    environment[
+        "authorize_setup_handoff"
+    ].assert_not_called()
+
+    continuation[
+        "setup_activation_service"
+    ].get.assert_not_called()
+
+
+def test_bound_continuation_activation_deployment_must_converge(
+    tmp_path: Path,
+) -> None:
+    environment = build_dependencies(
+        tmp_path
+    )
+
+    continuation = (
+        make_continuation_client(
+            environment,
+            activation=(
+                make_continuation_activation(
+                    deployment_id=(
+                        "different-deployment"
+                    ),
+                )
+            ),
+        )
+    )
+
+    response = continuation[
+        "client"
+    ].get(
+        "/customer/setup/package",
+        headers=bearer_header(
+            CONTINUATION_CREDENTIAL
+        ),
+    )
+
+    assert response.status_code == 500
+
+    environment[
+        "authorize_setup_handoff"
+    ].assert_not_called()
+
+    environment[
+        "authorize_deployment"
+    ].assert_not_called()
+
+    environment[
+        "authorize_entitlement"
+    ].assert_not_called()
+
+
+def test_bound_continuation_activation_customer_must_converge(
+    tmp_path: Path,
+) -> None:
+    environment = build_dependencies(
+        tmp_path
+    )
+
+    continuation = (
+        make_continuation_client(
+            environment,
+            activation=(
+                make_continuation_activation(
+                    customer_id=(
+                        "different-customer"
+                    ),
+                )
+            ),
+        )
+    )
+
+    response = continuation[
+        "client"
+    ].get(
+        "/customer/setup/package",
+        headers=bearer_header(
+            CONTINUATION_CREDENTIAL
+        ),
+    )
+
+    assert response.status_code == 500
+
+    environment[
+        "authorize_setup_handoff"
+    ].assert_not_called()
+
+    environment[
+        "authorize_deployment"
+    ].assert_not_called()
+
+    environment[
+        "authorize_entitlement"
+    ].assert_not_called()
+
+
+def test_continuation_dependencies_must_be_injected_as_pair(
+    tmp_path: Path,
+) -> None:
+    environment = build_dependencies(
+        tmp_path
+    )
+
+    with pytest.raises(
+        TypeError,
+        match=(
+            "continuation_service and "
+            "setup_activation_service must be "
+            "provided together"
+        ),
+    ):
+        create_customer_setup_package_router(
+            authorize_setup_handoff=(
+                environment[
+                    "authorize_setup_handoff"
+                ]
+            ),
+            authorize_deployment=(
+                environment[
+                    "authorize_deployment"
+                ]
+            ),
+            authorize_entitlement=(
+                environment[
+                    "authorize_entitlement"
+                ]
+            ),
+            package_publication=(
+                environment[
+                    "package_publication"
+                ]
+            ),
+            continuation_service=Mock(),
+        )
+
+    with pytest.raises(
+        TypeError,
+        match=(
+            "continuation_service and "
+            "setup_activation_service must be "
+            "provided together"
+        ),
+    ):
+        create_customer_setup_package_router(
+            authorize_setup_handoff=(
+                environment[
+                    "authorize_setup_handoff"
+                ]
+            ),
+            authorize_deployment=(
+                environment[
+                    "authorize_deployment"
+                ]
+            ),
+            authorize_entitlement=(
+                environment[
+                    "authorize_entitlement"
+                ]
+            ),
+            package_publication=(
+                environment[
+                    "package_publication"
+                ]
+            ),
+            setup_activation_service=Mock(),
+        )
+
+
+def test_continuation_clock_must_be_timezone_aware(
+    tmp_path: Path,
+) -> None:
+    environment = build_dependencies(
+        tmp_path
+    )
+
+    continuation = (
+        make_continuation_client(
+            environment,
+            clock=(
+                lambda: datetime(
+                    2026,
+                    9,
+                    1,
+                    4,
+                    41,
+                    53,
+                )
+            ),
+        )
+    )
+
+    response = continuation[
+        "client"
+    ].get(
+        "/customer/setup/package",
+        headers=bearer_header(
+            CONTINUATION_CREDENTIAL
+        ),
+    )
+
+    assert response.status_code == 500
+
+    continuation[
+        "continuation_service"
+    ].authorize.assert_not_called()
+
+    environment[
+        "authorize_setup_handoff"
+    ].assert_not_called()
+
+    environment[
+        "authorize_deployment"
+    ].assert_not_called()
 
 
 def test_api_source_has_no_customer_access_or_mutation_ownership(

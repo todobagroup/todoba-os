@@ -749,3 +749,339 @@ def test_owner_has_only_orchestration_ownership(
 
     for token in forbidden:
         assert token not in source
+
+# ===== CAP E: CUSTOMER SETUP CONTINUATION ORCHESTRATION =====
+
+
+def test_cap_e_pending_is_retained_then_continued_once(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    continuation_credential = (
+        "tdbsc1.cap-e-continuation-secret"
+    )
+    preflight = _preflight_result(
+        tmp_path
+    )
+
+    client, installer, service = (
+        _owners()
+    )
+
+    calls = []
+
+    def provision(
+        *,
+        account_fingerprint,
+    ):
+        calls.append(
+            (
+                "provision",
+                account_fingerprint,
+            )
+        )
+
+        return (
+            CustomerSetupProvisioningTransportResult(
+                status="build_pending",
+                continuation_credential=(
+                    continuation_credential
+                ),
+            )
+        )
+
+    def continue_provisioning(
+        *,
+        continuation_credential: str,
+    ):
+        calls.append(
+            (
+                "continue",
+                continuation_credential,
+            )
+        )
+
+        return (
+            CustomerSetupProvisioningTransportResult(
+                status="build_pending",
+                continuation_credential=(
+                    continuation_credential
+                ),
+            )
+        )
+
+    def forbidden_download(
+        **kwargs,
+    ):
+        del kwargs
+        raise AssertionError(
+            "package download must not run while pending"
+        )
+
+    def forbidden_install(
+        **kwargs,
+    ):
+        del kwargs
+        raise AssertionError(
+            "install must not run while pending"
+        )
+
+    monkeypatch.setattr(
+        client,
+        "provision",
+        provision,
+    )
+    monkeypatch.setattr(
+        client,
+        "continue_provisioning",
+        continue_provisioning,
+    )
+    monkeypatch.setattr(
+        client,
+        "download_package",
+        forbidden_download,
+    )
+    monkeypatch.setattr(
+        installer,
+        "install",
+        forbidden_install,
+    )
+
+    first = service.run(
+        preflight_result=preflight
+    )
+
+    assert first.status == "build_pending"
+
+    # No auto-poll inside the first run.
+    assert calls == [
+        (
+            "provision",
+            ACCOUNT_FINGERPRINT,
+        ),
+    ]
+
+    second = service.run(
+        preflight_result=preflight
+    )
+
+    assert second.status == "build_pending"
+
+    # One explicit customer retry -> one continuation call.
+    assert calls == [
+        (
+            "provision",
+            ACCOUNT_FINGERPRINT,
+        ),
+        (
+            "continue",
+            continuation_credential,
+        ),
+    ]
+
+
+def test_cap_e_continuation_ready_downloads_with_continuation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    continuation_credential = (
+        "tdbsc1.cap-e-continuation-secret"
+    )
+    preflight = _preflight_result(
+        tmp_path
+    )
+
+    client, installer, service = (
+        _owners()
+    )
+
+    calls = []
+
+    monkeypatch.setattr(
+        client,
+        "provision",
+        lambda **kwargs: (
+            CustomerSetupProvisioningTransportResult(
+                status="build_pending",
+                continuation_credential=(
+                    continuation_credential
+                ),
+            )
+        ),
+    )
+
+    service.run(
+        preflight_result=preflight
+    )
+
+    def forbidden_provision(
+        **kwargs,
+    ):
+        del kwargs
+        raise AssertionError(
+            "initial provision must not repeat "
+            "after continuation is retained"
+        )
+
+    def continue_provisioning(
+        *,
+        continuation_credential: str,
+    ):
+        calls.append(
+            (
+                "continue",
+                continuation_credential,
+            )
+        )
+
+        return (
+            CustomerSetupProvisioningTransportResult(
+                status="ready",
+                artifact_sha256=(
+                    ARTIFACT_SHA256
+                ),
+                artifact_size_bytes=(
+                    ARTIFACT_SIZE_BYTES
+                ),
+            )
+        )
+
+    def download_package(
+        *,
+        continuation_credential: str,
+    ):
+        calls.append(
+            (
+                "download",
+                continuation_credential,
+            )
+        )
+
+        return b"cap-e-artifact"
+
+    def install(
+        **kwargs,
+    ):
+        calls.append(
+            (
+                "install",
+                kwargs["expected_sha256"],
+                kwargs["expected_size_bytes"],
+            )
+        )
+
+        raise RuntimeError(
+            "CAP E reached installer"
+        )
+
+    monkeypatch.setattr(
+        client,
+        "provision",
+        forbidden_provision,
+    )
+    monkeypatch.setattr(
+        client,
+        "continue_provisioning",
+        continue_provisioning,
+    )
+    monkeypatch.setattr(
+        client,
+        "download_package",
+        download_package,
+    )
+    monkeypatch.setattr(
+        installer,
+        "install",
+        install,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="CAP E reached installer",
+    ):
+        service.run(
+            preflight_result=preflight
+        )
+
+    assert calls == [
+        (
+            "continue",
+            continuation_credential,
+        ),
+        (
+            "download",
+            continuation_credential,
+        ),
+        (
+            "install",
+            ARTIFACT_SHA256,
+            ARTIFACT_SIZE_BYTES,
+        ),
+    ]
+
+
+def test_cap_e_continuation_rejects_bound_account_mismatch_before_http(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    continuation_credential = (
+        "tdbsc1.cap-e-continuation-secret"
+    )
+    preflight = _preflight_result(
+        tmp_path
+    )
+
+    client, installer, service = (
+        _owners()
+    )
+
+    monkeypatch.setattr(
+        client,
+        "provision",
+        lambda **kwargs: (
+            CustomerSetupProvisioningTransportResult(
+                status="build_pending",
+                continuation_credential=(
+                    continuation_credential
+                ),
+            )
+        ),
+    )
+
+    service.run(
+        preflight_result=preflight
+    )
+
+    # Simulate an in-memory continuation binding that
+    # belongs to a different authoritative MT5 account.
+    # Do not fabricate an invalid preflight result: the
+    # preflight owner correctly enforces its own
+    # server/login/account_fingerprint invariant.
+    service._continuation_account_fingerprint = (
+        "different-account-fingerprint"
+    )
+
+    def forbidden_continue(
+        **kwargs,
+    ):
+        del kwargs
+        raise AssertionError(
+            "continuation HTTP must not run "
+            "for a changed account"
+        )
+
+    monkeypatch.setattr(
+        client,
+        "continue_provisioning",
+        forbidden_continue,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "continuation account identity changed"
+        ),
+    ):
+        service.run(
+            preflight_result=preflight
+        )

@@ -672,3 +672,240 @@ def test_result_build_pending_rejects_metadata() -> None:
                 ARTIFACT_SHA256
             ),
         )
+
+# ===== CAP E: CUSTOMER SETUP CONTINUATION CLIENT =====
+
+
+def test_cap_e_provision_captures_redacted_continuation(
+    monkeypatch,
+) -> None:
+    continuation_credential = (
+        "tdbsc1.cap-e-continuation-secret"
+    )
+
+    monkeypatch.setattr(
+        module.httpx,
+        "post",
+        lambda *args, **kwargs: module.httpx.Response(
+            202,
+            json={
+                "status": "build_pending",
+                "continuation_credential": (
+                    continuation_credential
+                ),
+            },
+        ),
+    )
+
+    result = _client().provision(
+        account_fingerprint=(
+            ACCOUNT_FINGERPRINT
+        )
+    )
+
+    assert result.status == "build_pending"
+    assert (
+        result.continuation_credential
+        == continuation_credential
+    )
+    assert (
+        continuation_credential
+        not in repr(result)
+    )
+
+
+def test_cap_e_continue_uses_only_continuation_bearer(
+    monkeypatch,
+) -> None:
+    continuation_credential = (
+        "tdbsc1.cap-e-continuation-secret"
+    )
+    captured = {}
+
+    def fake_post(
+        url,
+        **kwargs,
+    ):
+        captured["url"] = url
+        captured.update(kwargs)
+
+        return module.httpx.Response(
+            200,
+            json={
+                "status": "ready",
+                "artifact_sha256": (
+                    ARTIFACT_SHA256
+                ),
+                "artifact_size_bytes": (
+                    ARTIFACT_SIZE_BYTES
+                ),
+            },
+        )
+
+    monkeypatch.setattr(
+        module.httpx,
+        "post",
+        fake_post,
+    )
+
+    result = _client().continue_provisioning(
+        continuation_credential=(
+            continuation_credential
+        )
+    )
+
+    assert captured["url"] == (
+        f"{BASE_URL}/customer/setup/continue"
+    )
+    assert captured["headers"] == {
+        "Authorization": (
+            f"Bearer {continuation_credential}"
+        ),
+    }
+    assert "json" not in captured
+    assert result.status == "ready"
+    assert (
+        result.artifact_sha256
+        == ARTIFACT_SHA256
+    )
+    assert (
+        result.artifact_size_bytes
+        == ARTIFACT_SIZE_BYTES
+    )
+
+
+def test_cap_e_continue_pending_preserves_same_credential(
+    monkeypatch,
+) -> None:
+    continuation_credential = (
+        "tdbsc1.cap-e-continuation-secret"
+    )
+
+    monkeypatch.setattr(
+        module.httpx,
+        "post",
+        lambda *args, **kwargs: module.httpx.Response(
+            202,
+            json={
+                "status": "build_pending",
+                "continuation_credential": (
+                    continuation_credential
+                ),
+            },
+        ),
+    )
+
+    result = _client().continue_provisioning(
+        continuation_credential=(
+            continuation_credential
+        )
+    )
+
+    assert result.status == "build_pending"
+    assert (
+        result.continuation_credential
+        == continuation_credential
+    )
+
+
+def test_cap_e_continue_rejects_credential_change(
+    monkeypatch,
+) -> None:
+    continuation_credential = (
+        "tdbsc1.cap-e-continuation-secret"
+    )
+
+    monkeypatch.setattr(
+        module.httpx,
+        "post",
+        lambda *args, **kwargs: module.httpx.Response(
+            202,
+            json={
+                "status": "build_pending",
+                "continuation_credential": (
+                    "tdbsc1.different-secret"
+                ),
+            },
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="changed continuation credential",
+    ):
+        _client().continue_provisioning(
+            continuation_credential=(
+                continuation_credential
+            )
+        )
+
+
+def test_cap_e_package_download_uses_continuation_bearer(
+    monkeypatch,
+) -> None:
+    continuation_credential = (
+        "tdbsc1.cap-e-continuation-secret"
+    )
+    captured = {}
+
+    def fake_get(
+        url,
+        **kwargs,
+    ):
+        captured["url"] = url
+        captured.update(kwargs)
+
+        return module.httpx.Response(
+            200,
+            headers={
+                "content-type": (
+                    "application/octet-stream"
+                ),
+            },
+            content=b"cap-e-package",
+        )
+
+    monkeypatch.setattr(
+        module.httpx,
+        "get",
+        fake_get,
+    )
+
+    content = _client().download_package(
+        continuation_credential=(
+            continuation_credential
+        )
+    )
+
+    assert content == b"cap-e-package"
+    assert captured["url"] == (
+        f"{BASE_URL}/customer/setup/package"
+    )
+    assert captured["headers"] == {
+        "Authorization": (
+            f"Bearer {continuation_credential}"
+        ),
+    }
+
+
+def test_cap_e_ready_result_rejects_continuation_credential(
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match=(
+            "ready must not contain "
+            "continuation_credential"
+        ),
+    ):
+        CustomerSetupProvisioningTransportResult(
+            status="ready",
+            continuation_credential=(
+                "tdbsc1.cap-e-continuation-secret"
+            ),
+            artifact_sha256=(
+                ARTIFACT_SHA256
+            ),
+            artifact_size_bytes=(
+                ARTIFACT_SIZE_BYTES
+            ),
+        )

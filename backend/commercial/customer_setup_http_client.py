@@ -37,12 +37,14 @@ This component does not:
 from __future__ import annotations
 
 from dataclasses import dataclass
+from dataclasses import field
 from typing import Literal
 
 import httpx
 
 
 _PROVISION_PATH = "/customer/setup/provision"
+_CONTINUE_PATH = "/customer/setup/continue"
 _PACKAGE_PATH = "/customer/setup/package"
 _PACKAGE_MEDIA_TYPE = "application/octet-stream"
 
@@ -62,6 +64,10 @@ class CustomerSetupProvisioningTransportResult:
         "build_pending",
         "ready",
     ]
+    continuation_credential: str | None = field(
+        default=None,
+        repr=False,
+    )
     artifact_sha256: str | None = None
     artifact_size_bytes: int | None = None
 
@@ -85,7 +91,35 @@ class CustomerSetupProvisioningTransportResult:
                     "build_pending must not contain artifact metadata."
                 )
 
+            continuation_credential = (
+                self.continuation_credential
+            )
+
+            if continuation_credential is not None:
+                if (
+                    not isinstance(
+                        continuation_credential,
+                        str,
+                    )
+                    or not continuation_credential
+                    or continuation_credential.strip()
+                    != continuation_credential
+                    or not continuation_credential.startswith(
+                        "tdbsc1."
+                    )
+                ):
+                    raise ValueError(
+                        "build_pending continuation_credential "
+                        "must be a normalized TODOBA build "
+                        "continuation credential."
+                    )
+
             return
+
+        if self.continuation_credential is not None:
+            raise ValueError(
+                "ready must not contain continuation_credential."
+            )
 
         digest = self.artifact_sha256
 
@@ -234,19 +268,44 @@ class CustomerSetupHttpClient:
         )
 
         if response.status_code == 202:
-            if payload != {
-                "status": "build_pending",
-            }:
+            if (
+                payload.get("status")
+                != "build_pending"
+                or set(payload)
+                not in (
+                    {
+                        "status",
+                    },
+                    {
+                        "status",
+                        "continuation_credential",
+                    },
+                )
+            ):
                 raise RuntimeError(
                     "Invalid build_pending customer setup "
                     "provisioning response."
                 )
 
-            return (
-                CustomerSetupProvisioningTransportResult(
-                    status="build_pending",
+            try:
+                return (
+                    CustomerSetupProvisioningTransportResult(
+                        status="build_pending",
+                        continuation_credential=(
+                            payload.get(
+                                "continuation_credential"
+                            )
+                        ),
+                    )
                 )
-            )
+            except (
+                TypeError,
+                ValueError,
+            ) as exc:
+                raise RuntimeError(
+                    "Invalid build_pending customer setup "
+                    "continuation credential."
+                ) from exc
 
         if set(
             payload
@@ -293,15 +352,194 @@ class CustomerSetupHttpClient:
                 "metadata."
             ) from exc
 
+    def continue_provisioning(
+        self,
+        *,
+        continuation_credential: str,
+    ) -> CustomerSetupProvisioningTransportResult:
+        normalized_continuation_credential = (
+            _normalize_required_string(
+                continuation_credential,
+                name="continuation_credential",
+            )
+        )
+
+        if (
+            normalized_continuation_credential
+            != continuation_credential
+            or not normalized_continuation_credential.startswith(
+                "tdbsc1."
+            )
+        ):
+            raise ValueError(
+                "continuation_credential must be a normalized "
+                "TODOBA build continuation credential."
+            )
+
+        response = httpx.post(
+            (
+                f"{self._setup_base_url}"
+                f"{_CONTINUE_PATH}"
+            ),
+            headers={
+                "Authorization": (
+                    "Bearer "
+                    f"{normalized_continuation_credential}"
+                ),
+            },
+            timeout=self._timeout_seconds,
+        )
+
+        self._require_expected_status(
+            response,
+            expected_statuses=(
+                200,
+                202,
+            ),
+        )
+
+        payload = self._response_json_object(
+            response
+        )
+
+        if response.status_code == 202:
+            if (
+                payload.get("status")
+                != "build_pending"
+                or set(payload)
+                not in (
+                    {
+                        "status",
+                    },
+                    {
+                        "status",
+                        "continuation_credential",
+                    },
+                )
+            ):
+                raise RuntimeError(
+                    "Invalid build_pending customer setup "
+                    "continuation response."
+                )
+
+            returned_credential = payload.get(
+                "continuation_credential"
+            )
+
+            if (
+                returned_credential is not None
+                and returned_credential
+                != normalized_continuation_credential
+            ):
+                raise RuntimeError(
+                    "Customer setup continuation response "
+                    "changed continuation credential."
+                )
+
+            try:
+                return (
+                    CustomerSetupProvisioningTransportResult(
+                        status="build_pending",
+                        continuation_credential=(
+                            returned_credential
+                        ),
+                    )
+                )
+            except (
+                TypeError,
+                ValueError,
+            ) as exc:
+                raise RuntimeError(
+                    "Invalid build_pending customer setup "
+                    "continuation credential."
+                ) from exc
+
+        if set(
+            payload
+        ) != {
+            "status",
+            "artifact_sha256",
+            "artifact_size_bytes",
+        }:
+            raise RuntimeError(
+                "Invalid ready customer setup continuation "
+                "response shape."
+            )
+
+        if payload.get(
+            "status"
+        ) != "ready":
+            raise RuntimeError(
+                "HTTP 200 customer setup continuation "
+                "response must be ready."
+            )
+
+        try:
+            return (
+                CustomerSetupProvisioningTransportResult(
+                    status="ready",
+                    artifact_sha256=(
+                        payload.get(
+                            "artifact_sha256"
+                        )
+                    ),
+                    artifact_size_bytes=(
+                        payload.get(
+                            "artifact_size_bytes"
+                        )
+                    ),
+                )
+            )
+        except (
+            TypeError,
+            ValueError,
+        ) as exc:
+            raise RuntimeError(
+                "Invalid ready customer setup continuation "
+                "metadata."
+            ) from exc
+
     def download_package(
         self,
+        *,
+        continuation_credential: str | None = None,
     ) -> bytes:
+        if continuation_credential is None:
+            authentication_headers = (
+                self._authentication_headers()
+            )
+        else:
+            normalized_continuation_credential = (
+                _normalize_required_string(
+                    continuation_credential,
+                    name="continuation_credential",
+                )
+            )
+
+            if (
+                normalized_continuation_credential
+                != continuation_credential
+                or not normalized_continuation_credential.startswith(
+                    "tdbsc1."
+                )
+            ):
+                raise ValueError(
+                    "continuation_credential must be a normalized "
+                    "TODOBA build continuation credential."
+                )
+
+            authentication_headers = {
+                "Authorization": (
+                    "Bearer "
+                    f"{normalized_continuation_credential}"
+                ),
+            }
         response = httpx.get(
             (
                 f"{self._setup_base_url}"
                 f"{_PACKAGE_PATH}"
             ),
-            headers=self._authentication_headers(),
+            headers=authentication_headers,
             timeout=self._timeout_seconds,
         )
 

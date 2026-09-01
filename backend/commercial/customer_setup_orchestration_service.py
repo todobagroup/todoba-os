@@ -5,8 +5,9 @@ Coordinates already-authoritative customer setup owners in this order:
 
     validated MT5 preflight result
         -> provision customer setup
-        -> build_pending: stop and return
-        -> ready: download package
+        -> build_pending: retain continuation in process memory
+        -> later customer retry: continue customer setup once
+        -> ready: download with authoritative setup credential
         -> install verified package
         -> installed
 
@@ -121,6 +122,10 @@ class CustomerSetupOrchestrationService:
         self._ex5_installer_service = (
             ex5_installer_service
         )
+        self._continuation_credential: str | None = None
+        self._continuation_account_fingerprint: (
+            str | None
+        ) = None
 
     def run(
         self,
@@ -136,13 +141,36 @@ class CustomerSetupOrchestrationService:
                 "CustomerMT5SetupPreflightResult."
             )
 
-        provisioning_result = (
-            self._setup_http_client.provision(
-                account_fingerprint=(
-                    preflight_result.account_fingerprint
-                ),
-            )
+        continuation_credential = (
+            self._continuation_credential
         )
+
+        if continuation_credential is None:
+            provisioning_result = (
+                self._setup_http_client.provision(
+                    account_fingerprint=(
+                        preflight_result.account_fingerprint
+                    ),
+                )
+            )
+        else:
+            if (
+                self._continuation_account_fingerprint
+                != preflight_result.account_fingerprint
+            ):
+                raise RuntimeError(
+                    "Customer setup continuation account "
+                    "identity changed between attempts."
+                )
+
+            provisioning_result = (
+                self._setup_http_client
+                .continue_provisioning(
+                    continuation_credential=(
+                        continuation_credential
+                    ),
+                )
+            )
 
         if not isinstance(
             provisioning_result,
@@ -154,6 +182,29 @@ class CustomerSetupOrchestrationService:
             )
 
         if provisioning_result.status == "build_pending":
+            returned_continuation_credential = (
+                provisioning_result
+                .continuation_credential
+            )
+
+            if returned_continuation_credential is not None:
+                if (
+                    continuation_credential is not None
+                    and returned_continuation_credential
+                    != continuation_credential
+                ):
+                    raise RuntimeError(
+                        "Customer setup continuation credential "
+                        "changed between attempts."
+                    )
+
+                self._continuation_credential = (
+                    returned_continuation_credential
+                )
+                self._continuation_account_fingerprint = (
+                    preflight_result.account_fingerprint
+                )
+
             return CustomerSetupOrchestrationResult(
                 status="build_pending",
             )
@@ -190,9 +241,18 @@ class CustomerSetupOrchestrationService:
                 "is missing artifact metadata."
             )
 
-        artifact_bytes = (
-            self._setup_http_client.download_package()
-        )
+        if continuation_credential is None:
+            artifact_bytes = (
+                self._setup_http_client.download_package()
+            )
+        else:
+            artifact_bytes = (
+                self._setup_http_client.download_package(
+                    continuation_credential=(
+                        continuation_credential
+                    ),
+                )
+            )
 
         if not isinstance(
             artifact_bytes,
@@ -219,6 +279,9 @@ class CustomerSetupOrchestrationService:
             provisioning_result=provisioning_result,
             installation_result=installation_result,
         )
+
+        self._continuation_credential = None
+        self._continuation_account_fingerprint = None
 
         return CustomerSetupOrchestrationResult(
             status="installed",

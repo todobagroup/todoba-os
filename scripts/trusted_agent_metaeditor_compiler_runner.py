@@ -98,27 +98,15 @@ class MetaEditorCompilerRunner:
 
             log_path.unlink()
 
-        arguments = [
-            str(
-                metaeditor_path
-            ),
-            (
-                "/compile:"
-                + str(
-                    agent_path
-                )
-            ),
-            (
-                "/inc:"
-                + str(
-                    mql5_root
-                )
-            ),
-            "/log",
-        ]
+        command_line = (
+            f'"{metaeditor_path}" '
+            f'/compile:"{agent_path}" '
+            f'/inc:"{mql5_root}" '
+            "/log"
+        )
 
         process = self._process_runner(
-            arguments,
+            command_line,
             check=False,
         )
 

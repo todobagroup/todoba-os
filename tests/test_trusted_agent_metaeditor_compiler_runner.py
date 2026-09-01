@@ -109,13 +109,13 @@ def test_runner_invokes_exact_metaeditor_build_and_returns_exit_code_without_int
 
     calls: list[
         tuple[
-            list[str],
+            str,
             bool,
         ]
     ] = []
 
     def process_runner(
-        arguments: list[str],
+        arguments: str,
         *,
         check: bool,
     ):
@@ -157,26 +157,16 @@ def test_runner_invokes_exact_metaeditor_build_and_returns_exit_code_without_int
 
     assert exit_code == 1
 
+    expected_command_line = (
+        f'"{metaeditor_path.resolve()}" '
+        f'/compile:"{agent_path.resolve()}" '
+        f'/inc:"{mql5_root.resolve()}" '
+        "/log"
+    )
+
     assert calls == [
         (
-            [
-                str(
-                    metaeditor_path.resolve()
-                ),
-                (
-                    "/compile:"
-                    + str(
-                        agent_path.resolve()
-                    )
-                ),
-                (
-                    "/inc:"
-                    + str(
-                        mql5_root.resolve()
-                    )
-                ),
-                "/log",
-            ],
+            expected_command_line,
             False,
         )
     ]
@@ -189,6 +179,76 @@ def test_runner_invokes_exact_metaeditor_build_and_returns_exit_code_without_int
             encoding="utf-8"
         )
     )
+
+
+def test_runner_preserves_metaeditor_switch_value_quoting_for_paths_with_spaces(
+    tmp_path: Path,
+) -> None:
+    build_root = (
+        tmp_path
+        / "build surface with spaces"
+    )
+
+    build_root.mkdir()
+
+    (
+        metaeditor_path,
+        mql5_root,
+        agent_path,
+        log_path,
+    ) = create_build_surface(
+        build_root
+    )
+
+    captured_command_line = None
+
+    def process_runner(
+        arguments: str,
+        *,
+        check: bool,
+    ):
+        nonlocal captured_command_line
+
+        captured_command_line = arguments
+
+        assert check is False
+
+        log_path.write_text(
+            (
+                "MetaEditor proof compile\n"
+                "Result: 0 errors, 0 warnings, "
+                "100 ms elapsed\n"
+            ),
+            encoding="utf-8",
+        )
+
+        return SimpleNamespace(
+            returncode=1
+        )
+
+    runner_class = load_runner_class()
+
+    runner = runner_class(
+        metaeditor_path=metaeditor_path,
+        process_runner=process_runner,
+    )
+
+    exit_code = runner(
+        agent_path=agent_path,
+        mql5_root=mql5_root,
+        log_path=log_path,
+    )
+
+    assert exit_code == 1
+
+    assert captured_command_line == (
+        f'"{metaeditor_path.resolve()}" '
+        f'/compile:"{agent_path.resolve()}" '
+        f'/inc:"{mql5_root.resolve()}" '
+        "/log"
+    )
+
+    assert log_path.is_file()
 
 
 def test_runner_rejects_missing_metaeditor_before_process_execution(
@@ -208,7 +268,7 @@ def test_runner_rejects_missing_metaeditor_before_process_execution(
     called = False
 
     def process_runner(
-        arguments: list[str],
+        arguments: str,
         *,
         check: bool,
     ):
@@ -253,7 +313,7 @@ def test_runner_rejects_missing_compile_log_regardless_of_exit_code(
     )
 
     def process_runner(
-        arguments: list[str],
+        arguments: str,
         *,
         check: bool,
     ):
@@ -309,7 +369,7 @@ def test_runner_removes_stale_compile_log_before_invocation(
     )
 
     def process_runner(
-        arguments: list[str],
+        arguments: str,
         *,
         check: bool,
     ):

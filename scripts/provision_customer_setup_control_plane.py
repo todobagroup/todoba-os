@@ -52,6 +52,9 @@ from backend.commercial.customer_registration_service import (
 from backend.commercial.customer_setup_activation_service import (
     CustomerSetupActivationStore,
 )
+from backend.commercial.customer_setup_build_continuation_service import (
+    CustomerSetupBuildContinuationStore,
+)
 from backend.commercial.customer_setup_handoff_service import (
     CustomerSetupHandoffStore,
 )
@@ -77,6 +80,10 @@ _CUSTOMER_SETUP_ACTIVATION_FILENAME = (
 
 _CUSTOMER_SETUP_HANDOFF_FILENAME = (
     "customer_setup_handoffs.json"
+)
+
+_CUSTOMER_SETUP_BUILD_CONTINUATION_FILENAME = (
+    "customer_setup_build_continuations.json"
 )
 
 _CUSTOMER_SETUP_LAUNCH_CREDENTIAL_FILENAME = (
@@ -157,6 +164,11 @@ def provision_customer_setup_control_plane(
         / _CUSTOMER_SETUP_HANDOFF_FILENAME
     )
 
+    continuation_storage_path = (
+        commercial_root
+        / _CUSTOMER_SETUP_BUILD_CONTINUATION_FILENAME
+    )
+
     launch_credential_storage_path = (
         commercial_root
         / _CUSTOMER_SETUP_LAUNCH_CREDENTIAL_FILENAME
@@ -208,6 +220,12 @@ def provision_customer_setup_control_plane(
         )
     )
 
+    continuation_store = (
+        CustomerSetupBuildContinuationStore(
+            continuation_storage_path
+        )
+    )
+
     launch_credential_store = (
         CustomerSetupLaunchCredentialStore(
             launch_credential_storage_path,
@@ -247,6 +265,9 @@ def provision_customer_setup_control_plane(
     if not handoff_store.is_ready():
         handoff_store.initialize_empty()
 
+    if not continuation_store.is_ready:
+        continuation_store.initialize_empty()
+
     if launch_credential_storage_path.exists():
         launch_credential_store.open_existing()
     else:
@@ -279,6 +300,12 @@ def provision_customer_setup_control_plane(
         raise RuntimeError(
             "Customer setup handoff store did not "
             "become ready."
+        )
+
+    if not continuation_store.is_ready:
+        raise RuntimeError(
+            "Customer setup build continuation store "
+            "did not become ready."
         )
 
     if not launch_credential_store.is_ready():
@@ -377,6 +404,10 @@ def main() -> int:
     )
 
     print(
+        "CUSTOMER_SETUP_BUILD_CONTINUATION_STORE=READY"
+    )
+
+    print(
         "CUSTOMER_SETUP_LAUNCH_CREDENTIAL_STORE=READY"
     )
 
@@ -405,6 +436,17 @@ def main() -> int:
     print(
         "CUSTOMER_SETUP_HANDOFF_PATH="
         f"{handoff_storage_path}"
+    )
+
+    continuation_storage_path = (
+        args.control_plane_root
+        / "commercial"
+        / _CUSTOMER_SETUP_BUILD_CONTINUATION_FILENAME
+    )
+
+    print(
+        "CUSTOMER_SETUP_BUILD_CONTINUATION_PATH="
+        f"{continuation_storage_path}"
     )
 
     launch_credential_storage_path = (

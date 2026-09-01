@@ -20,6 +20,9 @@ from backend.commercial.customer_registration_service import (
 from backend.commercial.customer_setup_activation_service import (
     CustomerSetupActivationStore,
 )
+from backend.commercial.customer_setup_build_continuation_service import (
+    CustomerSetupBuildContinuationStore,
+)
 from backend.commercial.customer_setup_handoff_service import (
     CustomerSetupHandoffStore,
 )
@@ -48,6 +51,10 @@ ACTIVATION_FILENAME = (
 
 HANDOFF_FILENAME = (
     "customer_setup_handoffs.json"
+)
+
+CONTINUATION_FILENAME = (
+    "customer_setup_build_continuations.json"
 )
 
 LAUNCH_CREDENTIAL_FILENAME = (
@@ -182,6 +189,11 @@ def test_first_provisioning_creates_only_required_ready_state(
         / HANDOFF_FILENAME
     )
 
+    continuation_path = (
+        commercial_root
+        / CONTINUATION_FILENAME
+    )
+
     launch_credential_path = (
         commercial_root
         / LAUNCH_CREDENTIAL_FILENAME
@@ -205,6 +217,7 @@ def test_first_provisioning_creates_only_required_ready_state(
     assert registration_path.is_file()
     assert activation_path.is_file()
     assert handoff_path.is_file()
+    assert continuation_path.is_file()
     assert launch_credential_path.is_file()
     assert bootstrap_authorization_path.is_file()
     assert bootstrap_path.is_file()
@@ -224,6 +237,7 @@ def test_first_provisioning_creates_only_required_ready_state(
         REGISTRATION_FILENAME,
         ACTIVATION_FILENAME,
         HANDOFF_FILENAME,
+        CONTINUATION_FILENAME,
         LAUNCH_CREDENTIAL_FILENAME,
         BOOTSTRAP_AUTHORIZATION_FILENAME,
         BOOTSTRAP_FILENAME,
@@ -254,6 +268,12 @@ def test_first_provisioning_creates_only_required_ready_state(
     handoff_store = (
         CustomerSetupHandoffStore(
             handoff_path
+        )
+    )
+
+    continuation_store = (
+        CustomerSetupBuildContinuationStore(
+            continuation_path
         )
     )
 
@@ -294,6 +314,10 @@ def test_first_provisioning_creates_only_required_ready_state(
 
     assert activation_store.is_ready()
     assert handoff_store.is_ready()
+
+    assert continuation_store.is_ready
+    assert len(continuation_store.all()) == 0
+
     assert launch_credential_store.is_ready()
     assert launch_credential_store.size() == 0
 
@@ -340,6 +364,16 @@ def test_retry_is_byte_for_byte_and_queue_idempotent(
 
     first_handoff_bytes = (
         first_result[1].read_bytes()
+    )
+
+    continuation_path = (
+        control_plane_root
+        / "commercial"
+        / CONTINUATION_FILENAME
+    )
+
+    first_continuation_bytes = (
+        continuation_path.read_bytes()
     )
 
     launch_credential_path = (
@@ -392,6 +426,11 @@ def test_retry_is_byte_for_byte_and_queue_idempotent(
     )
 
     assert (
+        continuation_path.read_bytes()
+        == first_continuation_bytes
+    )
+
+    assert (
         launch_credential_path.read_bytes()
         == first_launch_bytes
     )
@@ -436,6 +475,7 @@ def test_retry_is_byte_for_byte_and_queue_idempotent(
         REGISTRATION_FILENAME,
         ACTIVATION_FILENAME,
         HANDOFF_FILENAME,
+        CONTINUATION_FILENAME,
         LAUNCH_CREDENTIAL_FILENAME,
         BOOTSTRAP_AUTHORIZATION_FILENAME,
         BOOTSTRAP_FILENAME,
@@ -534,6 +574,11 @@ def test_provisioner_has_store_only_commercial_surface() -> None:
         ),
         (
             "backend.commercial."
+            "customer_setup_build_continuation_service",
+            "CustomerSetupBuildContinuationStore",
+        ),
+        (
+            "backend.commercial."
             "customer_setup_handoff_service",
             "CustomerSetupHandoffStore",
         ),
@@ -553,7 +598,7 @@ def test_provisioner_has_store_only_commercial_surface() -> None:
         called_attributes.count(
             "initialize_empty"
         )
-        == 7
+        == 8
     )
 
     forbidden_business_actions = {

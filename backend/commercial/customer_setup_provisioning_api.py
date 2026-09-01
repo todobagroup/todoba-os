@@ -41,6 +41,8 @@ Security rules:
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime
+from datetime import timezone
 from typing import Literal
 
 from fastapi import APIRouter
@@ -49,6 +51,7 @@ from fastapi import HTTPException
 from fastapi import Response
 from pydantic import BaseModel
 from pydantic import ConfigDict
+from pydantic import Field
 from pydantic import field_validator
 from pydantic import model_validator
 
@@ -66,6 +69,10 @@ from backend.commercial.customer_deployment_package_build_request_store import (
 from backend.commercial.customer_deployment_package_publication import (
     CustomerDeploymentPublishedPackage,
 )
+from backend.commercial.customer_setup_build_continuation_service import (
+    CustomerSetupBuildContinuationAuthorization,
+    CustomerSetupBuildContinuationIssuanceResult,
+)
 from backend.commercial.customer_setup_handoff_service import (
     CustomerSetupHandoffAuthorization,
 )
@@ -78,6 +85,11 @@ SetupHandoffAuthorizer = Callable[
 
 
 _BEARER_PREFIX = "Bearer "
+
+_SECRET_RESPONSE_HEADERS = {
+    "Cache-Control": "no-store",
+    "Pragma": "no-cache",
+}
 
 _UNAUTHORIZED_DETAIL = (
     "Customer setup authentication failed."
@@ -153,12 +165,53 @@ class CustomerSetupProvisioningResponse(
     artifact_sha256: str | None = None
     artifact_size_bytes: int | None = None
 
+    continuation_credential: str | None = Field(
+        default=None,
+        repr=False,
+    )
+    continuation_expires_at: str | None = None
+
     @model_validator(
         mode="after"
     )
     def validate_state(
         self,
     ) -> "CustomerSetupProvisioningResponse":
+        has_continuation_credential = (
+            self.continuation_credential is not None
+        )
+        has_continuation_expiry = (
+            self.continuation_expires_at is not None
+        )
+
+        if (
+            has_continuation_credential
+            != has_continuation_expiry
+        ):
+            raise ValueError(
+                "Continuation credential and expiry "
+                "must appear together."
+            )
+
+        if has_continuation_credential:
+            if (
+                not isinstance(
+                    self.continuation_credential,
+                    str,
+                )
+                or not self.continuation_credential
+                or self.continuation_credential.strip()
+                != self.continuation_credential
+            ):
+                raise ValueError(
+                    "continuation_credential must be "
+                    "a non-empty normalized string."
+                )
+
+            _validate_continuation_expiry(
+                self.continuation_expires_at
+            )
+
         if self.status == "build_pending":
             if (
                 self.artifact_sha256 is not None
@@ -170,6 +223,12 @@ class CustomerSetupProvisioningResponse(
                 )
 
             return self
+
+        if has_continuation_credential:
+            raise ValueError(
+                "ready response must not contain "
+                "continuation authority."
+            )
 
         if (
             not isinstance(
@@ -215,6 +274,12 @@ def create_customer_setup_provisioning_router(
     package_publication,
     entitlement_registry,
     setup_activation_service,
+    continuation_service=None,
+    clock: Callable[[], datetime] = (
+        lambda: datetime.now(
+            timezone.utc
+        )
+    ),
 ) -> APIRouter:
     """
     Build the asynchronous customer setup provisioning
@@ -270,6 +335,31 @@ def create_customer_setup_provisioning_router(
             "bind",
         ),
     )
+
+    if continuation_service is not None:
+        _require_owner_methods(
+            continuation_service,
+            owner_name="continuation_service",
+            method_names=(
+                "issue",
+                "authorize",
+            ),
+        )
+
+        _require_owner_methods(
+            bootstrap_service,
+            owner_name="bootstrap_service",
+            method_names=(
+                "recover_prepared_bootstrap",
+            ),
+        )
+
+    if not callable(
+        clock
+    ):
+        raise TypeError(
+            "clock must be callable."
+        )
 
     router = APIRouter()
 
@@ -485,36 +575,81 @@ def create_customer_setup_provisioning_router(
         if published is None:
             response.status_code = 202
 
-            return (
-                CustomerSetupProvisioningResponse(
-                    status="build_pending",
+            if continuation_service is None:
+                return (
+                    CustomerSetupProvisioningResponse(
+                        status="build_pending",
+                    )
+                )
+
+            current_time = _read_clock(
+                clock
+            )
+
+            issued_continuation = (
+                continuation_service.issue(
+                    setup_activation_id=(
+                        setup_activation_id
+                    ),
+                    deployment_id=deployment_id,
+                    account_fingerprint=(
+                        request.account_fingerprint
+                    ),
+                    current_time=current_time,
                 )
             )
 
-        published = (
-            _require_published_package(
-                published,
-                deployment_id=(
-                    deployment_id
-                ),
-            )
-        )
+            if not isinstance(
+                issued_continuation,
+                CustomerSetupBuildContinuationIssuanceResult,
+            ):
+                raise RuntimeError(
+                    "Build continuation owner returned "
+                    "invalid issuance result."
+                )
 
-        activated = (
-            bootstrap_service.activate_bootstrap(
-                enrollment_request_id=(
-                    setup_activation_id
-                ),
-                customer_id=customer_id,
-                account_fingerprint=(
-                    request.account_fingerprint
-                ),
-            )
-        )
+            if (
+                issued_continuation.setup_activation_id
+                != setup_activation_id
+                or issued_continuation.deployment_id
+                != deployment_id
+            ):
+                raise RuntimeError(
+                    "Build continuation issuance "
+                    "identity mismatch."
+                )
 
-        _require_activation_result(
-            result=activated,
+            for (
+                header_name,
+                header_value,
+            ) in _SECRET_RESPONSE_HEADERS.items():
+                response.headers[
+                    header_name
+                ] = header_value
+
+            return (
+                CustomerSetupProvisioningResponse(
+                    status="build_pending",
+                    continuation_credential=(
+                        issued_continuation
+                        .continuation_credential
+                    ),
+                    continuation_expires_at=(
+                        issued_continuation.expires_at
+                    ),
+                )
+            )
+
+        return _complete_customer_setup(
+            bootstrap_service=bootstrap_service,
+            entitlement_registry=(
+                entitlement_registry
+            ),
+            setup_activation_service=(
+                setup_activation_service
+            ),
             prepared=prepared,
+            published=published,
             setup_activation_id=(
                 setup_activation_id
             ),
@@ -522,48 +657,325 @@ def create_customer_setup_provisioning_router(
             account_fingerprint=(
                 request.account_fingerprint
             ),
-        )
-
-        entitlement = (
-            entitlement_registry.activate(
-                deployment_id=deployment_id
-            )
-        )
-
-        _require_active_entitlement(
-            entitlement,
             deployment_id=deployment_id,
         )
 
-        bind_result = (
-            setup_activation_service.bind(
+    if continuation_service is not None:
+
+        @router.post(
+            "/customer/setup/continue",
+            response_model=(
+                CustomerSetupProvisioningResponse
+            ),
+            response_model_exclude_none=True,
+            responses={
+                202: {
+                    "model": (
+                        CustomerSetupProvisioningResponse
+                    )
+                }
+            },
+        )
+        def continue_customer_setup(
+            request: CustomerSetupProvisioningRequest,
+            response: Response,
+            authorization: str | None = Header(
+                default=None,
+                alias="Authorization",
+            ),
+        ) -> CustomerSetupProvisioningResponse:
+            continuation_credential = (
+                _extract_setup_handoff_bearer(
+                    authorization
+                )
+            )
+
+            current_time = _read_clock(
+                clock
+            )
+
+            try:
+                continuation_authorization = (
+                    continuation_service.authorize(
+                        continuation_credential=(
+                            continuation_credential
+                        ),
+                        current_time=current_time,
+                        account_fingerprint=(
+                            request.account_fingerprint
+                        ),
+                    )
+                )
+            except ValueError as exc:
+                raise _unauthorized_setup_handoff() from exc
+
+            if not isinstance(
+                continuation_authorization,
+                CustomerSetupBuildContinuationAuthorization,
+            ):
+                raise RuntimeError(
+                    "Build continuation owner returned "
+                    "invalid authorization result."
+                )
+
+            setup_activation_id = (
+                continuation_authorization
+                .setup_activation_id
+            )
+
+            customer_id = (
+                continuation_authorization.customer_id
+            )
+
+            deployment_id = (
+                continuation_authorization.deployment_id
+            )
+
+            activation_before = (
+                setup_activation_service.get(
+                    setup_activation_id=(
+                        setup_activation_id
+                    )
+                )
+            )
+
+            if activation_before is None:
+                raise RuntimeError(
+                    "Authorized setup activation does "
+                    "not exist."
+                )
+
+            if (
+                getattr(
+                    activation_before,
+                    "setup_activation_id",
+                    None,
+                )
+                != setup_activation_id
+            ):
+                raise RuntimeError(
+                    "Authorized setup activation "
+                    "identity mismatch."
+                )
+
+            if (
+                getattr(
+                    activation_before,
+                    "customer_id",
+                    None,
+                )
+                != customer_id
+            ):
+                raise RuntimeError(
+                    "Authorized setup activation "
+                    "customer identity mismatch."
+                )
+
+            activation_status = _status_value(
+                getattr(
+                    activation_before,
+                    "status",
+                    None,
+                )
+            )
+
+            if activation_status == "BOUND":
+                return _resolve_bound_retry(
+                    authorization_result=(
+                        continuation_authorization
+                    ),
+                    activation=activation_before,
+                    package_publication=(
+                        package_publication
+                    ),
+                    entitlement_registry=(
+                        entitlement_registry
+                    ),
+                )
+
+            if activation_status == "SUSPENDED":
+                raise HTTPException(
+                    status_code=403,
+                    detail=(
+                        _SETUP_NOT_ACTIVE_DETAIL
+                    ),
+                )
+
+            if activation_status != "ACTIVE":
+                raise RuntimeError(
+                    "Authorized setup activation has "
+                    "unknown status."
+                )
+
+            if (
+                getattr(
+                    activation_before,
+                    "deployment_id",
+                    None,
+                )
+                is not None
+            ):
+                raise RuntimeError(
+                    "ACTIVE setup activation "
+                    "unexpectedly contains deployment "
+                    "identity."
+                )
+
+            recovered = (
+                bootstrap_service
+                .recover_prepared_bootstrap(
+                    enrollment_request_id=(
+                        setup_activation_id
+                    )
+                )
+            )
+
+            recovered = (
+                _require_preparation_result(
+                    result=recovered,
+                    setup_activation_id=(
+                        setup_activation_id
+                    ),
+                    customer_id=customer_id,
+                    account_fingerprint=(
+                        request.account_fingerprint
+                    ),
+                )
+            )
+
+            if (
+                recovered.deployment.deployment_id
+                != deployment_id
+            ):
+                raise RuntimeError(
+                    "Recovered bootstrap deployment "
+                    "identity does not match "
+                    "continuation authority."
+                )
+
+            published = (
+                package_publication
+                .get_published_package(
+                    deployment_id=deployment_id
+                )
+            )
+
+            if published is None:
+                response.status_code = 202
+
+                return (
+                    CustomerSetupProvisioningResponse(
+                        status="build_pending",
+                    )
+                )
+
+            return _complete_customer_setup(
+                bootstrap_service=(
+                    bootstrap_service
+                ),
+                entitlement_registry=(
+                    entitlement_registry
+                ),
+                setup_activation_service=(
+                    setup_activation_service
+                ),
+                prepared=recovered,
+                published=published,
                 setup_activation_id=(
                     setup_activation_id
                 ),
+                customer_id=customer_id,
+                account_fingerprint=(
+                    request.account_fingerprint
+                ),
                 deployment_id=deployment_id,
             )
-        )
 
-        _require_bound_activation(
-            bind_result,
-            setup_activation_id=(
+    return router
+
+
+def _complete_customer_setup(
+    *,
+    bootstrap_service,
+    entitlement_registry,
+    setup_activation_service,
+    prepared: CustomerDeploymentBootstrapPreparationResult,
+    published,
+    setup_activation_id: str,
+    customer_id: str,
+    account_fingerprint: str,
+    deployment_id: str,
+) -> CustomerSetupProvisioningResponse:
+    published = (
+        _require_published_package(
+            published,
+            deployment_id=deployment_id,
+        )
+    )
+
+    activated = (
+        bootstrap_service.activate_bootstrap(
+            enrollment_request_id=(
                 setup_activation_id
             ),
             customer_id=customer_id,
+            account_fingerprint=(
+                account_fingerprint
+            ),
+        )
+    )
+
+    _require_activation_result(
+        result=activated,
+        prepared=prepared,
+        setup_activation_id=(
+            setup_activation_id
+        ),
+        customer_id=customer_id,
+        account_fingerprint=(
+            account_fingerprint
+        ),
+    )
+
+    entitlement = (
+        entitlement_registry.activate(
+            deployment_id=deployment_id
+        )
+    )
+
+    _require_active_entitlement(
+        entitlement,
+        deployment_id=deployment_id,
+    )
+
+    bind_result = (
+        setup_activation_service.bind(
+            setup_activation_id=(
+                setup_activation_id
+            ),
             deployment_id=deployment_id,
         )
+    )
 
-        return _ready_response(
-            published
-        )
+    _require_bound_activation(
+        bind_result,
+        setup_activation_id=(
+            setup_activation_id
+        ),
+        customer_id=customer_id,
+        deployment_id=deployment_id,
+    )
 
-    return router
+    return _ready_response(
+        published
+    )
 
 
 def _resolve_bound_retry(
     *,
     authorization_result: (
         CustomerSetupHandoffAuthorization
+        | CustomerSetupBuildContinuationAuthorization
     ),
     activation,
     package_publication,
@@ -862,6 +1274,67 @@ def _ready_response(
         artifact_size_bytes=(
             published.artifact_size_bytes
         ),
+    )
+
+
+def _validate_continuation_expiry(
+    value,
+) -> None:
+    if (
+        not isinstance(
+            value,
+            str,
+        )
+        or not value
+        or value.strip() != value
+    ):
+        raise ValueError(
+            "continuation_expires_at must be "
+            "a non-empty normalized string."
+        )
+
+    try:
+        parsed = datetime.fromisoformat(
+            value.replace(
+                "Z",
+                "+00:00",
+            )
+        )
+    except ValueError as exc:
+        raise ValueError(
+            "continuation_expires_at must be "
+            "an ISO-8601 timestamp."
+        ) from exc
+
+    if parsed.tzinfo is None:
+        raise ValueError(
+            "continuation_expires_at must be "
+            "timezone-aware."
+        )
+
+
+def _read_clock(
+    clock: Callable[[], datetime],
+) -> datetime:
+    value = clock()
+
+    if not isinstance(
+        value,
+        datetime,
+    ):
+        raise RuntimeError(
+            "Customer setup provisioning clock "
+            "returned invalid value."
+        )
+
+    if value.tzinfo is None:
+        raise RuntimeError(
+            "Customer setup provisioning clock "
+            "must return timezone-aware datetime."
+        )
+
+    return value.astimezone(
+        timezone.utc
     )
 
 

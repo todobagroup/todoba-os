@@ -3,6 +3,8 @@ Owner tests for asynchronous Customer Setup Provisioning API.
 """
 
 import ast
+from datetime import datetime
+from datetime import timezone
 
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,6 +34,11 @@ from backend.commercial.customer_deployment_registry import (
 from backend.commercial.customer_deployment_secret_store import (
     CustomerDeploymentSecrets,
 )
+from backend.commercial.customer_setup_build_continuation_service import (
+    CustomerSetupBuildContinuationAuthorization,
+    CustomerSetupBuildContinuationIssuanceResult,
+    derive_customer_setup_build_continuation_issuance_request_id,
+)
 from backend.commercial.customer_setup_handoff_service import (
     CustomerSetupHandoffAuthorization,
 )
@@ -50,6 +57,40 @@ ACCOUNT_FINGERPRINT = "broker|login|server"
 HANDOFF_ID = "a" * 32
 ARTIFACT_SHA256 = "b" * 64
 ARTIFACT_SIZE_BYTES = 1234
+
+CONTINUATION_ID = "c" * 32
+
+CONTINUATION_CREDENTIAL = (
+    f"tdbsc1.{CONTINUATION_ID}."
+    "continuation-secret-value"
+)
+
+CONTINUATION_ISSUED_AT = (
+    "2026-09-01T04:41:53.000000Z"
+)
+
+CONTINUATION_EXPIRES_AT = (
+    "2026-09-02T04:41:53.000000Z"
+)
+
+NOW = datetime(
+    2026,
+    9,
+    1,
+    4,
+    41,
+    53,
+    tzinfo=timezone.utc,
+)
+
+CONTINUATION_ISSUANCE_REQUEST_ID = (
+    derive_customer_setup_build_continuation_issuance_request_id(
+        setup_activation_id=(
+            SETUP_ACTIVATION_ID
+        ),
+        deployment_id=DEPLOYMENT_ID,
+    )
+)
 
 
 def _status(
@@ -84,6 +125,21 @@ def _handoff(
 ):
     return CustomerSetupHandoffAuthorization(
         handoff_id=HANDOFF_ID,
+        setup_activation_id=(
+            SETUP_ACTIVATION_ID
+        ),
+        customer_id=customer_id,
+        deployment_id=deployment_id,
+    )
+
+
+def _continuation_authorization(
+    *,
+    customer_id: str = CUSTOMER_ID,
+    deployment_id: str = DEPLOYMENT_ID,
+):
+    return CustomerSetupBuildContinuationAuthorization(
+        continuation_id=CONTINUATION_ID,
         setup_activation_id=(
             SETUP_ACTIVATION_ID
         ),
@@ -222,13 +278,48 @@ def _environment(
     tmp_path: Path,
     *,
     package_ready: bool = False,
+    continuation_enabled: bool = False,
 ):
     authorizer = Mock(
         return_value=_handoff()
     )
 
+    continuation_service = None
+
+    if continuation_enabled:
+        continuation_service = Mock()
+
+        continuation_service.issue.return_value = (
+            CustomerSetupBuildContinuationIssuanceResult(
+                issuance_request_id=(
+                    CONTINUATION_ISSUANCE_REQUEST_ID
+                ),
+                continuation_id=CONTINUATION_ID,
+                setup_activation_id=(
+                    SETUP_ACTIVATION_ID
+                ),
+                deployment_id=DEPLOYMENT_ID,
+                issued_at=(
+                    CONTINUATION_ISSUED_AT
+                ),
+                expires_at=(
+                    CONTINUATION_EXPIRES_AT
+                ),
+                continuation_credential=(
+                    CONTINUATION_CREDENTIAL
+                ),
+            )
+        )
+
+        continuation_service.authorize.return_value = (
+            _continuation_authorization()
+        )
+
     bootstrap_service = Mock()
     bootstrap_service.prepare_bootstrap.return_value = (
+        _prepared()
+    )
+    bootstrap_service.recover_prepared_bootstrap.return_value = (
         _prepared()
     )
     bootstrap_service.activate_bootstrap.return_value = (
@@ -272,6 +363,9 @@ def _environment(
 
     return {
         "authorizer": authorizer,
+        "continuation_service": (
+            continuation_service
+        ),
         "bootstrap_service": bootstrap_service,
         "build_request_store": (
             build_request_store
@@ -322,6 +416,12 @@ def _router(
                 "setup_activation_service"
             ]
         ),
+        continuation_service=(
+            environment[
+                "continuation_service"
+            ]
+        ),
+        clock=lambda: NOW,
     )
 
 
@@ -371,6 +471,30 @@ def _post(
         "/customer/setup/provision",
         headers=headers,
         json=payload,
+    )
+
+
+def _post_continue(
+    client,
+    *,
+    authorization=(
+        "Bearer "
+        + CONTINUATION_CREDENTIAL
+    ),
+    account_fingerprint=(
+        ACCOUNT_FINGERPRINT
+    ),
+):
+    return client.post(
+        "/customer/setup/continue",
+        headers={
+            "Authorization": authorization,
+        },
+        json={
+            "account_fingerprint": (
+                account_fingerprint
+            ),
+        },
     )
 
 
@@ -1462,6 +1586,470 @@ def test_http_response_exposes_only_safe_metadata(
         "account_fingerprint",
     ):
         assert forbidden not in serialized
+
+
+def test_continuation_route_is_absent_without_owner(
+    tmp_path: Path,
+):
+    environment = _environment(
+        tmp_path,
+    )
+
+    response = _post_continue(
+        _client(environment)
+    )
+
+    assert response.status_code == 404
+
+
+def test_pending_with_continuation_owner_issues_one_continuation(
+    tmp_path: Path,
+):
+    environment = _environment(
+        tmp_path,
+        package_ready=False,
+        continuation_enabled=True,
+    )
+
+    response = _post(
+        _client(environment)
+    )
+
+    assert response.status_code == 202
+
+    assert response.json() == {
+        "status": "build_pending",
+        "continuation_credential": (
+            CONTINUATION_CREDENTIAL
+        ),
+        "continuation_expires_at": (
+            CONTINUATION_EXPIRES_AT
+        ),
+    }
+
+    assert (
+        response.headers[
+            "cache-control"
+        ]
+        == "no-store"
+    )
+
+    assert (
+        response.headers[
+            "pragma"
+        ]
+        == "no-cache"
+    )
+
+    environment[
+        "continuation_service"
+    ].issue.assert_called_once_with(
+        setup_activation_id=(
+            SETUP_ACTIVATION_ID
+        ),
+        deployment_id=DEPLOYMENT_ID,
+        account_fingerprint=(
+            ACCOUNT_FINGERPRINT
+        ),
+        current_time=NOW,
+    )
+
+
+def test_ready_initial_request_does_not_issue_continuation(
+    tmp_path: Path,
+):
+    environment = _environment(
+        tmp_path,
+        package_ready=True,
+        continuation_enabled=True,
+    )
+
+    response = _post(
+        _client(environment)
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ready"
+
+    environment[
+        "continuation_service"
+    ].issue.assert_not_called()
+
+
+def test_pending_response_rejects_partial_continuation_authority():
+    with pytest.raises(
+        ValueError,
+        match="must appear together",
+    ):
+        CustomerSetupProvisioningResponse(
+            status="build_pending",
+            continuation_credential=(
+                CONTINUATION_CREDENTIAL
+            ),
+        )
+
+
+def test_ready_response_rejects_continuation_authority():
+    with pytest.raises(
+        ValueError,
+        match="must not contain continuation",
+    ):
+        CustomerSetupProvisioningResponse(
+            status="ready",
+            artifact_sha256=ARTIFACT_SHA256,
+            artifact_size_bytes=(
+                ARTIFACT_SIZE_BYTES
+            ),
+            continuation_credential=(
+                CONTINUATION_CREDENTIAL
+            ),
+            continuation_expires_at=(
+                CONTINUATION_EXPIRES_AT
+            ),
+        )
+
+
+def test_provisioning_response_repr_redacts_continuation_secret():
+    result = CustomerSetupProvisioningResponse(
+        status="build_pending",
+        continuation_credential=(
+            CONTINUATION_CREDENTIAL
+        ),
+        continuation_expires_at=(
+            CONTINUATION_EXPIRES_AT
+        ),
+    )
+
+    assert (
+        CONTINUATION_CREDENTIAL
+        not in repr(result)
+    )
+
+
+def test_continue_pending_recovers_existing_build_without_register(
+    tmp_path: Path,
+):
+    environment = _environment(
+        tmp_path,
+        package_ready=False,
+        continuation_enabled=True,
+    )
+
+    response = _post_continue(
+        _client(environment)
+    )
+
+    assert response.status_code == 202
+
+    assert response.json() == {
+        "status": "build_pending"
+    }
+
+    environment[
+        "continuation_service"
+    ].authorize.assert_called_once_with(
+        continuation_credential=(
+            CONTINUATION_CREDENTIAL
+        ),
+        current_time=NOW,
+        account_fingerprint=(
+            ACCOUNT_FINGERPRINT
+        ),
+    )
+
+    environment[
+        "authorizer"
+    ].assert_not_called()
+
+    environment[
+        "bootstrap_service"
+    ].recover_prepared_bootstrap.assert_called_once_with(
+        enrollment_request_id=(
+            SETUP_ACTIVATION_ID
+        )
+    )
+
+    environment[
+        "build_request_store"
+    ].register.assert_not_called()
+
+    environment[
+        "bootstrap_service"
+    ].prepare_bootstrap.assert_not_called()
+
+    environment[
+        "bootstrap_service"
+    ].activate_bootstrap.assert_not_called()
+
+    environment[
+        "entitlement_registry"
+    ].activate.assert_not_called()
+
+    environment[
+        "setup_activation_service"
+    ].bind.assert_not_called()
+
+
+def test_continue_ready_completes_exact_recovered_build(
+    tmp_path: Path,
+):
+    environment = _environment(
+        tmp_path,
+        package_ready=True,
+        continuation_enabled=True,
+    )
+
+    response = _post_continue(
+        _client(environment)
+    )
+
+    assert response.status_code == 200
+
+    assert response.json() == {
+        "status": "ready",
+        "artifact_sha256": ARTIFACT_SHA256,
+        "artifact_size_bytes": (
+            ARTIFACT_SIZE_BYTES
+        ),
+    }
+
+    environment[
+        "authorizer"
+    ].assert_not_called()
+
+    environment[
+        "build_request_store"
+    ].register.assert_not_called()
+
+    environment[
+        "bootstrap_service"
+    ].recover_prepared_bootstrap.assert_called_once_with(
+        enrollment_request_id=(
+            SETUP_ACTIVATION_ID
+        )
+    )
+
+    environment[
+        "bootstrap_service"
+    ].activate_bootstrap.assert_called_once_with(
+        enrollment_request_id=(
+            SETUP_ACTIVATION_ID
+        ),
+        customer_id=CUSTOMER_ID,
+        account_fingerprint=(
+            ACCOUNT_FINGERPRINT
+        ),
+    )
+
+    environment[
+        "entitlement_registry"
+    ].activate.assert_called_once_with(
+        deployment_id=DEPLOYMENT_ID
+    )
+
+    environment[
+        "setup_activation_service"
+    ].bind.assert_called_once_with(
+        setup_activation_id=(
+            SETUP_ACTIVATION_ID
+        ),
+        deployment_id=DEPLOYMENT_ID,
+    )
+
+
+def test_invalid_continuation_fails_before_recovery(
+    tmp_path: Path,
+):
+    environment = _environment(
+        tmp_path,
+        continuation_enabled=True,
+    )
+
+    environment[
+        "continuation_service"
+    ].authorize.side_effect = ValueError(
+        "invalid continuation"
+    )
+
+    response = _post_continue(
+        _client(environment),
+        authorization=(
+            "Bearer invalid-continuation"
+        ),
+    )
+
+    assert response.status_code == 401
+
+    environment[
+        "authorizer"
+    ].assert_not_called()
+
+    environment[
+        "bootstrap_service"
+    ].recover_prepared_bootstrap.assert_not_called()
+
+    environment[
+        "build_request_store"
+    ].register.assert_not_called()
+
+
+def test_continue_authorization_result_type_is_strict(
+    tmp_path: Path,
+):
+    environment = _environment(
+        tmp_path,
+        continuation_enabled=True,
+    )
+
+    environment[
+        "continuation_service"
+    ].authorize.return_value = object()
+
+    response = _post_continue(
+        _client(environment)
+    )
+
+    assert response.status_code == 500
+
+    environment[
+        "bootstrap_service"
+    ].recover_prepared_bootstrap.assert_not_called()
+
+
+def test_continue_recovered_deployment_must_match_authority(
+    tmp_path: Path,
+):
+    environment = _environment(
+        tmp_path,
+        package_ready=True,
+        continuation_enabled=True,
+    )
+
+    environment[
+        "bootstrap_service"
+    ].recover_prepared_bootstrap.return_value = (
+        _prepared(
+            deployment_id=(
+                "different-deployment"
+            )
+        )
+    )
+
+    response = _post_continue(
+        _client(environment)
+    )
+
+    assert response.status_code == 500
+
+    environment[
+        "build_request_store"
+    ].register.assert_not_called()
+
+    environment[
+        "bootstrap_service"
+    ].activate_bootstrap.assert_not_called()
+
+
+def test_continue_bound_retry_remains_read_only(
+    tmp_path: Path,
+):
+    environment = _environment(
+        tmp_path,
+        package_ready=True,
+        continuation_enabled=True,
+    )
+
+    environment[
+        "setup_activation_service"
+    ].get.return_value = _activation(
+        status="BOUND",
+        deployment_id=DEPLOYMENT_ID,
+    )
+
+    response = _post_continue(
+        _client(environment)
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "ready"
+
+    environment[
+        "bootstrap_service"
+    ].recover_prepared_bootstrap.assert_not_called()
+
+    environment[
+        "build_request_store"
+    ].register.assert_not_called()
+
+    environment[
+        "bootstrap_service"
+    ].activate_bootstrap.assert_not_called()
+
+    environment[
+        "entitlement_registry"
+    ].activate.assert_not_called()
+
+    environment[
+        "setup_activation_service"
+    ].bind.assert_not_called()
+
+
+def test_bad_continuation_issuance_type_fails_closed(
+    tmp_path: Path,
+):
+    environment = _environment(
+        tmp_path,
+        continuation_enabled=True,
+    )
+
+    environment[
+        "continuation_service"
+    ].issue.return_value = object()
+
+    response = _post(
+        _client(environment)
+    )
+
+    assert response.status_code == 500
+
+
+def test_continuation_issuance_identity_must_converge(
+    tmp_path: Path,
+):
+    environment = _environment(
+        tmp_path,
+        continuation_enabled=True,
+    )
+
+    environment[
+        "continuation_service"
+    ].issue.return_value = (
+        CustomerSetupBuildContinuationIssuanceResult(
+            issuance_request_id=(
+                CONTINUATION_ISSUANCE_REQUEST_ID
+            ),
+            continuation_id=CONTINUATION_ID,
+            setup_activation_id=(
+                SETUP_ACTIVATION_ID
+            ),
+            deployment_id=(
+                "different-deployment"
+            ),
+            issued_at=CONTINUATION_ISSUED_AT,
+            expires_at=(
+                CONTINUATION_EXPIRES_AT
+            ),
+            continuation_credential=(
+                CONTINUATION_CREDENTIAL
+            ),
+        )
+    )
+
+    response = _post(
+        _client(environment)
+    )
+
+    assert response.status_code == 500
 
 
 def test_source_has_no_sync_onboarding_or_build_ownership():

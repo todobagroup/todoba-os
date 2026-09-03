@@ -27,35 +27,39 @@ from backend.commercial.customer_setup_application_controller import (
 )
 
 
-WINDOW_TITLE = "TODOBA Setup"
-WELCOME_HEADLINE = "Welcome to TODOBA Trading"
+WINDOW_TITLE = (
+    'TODOBA Trading AI Setup'
+)
+WELCOME_HEADLINE = (
+    'Welcome to TODOBA Trading'
+)
 WELCOME_SUBTITLE = (
-    "Thiết lập TODOBA cho tài khoản MetaTrader 5 của bạn."
+    'Set up TODOBA Trading AI for your MetaTrader 5 account.'
 )
 
 _DISCOVERY_PROMPT = (
-    "Chọn MetaTrader 5 đang đăng nhập tài khoản "
-    "bạn muốn sử dụng với TODOBA."
+    'Select the MetaTrader 5 installation that is signed in to the account you want to use with TODOBA.'
 )
-_DISCOVERING_MESSAGE = "Đang tìm MetaTrader 5..."
+_DISCOVERING_MESSAGE = (
+    'Searching for MetaTrader 5 installations...'
+)
 _NO_INSTALLATION_MESSAGE = (
-    "Không tìm thấy MetaTrader 5 tiêu chuẩn trên máy này."
+    'No supported MetaTrader 5 installation was found. Open MetaTrader 5, sign in to your account, then select Refresh.'
 )
 _READY_TO_INSTALL_MESSAGE = (
-    "Chọn một MetaTrader 5 rồi nhấn Install."
+    'Select a MetaTrader 5 installation, then select Install.'
 )
 _PREPARING_MESSAGE = (
-    "TODOBA đang được chuẩn bị. "
-    "Nhấn Thử lại để kiểm tra lại."
+    'Preparing TODOBA Trading AI for this MetaTrader 5 account. When ready, select Continue.'
 )
 _INSTALLED_MESSAGE = (
-    "TODOBA đã được cài đặt thành công."
+    'TODOBA Trading AI was installed successfully.'
 )
 _GENERIC_ERROR_MESSAGE = (
-    "Không thể hoàn tất thao tác. Vui lòng thử lại."
+    'Setup could not complete this step. Please try again.'
 )
 _NO_SELECTION_MESSAGE = (
-    "Hãy chọn một MetaTrader 5 trước khi cài đặt."
+    'Select a MetaTrader 5 installation to continue.'
 )
 
 
@@ -248,7 +252,7 @@ class CustomerSetupGuiShell:
 
         self._refresh_button = ttk.Button(
             button_row,
-            text="Tìm lại",
+            text='Refresh',
             command=(
                 self.refresh_installations
             ),
@@ -276,7 +280,7 @@ class CustomerSetupGuiShell:
         self._finish_button = ttk.Button(
             button_row,
             text="Finish",
-            command=root.destroy,
+            command=self._finish_setup,
             state="disabled",
         )
         self._finish_button.pack(
@@ -413,7 +417,7 @@ class CustomerSetupGuiShell:
             state="disabled",
         )
         self._status_var.set(
-            "Đang cài đặt TODOBA..."
+            'Setting up TODOBA Trading AI...'
         )
         self._account_var.set(
             ""
@@ -434,6 +438,7 @@ class CustomerSetupGuiShell:
             )
             self._install_button.configure(
                 state="normal",
+                text="Retry",
             )
             return
 
@@ -449,6 +454,7 @@ class CustomerSetupGuiShell:
             )
             self._install_button.configure(
                 state="normal",
+                text="Retry",
             )
             return
 
@@ -465,7 +471,7 @@ class CustomerSetupGuiShell:
             )
             self._install_button.configure(
                 state="normal",
-                text="Thử lại",
+                text='Continue',
             )
             return
 
@@ -478,6 +484,7 @@ class CustomerSetupGuiShell:
             )
             self._install_button.configure(
                 state="normal",
+                text="Retry",
             )
             return
 
@@ -497,6 +504,14 @@ class CustomerSetupGuiShell:
         self._finish_button.configure(
             state="normal",
         )
+
+    def _finish_setup(
+        self,
+    ) -> None:
+        self._require_built()
+
+        self._root.quit()
+        self._root.destroy()
 
     def _on_selection_changed(
         self,
@@ -563,8 +578,7 @@ class CustomerSetupGuiShell:
         result: CustomerSetupApplicationResult,
     ) -> None:
         self._account_var.set(
-            "Tài khoản MT5 đã được xác minh "
-            "(HEDGING)\n"
+            'Verified MT5 account (HEDGING)\n'
             f"{result.server} / "
             f"{result.login}"
         )

@@ -195,6 +195,11 @@ class FakeRoot(
     ):
         self.mainloop_called = True
 
+    def quit(
+        self,
+    ):
+        self.quit_called = True
+
     def destroy(
         self,
     ):
@@ -336,7 +341,7 @@ def _build(
 def test_locked_customer_welcome_copy() -> None:
     assert (
         WINDOW_TITLE
-        == "TODOBA Setup"
+        == 'TODOBA Trading AI Setup'
     )
     assert (
         WELCOME_HEADLINE
@@ -345,8 +350,7 @@ def test_locked_customer_welcome_copy() -> None:
     assert (
         WELCOME_SUBTITLE
         == (
-            "Thiết lập TODOBA cho tài khoản "
-            "MetaTrader 5 của bạn."
+            'Set up TODOBA Trading AI for your MetaTrader 5 account.'
         )
     )
 
@@ -395,7 +399,7 @@ def test_build_window_has_todoba_identity_and_discovers(
 
     assert (
         root.window_title
-        == "TODOBA Setup"
+        == 'TODOBA Trading AI Setup'
     )
     assert (
         root.window_geometry
@@ -434,7 +438,7 @@ def test_empty_discovery_is_customer_safe(
         == []
     )
     assert (
-        "Không tìm thấy MetaTrader 5"
+        'No supported MetaTrader 5 installation was found'
         in shell._status_var.get()
     )
     assert (
@@ -496,12 +500,12 @@ def test_no_selection_does_not_run_setup(
 
     assert called == []
     assert (
-        "Hãy chọn"
+        'Select a MetaTrader 5 installation'
         in shell._status_var.get()
     )
 
 
-def test_build_pending_requires_customer_retry(
+def test_build_pending_requires_customer_continue(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -546,6 +550,7 @@ def test_build_pending_requires_customer_retry(
     shell._installation_list.selection_set(
         0
     )
+
     shell.install_selected()
 
     assert calls == [
@@ -558,20 +563,24 @@ def test_build_pending_requires_customer_retry(
         )
         == "normal"
     )
+
     assert (
         shell._install_button.cget(
             "text"
         )
-        == "Thử lại"
+        == "Continue"
     )
+
     assert (
-        "đang được chuẩn bị"
+        "Preparing TODOBA Trading AI"
         in shell._status_var.get()
     )
+
     assert (
         "HEDGING"
         in shell._account_var.get()
     )
+
     assert (
         "Broker-Server / 12345678"
         in shell._account_var.get()
@@ -583,6 +592,7 @@ def test_build_pending_requires_customer_retry(
         )
         == "disabled"
     )
+
 
 
 def test_build_pending_does_not_auto_poll(
@@ -679,7 +689,7 @@ def test_installed_enables_finish_only(
 
     assert (
         shell._status_var.get()
-        == "TODOBA đã được cài đặt thành công."
+        == 'TODOBA Trading AI was installed successfully.'
     )
     assert (
         shell._installation_list.cget(
@@ -712,6 +722,8 @@ def test_installed_enables_finish_only(
         )
     )
     finish_command()
+
+    assert root.quit_called is True
 
     assert root.destroyed is True
 
@@ -816,8 +828,7 @@ def test_controller_failure_is_customer_safe(
     assert (
         shell._status_var.get()
         == (
-            "Không thể hoàn tất thao tác. "
-            "Vui lòng thử lại."
+            'Setup could not complete this step. Please try again.'
         )
     )
 
@@ -851,8 +862,7 @@ def test_discovery_failure_is_customer_safe(
     assert (
         shell._status_var.get()
         == (
-            "Không thể hoàn tất thao tác. "
-            "Vui lòng thử lại."
+            'Setup could not complete this step. Please try again.'
         )
     )
     assert (
@@ -974,3 +984,62 @@ def test_owner_is_presentation_only() -> None:
 
     for token in forbidden_tokens:
         assert token not in source
+
+
+def test_recoverable_setup_error_uses_retry(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    option = _option()
+
+    shell, _ = _build(
+        tmp_path,
+        monkeypatch,
+        options=(
+            option,
+        ),
+    )
+
+    def fail_setup(
+        *,
+        option,
+    ):
+        del option
+
+        raise RuntimeError(
+            "recoverable failure"
+        )
+
+    monkeypatch.setattr(
+        shell._controller,
+        "run_selected",
+        fail_setup,
+    )
+
+    shell._installation_list.selection_set(
+        0
+    )
+
+    shell.install_selected()
+
+    assert (
+        shell._install_button.cget(
+            "state"
+        )
+        == "normal"
+    )
+
+    assert (
+        shell._install_button.cget(
+            "text"
+        )
+        == "Retry"
+    )
+
+    assert (
+        shell._status_var.get()
+        == (
+            "Setup could not complete this step. "
+            "Please try again."
+        )
+    )

@@ -909,3 +909,135 @@ def test_cap_e_ready_result_rejects_continuation_credential(
                 ARTIFACT_SIZE_BYTES
             ),
         )
+
+
+# ===== CAP F: PRODUCTION CONTINUATION RESPONSE COMPATIBILITY =====
+
+
+def test_cap_f_provision_accepts_production_continuation_expiry(
+    monkeypatch,
+) -> None:
+    continuation_credential = (
+        "tdbsc1.cap-f-production-continuation"
+    )
+
+    continuation_expires_at = (
+        "2026-09-04T01:19:27.707380Z"
+    )
+
+    monkeypatch.setattr(
+        module.httpx,
+        "post",
+        lambda *args, **kwargs: module.httpx.Response(
+            202,
+            json={
+                "status": "build_pending",
+                "continuation_credential": (
+                    continuation_credential
+                ),
+                "continuation_expires_at": (
+                    continuation_expires_at
+                ),
+            },
+        ),
+    )
+
+    result = _client().provision(
+        account_fingerprint=(
+            ACCOUNT_FINGERPRINT
+        )
+    )
+
+    assert result.status == "build_pending"
+
+    assert (
+        result.continuation_credential
+        == continuation_credential
+    )
+
+    assert (
+        continuation_credential
+        not in repr(result)
+    )
+
+    assert (
+        not hasattr(
+            result,
+            "continuation_expires_at",
+        )
+    )
+
+
+def test_cap_f_provision_rejects_expiry_without_credential(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        module.httpx,
+        "post",
+        lambda *args, **kwargs: module.httpx.Response(
+            202,
+            json={
+                "status": "build_pending",
+                "continuation_credential": None,
+                "continuation_expires_at": (
+                    "2026-09-04T01:19:27.707380Z"
+                ),
+            },
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "Invalid build_pending customer setup "
+            "continuation expiry"
+        ),
+    ):
+        _client().provision(
+            account_fingerprint=(
+                ACCOUNT_FINGERPRINT
+            )
+        )
+
+
+@pytest.mark.parametrize(
+    "invalid_expiry",
+    [
+        "",
+        " 2026-09-04T01:19:27Z",
+        123,
+    ],
+)
+def test_cap_f_provision_rejects_invalid_continuation_expiry(
+    monkeypatch,
+    invalid_expiry,
+) -> None:
+    monkeypatch.setattr(
+        module.httpx,
+        "post",
+        lambda *args, **kwargs: module.httpx.Response(
+            202,
+            json={
+                "status": "build_pending",
+                "continuation_credential": (
+                    "tdbsc1.cap-f-production-continuation"
+                ),
+                "continuation_expires_at": (
+                    invalid_expiry
+                ),
+            },
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match=(
+            "Invalid build_pending customer setup "
+            "continuation expiry"
+        ),
+    ):
+        _client().provision(
+            account_fingerprint=(
+                ACCOUNT_FINGERPRINT
+            )
+        )

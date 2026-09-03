@@ -280,12 +280,47 @@ class CustomerSetupHttpClient:
                         "status",
                         "continuation_credential",
                     },
+                    {
+                        "status",
+                        "continuation_credential",
+                        "continuation_expires_at",
+                    },
                 )
             ):
                 raise RuntimeError(
                     "Invalid build_pending customer setup "
                     "provisioning response."
                 )
+
+            if (
+                "continuation_expires_at"
+                in payload
+            ):
+                continuation_expires_at = (
+                    payload[
+                        "continuation_expires_at"
+                    ]
+                )
+
+                if (
+                    not isinstance(
+                        payload.get(
+                            "continuation_credential"
+                        ),
+                        str,
+                    )
+                    or not isinstance(
+                        continuation_expires_at,
+                        str,
+                    )
+                    or not continuation_expires_at
+                    or continuation_expires_at.strip()
+                    != continuation_expires_at
+                ):
+                    raise RuntimeError(
+                        "Invalid build_pending customer setup "
+                        "continuation expiry."
+                    )
 
             try:
                 return (

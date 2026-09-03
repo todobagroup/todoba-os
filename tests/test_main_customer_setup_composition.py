@@ -1651,3 +1651,211 @@ def test_bootstrap_router_composition_passes_no_customer_controlled_identity(
     assert forbidden.isdisjoint(
         keyword_names
     )
+
+
+# ===== CAP F BUILD CONTINUATION PRODUCTION COMPOSITION =====
+
+
+def test_cap_f_continuation_store_is_production_owned_fail_closed(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    compose_source = ast.get_source_segment(
+        SOURCE,
+        compose,
+    )
+
+    assert compose_source is not None
+
+    assert len(
+        _calls_named(
+            compose,
+            "CustomerSetupBuildContinuationStore",
+        )
+    ) == 1
+
+    assert (
+        "CUSTOMER_SETUP_BUILD_CONTINUATION_STORAGE_PATH"
+        in compose_source
+    )
+
+    assert (
+        "if not continuation_store.is_ready:"
+        in compose_source
+    )
+
+    assert (
+        "continuation_store.initialize_empty()"
+        not in compose_source
+    )
+
+
+def test_cap_f_continuation_service_reuses_authoritative_state(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    calls = _calls_named(
+        compose,
+        "CustomerSetupBuildContinuationService",
+    )
+
+    assert len(calls) == 1
+
+    call = calls[0]
+
+    expected = {
+        "continuation_store": "continuation_store",
+        "setup_activation_store": "activation_store",
+        "build_request_store": "build_request_store",
+    }
+
+    assert {
+        keyword.arg
+        for keyword in call.keywords
+    } == set(expected)
+
+    for keyword_name, owner_name in expected.items():
+        assert _is_name(
+            _keyword(
+                call,
+                keyword_name,
+            ),
+            owner_name,
+        )
+
+
+def test_cap_f_provision_and_package_share_one_continuation_owner(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    provisioning = _calls_named(
+        compose,
+        "create_customer_setup_provisioning_router",
+    )[0]
+
+    package = _calls_named(
+        compose,
+        "create_customer_setup_package_router",
+    )[0]
+
+    assert _is_name(
+        _keyword(
+            provisioning,
+            "continuation_service",
+        ),
+        "continuation_service",
+    )
+
+    assert _is_name(
+        _keyword(
+            package,
+            "continuation_service",
+        ),
+        "continuation_service",
+    )
+
+    assert _is_name(
+        _keyword(
+            package,
+            "setup_activation_service",
+        ),
+        "activation_service",
+    )
+
+
+def test_cap_f_continuation_owner_is_lifespan_owned_only(
+) -> None:
+    forbidden_top_level_calls = {
+        "CustomerSetupBuildContinuationStore",
+        "CustomerSetupBuildContinuationService",
+    }
+
+    for node in TREE.body:
+        if not isinstance(
+            node,
+            ast.Assign,
+        ):
+            continue
+
+        if not isinstance(
+            node.value,
+            ast.Call,
+        ):
+            continue
+
+        if not isinstance(
+            node.value.func,
+            ast.Name,
+        ):
+            continue
+
+        assert (
+            node.value.func.id
+            not in forbidden_top_level_calls
+        )
+
+
+def test_cap_f_continuation_runtime_exports_are_present(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    compose_source = ast.get_source_segment(
+        SOURCE,
+        compose,
+    )
+
+    assert compose_source is not None
+
+    expected = (
+        "customer_setup_build_continuation_store",
+        "customer_setup_build_continuation_service",
+    )
+
+    for name in expected:
+        assert (
+            f"global {name}"
+            in compose_source
+        )
+
+        assert (
+            f"{name} = ("
+            in compose_source
+        )
+
+
+def test_cap_f_continuation_composition_has_no_customer_identity_input(
+) -> None:
+    compose = _function(
+        "_compose_customer_setup_runtime"
+    )
+
+    call = _calls_named(
+        compose,
+        "CustomerSetupBuildContinuationService",
+    )[0]
+
+    keyword_names = {
+        keyword.arg
+        for keyword in call.keywords
+    }
+
+    forbidden = {
+        "customer_id",
+        "deployment_id",
+        "agent_id",
+        "account_fingerprint",
+        "continuation_credential",
+        "authorization",
+    }
+
+    assert forbidden.isdisjoint(
+        keyword_names
+    )

@@ -677,7 +677,6 @@ def create_customer_setup_provisioning_router(
             },
         )
         def continue_customer_setup(
-            request: CustomerSetupProvisioningRequest,
             response: Response,
             authorization: str | None = Header(
                 default=None,
@@ -701,9 +700,6 @@ def create_customer_setup_provisioning_router(
                             continuation_credential
                         ),
                         current_time=current_time,
-                        account_fingerprint=(
-                            request.account_fingerprint
-                        ),
                     )
                 )
             except ValueError as exc:
@@ -830,6 +826,53 @@ def create_customer_setup_provisioning_router(
                 )
             )
 
+            authoritative_account_fingerprint = (
+                getattr(
+                    recovered,
+                    "account_fingerprint",
+                    None,
+                )
+            )
+
+            if (
+                not isinstance(
+                    authoritative_account_fingerprint,
+                    str,
+                )
+                or not authoritative_account_fingerprint
+                or authoritative_account_fingerprint.strip()
+                != authoritative_account_fingerprint
+            ):
+                raise RuntimeError(
+                    "Recovered bootstrap account fingerprint "
+                    "is invalid."
+                )
+
+            try:
+                fingerprint_authorization = (
+                    continuation_service.authorize(
+                        continuation_credential=(
+                            continuation_credential
+                        ),
+                        current_time=current_time,
+                        account_fingerprint=(
+                            authoritative_account_fingerprint
+                        ),
+                    )
+                )
+            except ValueError as exc:
+                raise _unauthorized_setup_handoff() from exc
+
+            if (
+                fingerprint_authorization
+                != continuation_authorization
+            ):
+                raise RuntimeError(
+                    "Build continuation authorization "
+                    "changed during authoritative account "
+                    "binding verification."
+                )
+
             recovered = (
                 _require_preparation_result(
                     result=recovered,
@@ -838,7 +881,7 @@ def create_customer_setup_provisioning_router(
                     ),
                     customer_id=customer_id,
                     account_fingerprint=(
-                        request.account_fingerprint
+                        authoritative_account_fingerprint
                     ),
                 )
             )
@@ -886,7 +929,7 @@ def create_customer_setup_provisioning_router(
                 ),
                 customer_id=customer_id,
                 account_fingerprint=(
-                    request.account_fingerprint
+                    authoritative_account_fingerprint
                 ),
                 deployment_id=deployment_id,
             )

@@ -490,11 +490,6 @@ def _post_continue(
         headers={
             "Authorization": authorization,
         },
-        json={
-            "account_fingerprint": (
-                account_fingerprint
-            ),
-        },
     )
 
 
@@ -1745,16 +1740,33 @@ def test_continue_pending_recovers_existing_build_without_register(
         "status": "build_pending"
     }
 
-    environment[
+    authorize = environment[
         "continuation_service"
-    ].authorize.assert_called_once_with(
-        continuation_credential=(
-            CONTINUATION_CREDENTIAL
-        ),
-        current_time=NOW,
-        account_fingerprint=(
-            ACCOUNT_FINGERPRINT
-        ),
+    ].authorize
+
+    assert authorize.call_count == 2
+
+    assert (
+        authorize.call_args_list[0].kwargs
+        == {
+            "continuation_credential": (
+                CONTINUATION_CREDENTIAL
+            ),
+            "current_time": NOW,
+        }
+    )
+
+    assert (
+        authorize.call_args_list[1].kwargs
+        == {
+            "continuation_credential": (
+                CONTINUATION_CREDENTIAL
+            ),
+            "current_time": NOW,
+            "account_fingerprint": (
+                ACCOUNT_FINGERPRINT
+            ),
+        }
     )
 
     environment[

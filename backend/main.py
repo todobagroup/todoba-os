@@ -78,6 +78,10 @@ from backend.commercial.customer_setup_handoff_service import (
     CustomerSetupHandoffService,
     CustomerSetupHandoffStore,
 )
+from backend.commercial.customer_setup_build_continuation_service import (
+    CustomerSetupBuildContinuationService,
+    CustomerSetupBuildContinuationStore,
+)
 from backend.commercial.customer_setup_package_api import (
     create_customer_setup_package_router,
 )
@@ -481,6 +485,12 @@ CUSTOMER_SETUP_HANDOFF_STORAGE_PATH = (
     / "customer_setup_handoffs.json"
 )
 
+CUSTOMER_SETUP_BUILD_CONTINUATION_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_setup_build_continuations.json"
+)
+
 CUSTOMER_DEPLOYMENT_BOOTSTRAP_STORAGE_PATH = (
     TODOBA_CONTROL_PLANE_DATA_ROOT
     / "commercial"
@@ -641,6 +651,7 @@ customer_setup_launch_credential_store = None
 customer_setup_bootstrap_authorization_store = None
 customer_setup_activation_store = None
 customer_setup_handoff_store = None
+customer_setup_build_continuation_store = None
 customer_deployment_bootstrap_store = None
 customer_deployment_package_build_request_store = None
 customer_registration_service = None
@@ -651,6 +662,7 @@ customer_setup_entry_grant_service = None
 customer_setup_activation_service = None
 customer_setup_handoff_service = None
 customer_setup_handoff_authorizer = None
+customer_setup_build_continuation_service = None
 customer_deployment_enrollment_service = None
 customer_deployment_bootstrap_service = None
 
@@ -664,6 +676,7 @@ def _compose_customer_setup_runtime(
     global customer_setup_bootstrap_authorization_store
     global customer_setup_activation_store
     global customer_setup_handoff_store
+    global customer_setup_build_continuation_store
     global customer_deployment_bootstrap_store
     global customer_deployment_package_build_request_store
     global customer_registration_service
@@ -674,6 +687,7 @@ def _compose_customer_setup_runtime(
     global customer_setup_activation_service
     global customer_setup_handoff_service
     global customer_setup_handoff_authorizer
+    global customer_setup_build_continuation_service
     global customer_deployment_enrollment_service
     global customer_deployment_bootstrap_service
 
@@ -717,6 +731,18 @@ def _compose_customer_setup_runtime(
             CUSTOMER_SETUP_HANDOFF_STORAGE_PATH
         )
     )
+
+    continuation_store = (
+        CustomerSetupBuildContinuationStore(
+            CUSTOMER_SETUP_BUILD_CONTINUATION_STORAGE_PATH
+        )
+    )
+
+    if not continuation_store.is_ready:
+        raise RuntimeError(
+            "Customer setup build continuation store "
+            "is not initialized."
+        )
 
     bootstrap_store = (
         CustomerDeploymentBootstrapStore(
@@ -766,6 +792,20 @@ def _compose_customer_setup_runtime(
             raise RuntimeError(
                 f"{owner_name} is not initialized."
             )
+
+    continuation_service = (
+        CustomerSetupBuildContinuationService(
+            continuation_store=(
+                continuation_store
+            ),
+            setup_activation_store=(
+                activation_store
+            ),
+            build_request_store=(
+                build_request_store
+            ),
+        )
+    )
 
     registration_service = (
         CustomerRegistrationService(
@@ -942,6 +982,9 @@ def _compose_customer_setup_runtime(
             setup_activation_service=(
                 activation_service
             ),
+            continuation_service=(
+                continuation_service
+            ),
         )
     )
 
@@ -959,6 +1002,12 @@ def _compose_customer_setup_runtime(
             ),
             package_publication=(
                 customer_deployment_package_publication
+            ),
+            continuation_service=(
+                continuation_service
+            ),
+            setup_activation_service=(
+                activation_service
             ),
         )
     )
@@ -998,6 +1047,9 @@ def _compose_customer_setup_runtime(
     customer_setup_handoff_store = (
         handoff_store
     )
+    customer_setup_build_continuation_store = (
+        continuation_store
+    )
     customer_deployment_bootstrap_store = (
         bootstrap_store
     )
@@ -1027,6 +1079,9 @@ def _compose_customer_setup_runtime(
     )
     customer_setup_handoff_authorizer = (
         handoff_authorizer
+    )
+    customer_setup_build_continuation_service = (
+        continuation_service
     )
     customer_deployment_enrollment_service = (
         enrollment_service

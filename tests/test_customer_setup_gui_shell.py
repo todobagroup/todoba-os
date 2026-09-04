@@ -167,6 +167,7 @@ class FakeRoot(
         self.resizable_value = None
         self.mainloop_called = False
         self.destroyed = False
+        self.protocol_callbacks = {}
 
     def title(
         self,
@@ -189,6 +190,15 @@ class FakeRoot(
             width,
             height,
         )
+
+    def protocol(
+        self,
+        name,
+        callback,
+    ):
+        self.protocol_callbacks[
+            name
+        ] = callback
 
     def mainloop(
         self,
@@ -886,6 +896,37 @@ def test_window_cannot_be_built_twice(
         match="already built",
     ):
         shell.build_window()
+
+
+def test_window_x_close_uses_finish_lifecycle(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _install_fake_tk(
+        monkeypatch
+    )
+
+    shell = _shell(
+        tmp_path
+    )
+
+    root = shell.build_window()
+
+    assert (
+        "WM_DELETE_WINDOW"
+        in root.protocol_callbacks
+    )
+
+    close_callback = (
+        root.protocol_callbacks[
+            "WM_DELETE_WINDOW"
+        ]
+    )
+
+    close_callback()
+
+    assert root.quit_called is True
+    assert root.destroyed is True
 
 
 def test_run_starts_mainloop(

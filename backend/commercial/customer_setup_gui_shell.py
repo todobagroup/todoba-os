@@ -289,6 +289,11 @@ class CustomerSetupGuiShell:
 
         self._root = root
 
+        root.protocol(
+            "WM_DELETE_WINDOW",
+            self._finish_setup,
+        )
+
         self.refresh_installations()
 
         return root

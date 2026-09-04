@@ -130,6 +130,7 @@ _RUNTIME_EXPORT_NAMES = (
     "customer_setup_launch_credential_store",
     "customer_setup_bootstrap_authorization_store",
     "customer_setup_activation_store",
+    "customer_setup_access_code_store",
     "customer_setup_handoff_store",
     "customer_setup_build_continuation_store",
     "customer_deployment_bootstrap_store",
@@ -140,6 +141,8 @@ _RUNTIME_EXPORT_NAMES = (
     "customer_setup_bootstrap_launch_grant_service",
     "customer_setup_entry_grant_service",
     "customer_setup_activation_service",
+    "customer_setup_access_code_service",
+    "customer_setup_access_code_exchange_service",
     "customer_setup_handoff_service",
     "customer_setup_handoff_authorizer",
     "customer_setup_build_continuation_service",
@@ -383,6 +386,10 @@ def test_production_continuation_golden_path_reaches_installed(
         "CUSTOMER_SETUP_ACTIVATION_STORAGE_PATH": (
             commercial_root
             / "customer_setup_activations.json"
+        ),
+        "CUSTOMER_SETUP_ACCESS_CODE_STORAGE_PATH": (
+            commercial_root
+            / "customer_setup_access_codes.json"
         ),
         "CUSTOMER_SETUP_HANDOFF_STORAGE_PATH": (
             commercial_root

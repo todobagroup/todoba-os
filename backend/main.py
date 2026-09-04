@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -50,6 +51,9 @@ from backend.commercial.customer_registration_service import (
 from backend.commercial.customer_setup_bootstrap_api import (
     create_customer_setup_bootstrap_router,
 )
+from backend.commercial.customer_setup_access_code_api import (
+    create_customer_setup_access_code_router,
+)
 from backend.commercial.customer_setup_entry_api import (
     create_customer_setup_entry_router,
 )
@@ -70,6 +74,13 @@ from backend.commercial.customer_setup_launch_credential_service import (
 from backend.commercial.customer_setup_activation_service import (
     CustomerSetupActivationService,
     CustomerSetupActivationStore,
+)
+from backend.commercial.customer_setup_access_code_service import (
+    CustomerSetupAccessCodeService,
+    CustomerSetupAccessCodeStore,
+)
+from backend.commercial.customer_setup_access_code_exchange_service import (
+    CustomerSetupAccessCodeExchangeService,
 )
 from backend.commercial.customer_setup_handoff_authorizer import (
     CustomerSetupHandoffAuthorizer,
@@ -479,6 +490,12 @@ CUSTOMER_SETUP_ACTIVATION_STORAGE_PATH = (
     / "customer_setup_activations.json"
 )
 
+CUSTOMER_SETUP_ACCESS_CODE_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_setup_access_codes.json"
+)
+
 CUSTOMER_SETUP_HANDOFF_STORAGE_PATH = (
     TODOBA_CONTROL_PLANE_DATA_ROOT
     / "commercial"
@@ -650,6 +667,7 @@ customer_registration_store = None
 customer_setup_launch_credential_store = None
 customer_setup_bootstrap_authorization_store = None
 customer_setup_activation_store = None
+customer_setup_access_code_store = None
 customer_setup_handoff_store = None
 customer_setup_build_continuation_store = None
 customer_deployment_bootstrap_store = None
@@ -660,6 +678,8 @@ customer_setup_bootstrap_authorization_service = None
 customer_setup_bootstrap_launch_grant_service = None
 customer_setup_entry_grant_service = None
 customer_setup_activation_service = None
+customer_setup_access_code_service = None
+customer_setup_access_code_exchange_service = None
 customer_setup_handoff_service = None
 customer_setup_handoff_authorizer = None
 customer_setup_build_continuation_service = None
@@ -675,6 +695,7 @@ def _compose_customer_setup_runtime(
     global customer_setup_launch_credential_store
     global customer_setup_bootstrap_authorization_store
     global customer_setup_activation_store
+    global customer_setup_access_code_store
     global customer_setup_handoff_store
     global customer_setup_build_continuation_store
     global customer_deployment_bootstrap_store
@@ -685,6 +706,8 @@ def _compose_customer_setup_runtime(
     global customer_setup_bootstrap_launch_grant_service
     global customer_setup_entry_grant_service
     global customer_setup_activation_service
+    global customer_setup_access_code_service
+    global customer_setup_access_code_exchange_service
     global customer_setup_handoff_service
     global customer_setup_handoff_authorizer
     global customer_setup_build_continuation_service
@@ -723,6 +746,15 @@ def _compose_customer_setup_runtime(
     activation_store = (
         CustomerSetupActivationStore(
             CUSTOMER_SETUP_ACTIVATION_STORAGE_PATH
+        )
+    )
+
+    access_code_store = (
+        CustomerSetupAccessCodeStore(
+            CUSTOMER_SETUP_ACCESS_CODE_STORAGE_PATH,
+            setup_activation_store=(
+                activation_store
+            ),
         )
     )
 
@@ -772,6 +804,10 @@ def _compose_customer_setup_runtime(
         (
             "Customer setup activation store",
             activation_store,
+        ),
+        (
+            "Customer setup access code store",
+            access_code_store,
         ),
         (
             "Customer setup handoff store",
@@ -832,6 +868,17 @@ def _compose_customer_setup_runtime(
         )
     )
 
+    access_code_service = (
+        CustomerSetupAccessCodeService(
+            access_code_store=(
+                access_code_store
+            ),
+            setup_activation_store=(
+                activation_store
+            ),
+        )
+    )
+
     handoff_service = (
         CustomerSetupHandoffService(
             handoff_store=(
@@ -869,6 +916,22 @@ def _compose_customer_setup_runtime(
             ),
             customer_identity_registry=(
                 customer_identity_registry
+            ),
+        )
+    )
+
+    access_code_exchange_service = (
+        CustomerSetupAccessCodeExchangeService(
+            authorize_access_code=(
+                access_code_service.authorize
+            ),
+            issue_bootstrap_authorization=(
+                bootstrap_authorization_service.issue
+            ),
+            clock=(
+                lambda: datetime.now(
+                    timezone.utc
+                )
             ),
         )
     )
@@ -939,6 +1002,14 @@ def _compose_customer_setup_runtime(
         create_customer_registration_router(
             registration_service=(
                 registration_service
+            ),
+        )
+    )
+
+    access_code_router = (
+        create_customer_setup_access_code_router(
+            exchange_setup_access=(
+                access_code_exchange_service.exchange
             ),
         )
     )
@@ -1017,6 +1088,10 @@ def _compose_customer_setup_runtime(
     )
 
     app.include_router(
+        access_code_router
+    )
+
+    app.include_router(
         bootstrap_router
     )
 
@@ -1043,6 +1118,9 @@ def _compose_customer_setup_runtime(
     )
     customer_setup_activation_store = (
         activation_store
+    )
+    customer_setup_access_code_store = (
+        access_code_store
     )
     customer_setup_handoff_store = (
         handoff_store
@@ -1073,6 +1151,12 @@ def _compose_customer_setup_runtime(
     )
     customer_setup_activation_service = (
         activation_service
+    )
+    customer_setup_access_code_service = (
+        access_code_service
+    )
+    customer_setup_access_code_exchange_service = (
+        access_code_exchange_service
     )
     customer_setup_handoff_service = (
         handoff_service

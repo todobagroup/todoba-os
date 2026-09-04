@@ -8,6 +8,7 @@ package-build flow:
 
 - customer_registrations.json
 - customer_setup_activations.json
+- customer_setup_access_codes.json
 - customer_setup_handoffs.json
 - customer_setup_launch_credentials.json
 - customer_setup_bootstrap_authorizations.json
@@ -52,6 +53,9 @@ from backend.commercial.customer_registration_service import (
 from backend.commercial.customer_setup_activation_service import (
     CustomerSetupActivationStore,
 )
+from backend.commercial.customer_setup_access_code_service import (
+    CustomerSetupAccessCodeStore,
+)
 from backend.commercial.customer_setup_build_continuation_service import (
     CustomerSetupBuildContinuationStore,
 )
@@ -76,6 +80,10 @@ _CUSTOMER_REGISTRATION_FILENAME = (
 
 _CUSTOMER_SETUP_ACTIVATION_FILENAME = (
     "customer_setup_activations.json"
+)
+
+_CUSTOMER_SETUP_ACCESS_CODE_FILENAME = (
+    "customer_setup_access_codes.json"
 )
 
 _CUSTOMER_SETUP_HANDOFF_FILENAME = (
@@ -157,6 +165,11 @@ def provision_customer_setup_control_plane(
     activation_storage_path = (
         commercial_root
         / _CUSTOMER_SETUP_ACTIVATION_FILENAME
+    )
+
+    access_code_storage_path = (
+        commercial_root
+        / _CUSTOMER_SETUP_ACCESS_CODE_FILENAME
     )
 
     handoff_storage_path = (
@@ -262,6 +275,18 @@ def provision_customer_setup_control_plane(
     if not activation_store.is_ready():
         activation_store.initialize_empty()
 
+    access_code_store = (
+        CustomerSetupAccessCodeStore(
+            access_code_storage_path,
+            setup_activation_store=(
+                activation_store
+            ),
+        )
+    )
+
+    if not access_code_store.is_ready():
+        access_code_store.initialize_empty()
+
     if not handoff_store.is_ready():
         handoff_store.initialize_empty()
 
@@ -293,6 +318,12 @@ def provision_customer_setup_control_plane(
     if not activation_store.is_ready():
         raise RuntimeError(
             "Customer setup activation store did not "
+            "become ready."
+        )
+
+    if not access_code_store.is_ready():
+        raise RuntimeError(
+            "Customer setup access code store did not "
             "become ready."
         )
 
@@ -400,6 +431,10 @@ def main() -> int:
     )
 
     print(
+        "CUSTOMER_SETUP_ACCESS_CODE_STORE=READY"
+    )
+
+    print(
         "CUSTOMER_SETUP_HANDOFF_STORE=READY"
     )
 
@@ -431,6 +466,17 @@ def main() -> int:
     print(
         "CUSTOMER_SETUP_ACTIVATION_PATH="
         f"{activation_storage_path}"
+    )
+
+    access_code_storage_path = (
+        args.control_plane_root
+        / "commercial"
+        / _CUSTOMER_SETUP_ACCESS_CODE_FILENAME
+    )
+
+    print(
+        "CUSTOMER_SETUP_ACCESS_CODE_PATH="
+        f"{access_code_storage_path}"
     )
 
     print(

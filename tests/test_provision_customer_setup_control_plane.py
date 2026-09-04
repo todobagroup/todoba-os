@@ -49,6 +49,8 @@ ACTIVATION_FILENAME = (
     "customer_setup_activations.json"
 )
 
+ACCESS_CODE_FILENAME = "customer_setup_access_codes.json"
+
 HANDOFF_FILENAME = (
     "customer_setup_handoffs.json"
 )
@@ -236,6 +238,7 @@ def test_first_provisioning_creates_only_required_ready_state(
         IDENTITY_FILENAME,
         REGISTRATION_FILENAME,
         ACTIVATION_FILENAME,
+        ACCESS_CODE_FILENAME,
         HANDOFF_FILENAME,
         CONTINUATION_FILENAME,
         LAUNCH_CREDENTIAL_FILENAME,
@@ -474,6 +477,7 @@ def test_retry_is_byte_for_byte_and_queue_idempotent(
         IDENTITY_FILENAME,
         REGISTRATION_FILENAME,
         ACTIVATION_FILENAME,
+        ACCESS_CODE_FILENAME,
         HANDOFF_FILENAME,
         CONTINUATION_FILENAME,
         LAUNCH_CREDENTIAL_FILENAME,
@@ -569,6 +573,11 @@ def test_provisioner_has_store_only_commercial_surface() -> None:
         ),
         (
             "backend.commercial."
+            "customer_setup_access_code_service",
+            "CustomerSetupAccessCodeStore",
+        ),
+        (
+            "backend.commercial."
             "customer_setup_activation_service",
             "CustomerSetupActivationStore",
         ),
@@ -598,7 +607,7 @@ def test_provisioner_has_store_only_commercial_surface() -> None:
         called_attributes.count(
             "initialize_empty"
         )
-        == 8
+        == 9
     )
 
     forbidden_business_actions = {

@@ -38,8 +38,10 @@ class FakeStringVar:
     def __init__(
         self,
         *,
+        master,
         value="",
     ):
+        self.master = master
         self.value = value
 
     def set(

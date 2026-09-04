@@ -208,6 +208,7 @@ class CustomerSetupGuiShell:
         )
 
         self._status_var = tk.StringVar(
+            master=root,
             value=_DISCOVERING_MESSAGE
         )
         ttk.Label(
@@ -226,6 +227,7 @@ class CustomerSetupGuiShell:
         )
 
         self._account_var = tk.StringVar(
+            master=root,
             value=""
         )
         ttk.Label(

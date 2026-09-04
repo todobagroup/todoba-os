@@ -1648,8 +1648,8 @@ def test_post_g3_harness_locks_continue_finish_and_rebuilt_binary(
     assert (
         journey._EXPECTED_FROZEN_EXE_SHA256
         == (
-            "CEBFC6B659C6792B3CFC3D59C0AFE1F7"
-            "CD5A2FF439254EE60F8682EB238A79E1"
+            "B302241F4CB1FB900DE7B0FB245C8785"
+            "184388621DA6460E745F33DAD1153A99"
         )
     )
 

@@ -284,7 +284,9 @@ class CustomerSetupAccessCodeExchangeService:
                 issuance.authorization_code
             ),
             expires_at=(
-                issuance.expires_at
+                self._normalize_authoritative_expiry(
+                    issuance.expires_at
+                )
             ),
         )
 
@@ -339,6 +341,70 @@ class CustomerSetupAccessCodeExchangeService:
             )
 
         return normalized
+
+    @staticmethod
+    def _normalize_authoritative_expiry(
+        value: datetime | str,
+    ) -> datetime:
+        if isinstance(
+            value,
+            datetime,
+        ):
+            normalized = value
+
+        elif isinstance(
+            value,
+            str,
+        ):
+            if (
+                not value
+                or value.strip()
+                != value
+            ):
+                raise ValueError(
+                    "expires_at must be normalized."
+                )
+
+            serialized = value
+
+            if serialized.endswith(
+                "Z"
+            ):
+                serialized = (
+                    serialized[:-1]
+                    + "+00:00"
+                )
+
+            try:
+                normalized = (
+                    datetime.fromisoformat(
+                        serialized
+                    )
+                )
+            except ValueError:
+                raise ValueError(
+                    "expires_at must be a valid "
+                    "ISO 8601 datetime."
+                ) from None
+
+        else:
+            raise TypeError(
+                "expires_at must be datetime or str."
+            )
+
+        if (
+            normalized.tzinfo is None
+            or normalized.utcoffset()
+            is None
+        ):
+            raise ValueError(
+                "expires_at must be "
+                "timezone-aware."
+            )
+
+        return normalized.astimezone(
+            timezone.utc
+        )
 
     @staticmethod
     def _normalize_trusted_time(

@@ -650,3 +650,103 @@ def test_owner_has_no_payment_http_main_or_persistence_authority(
 
     for token in forbidden:
         assert token not in source
+
+
+def test_exchange_converges_authoritative_serialized_bootstrap_expiry(
+) -> None:
+    """
+    Production bootstrap issuance exposes serialized timestamps.
+
+    Access-code exchange must converge that authoritative
+    transport-neutral timestamp into its own result contract
+    instead of failing after durable authorization issuance.
+    """
+
+    serialized_now = (
+        _NOW
+        .isoformat()
+        .replace(
+            "+00:00",
+            "Z",
+        )
+    )
+
+    serialized_expiry = (
+        _EXPIRES_AT
+        .isoformat()
+        .replace(
+            "+00:00",
+            "Z",
+        )
+    )
+
+    def authorize_access_code(
+        **kwargs,
+    ):
+        return CustomerSetupAccessCodeAuthorization(
+            setup_activation_id=(
+                _SETUP_ACTIVATION_ID
+            ),
+            customer_id=(
+                _CUSTOMER_ID
+            ),
+        )
+
+    def issue_bootstrap_authorization(
+        **kwargs,
+    ):
+        return CustomerSetupBootstrapAuthorizationIssuance(
+            authorization_request_id=(
+                kwargs[
+                    "authorization_request_id"
+                ]
+            ),
+            authorization_id=(
+                "bootstrap-authorization-production-shaped"
+            ),
+            customer_id=(
+                kwargs[
+                    "customer_id"
+                ]
+            ),
+            issued_at=(
+                serialized_now
+            ),
+            expires_at=(
+                serialized_expiry
+            ),
+            authorization_code=(
+                _INTERNAL_AUTHORIZATION_CODE
+            ),
+        )
+
+    service = CustomerSetupAccessCodeExchangeService(
+        authorize_access_code=(
+            authorize_access_code
+        ),
+        issue_bootstrap_authorization=(
+            issue_bootstrap_authorization
+        ),
+        clock=(
+            lambda: _NOW
+        ),
+    )
+
+    result = service.exchange(
+        activation_code=(
+            _ACTIVATION_CODE
+        ),
+        code_challenge_s256=(
+            _CODE_CHALLENGE
+        ),
+    )
+
+    assert (
+        result.authorization_code
+        == _INTERNAL_AUTHORIZATION_CODE
+    )
+
+    assert (
+        result.expires_at
+        == _EXPIRES_AT
+    )

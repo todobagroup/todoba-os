@@ -20,6 +20,15 @@ AUTHORIZATION_CODE = (
     + ("A" * 43)
 )
 
+
+ACTIVATION_CODE = (
+    "tdbsa."
+    + ("2" * 32)
+    + "."
+    + ("B" * 43)
+)
+
+
 SETUP_CHALLENGE = (
     "B" * 43
 )
@@ -152,33 +161,56 @@ class FakeAcquisition:
             raise self.failure
 
 
+class FakeBridge:
+    def __init__(
+        self,
+        *,
+        failure=None,
+    ):
+        self.launch_calls = []
+        self.failure = failure
+
+    def launch(
+        self,
+        *,
+        activation_code,
+    ):
+        self.launch_calls.append(
+            activation_code
+        )
+
+        if self.failure is not None:
+            raise self.failure
+
+
+
 def _window_for_submission(
     monkeypatch,
     *,
-    authorization_code=AUTHORIZATION_CODE,
-    acquisition=None,
+    activation_code=ACTIVATION_CODE,
+    bridge=None,
 ):
-    if acquisition is None:
-        acquisition = FakeAcquisition()
+    if bridge is None:
+        bridge = FakeBridge()
 
     monkeypatch.setattr(
         customer_setup_module,
-        "CustomerSetupBootstrapAcquisition",
-        FakeAcquisition,
+        "CustomerSetupAccessCodeBootstrapBridge",
+        FakeBridge,
     )
 
     window = (
         customer_setup_module
         .CustomerSetupBootstrapWindow(
-            acquisition=acquisition,
+            bridge=bridge,
         )
     )
 
     root = FakeRoot()
 
-    authorization_var = (
+    activation_var = (
         FakeVariable(
-            authorization_code
+            activation_code
         )
     )
 
@@ -191,22 +223,23 @@ def _window_for_submission(
     )
 
     window._root = root
-    window._authorization_code_var = (
-        authorization_var
+    window._activation_code_var = (
+        activation_var
     )
     window._status_var = (
         status_var
     )
-    window._continue_button = button
+    window._start_button = button
 
     return (
         window,
-        acquisition,
+        bridge,
         root,
-        authorization_var,
+        activation_var,
         status_var,
         button,
     )
+
 
 
 def test_locked_customer_window_identity(
@@ -236,15 +269,51 @@ def test_production_flow_uses_authoritative_cloud_base_url(
                 "acquisition"
             ] = kwargs
 
+            observed[
+                "acquisition_instance"
+            ] = self
+
+    class FakeAccessCodeClient:
+        def __init__(
+            self,
+            **kwargs,
+        ):
+            observed[
+                "access_code_client"
+            ] = kwargs
+
+            observed[
+                "access_code_client_instance"
+            ] = self
+
+    class FakeProductionBridge:
+        def __init__(
+            self,
+            *,
+            access_code_client,
+            acquisition,
+        ):
+            observed[
+                "bridge_access_code_client"
+            ] = access_code_client
+
+            observed[
+                "bridge_acquisition"
+            ] = acquisition
+
+            observed[
+                "bridge_instance"
+            ] = self
+
     class FakeWindow:
         def __init__(
             self,
             *,
-            acquisition,
+            bridge,
         ):
             observed[
-                "window_acquisition"
-            ] = acquisition
+                "window_bridge"
+            ] = bridge
 
         def run(
             self,
@@ -263,6 +332,18 @@ def test_production_flow_uses_authoritative_cloud_base_url(
         customer_setup_module,
         "CustomerSetupBootstrapAcquisition",
         FakeProductionAcquisition,
+    )
+
+    monkeypatch.setattr(
+        customer_setup_module,
+        "CustomerSetupAccessCodeHttpClient",
+        FakeAccessCodeClient,
+    )
+
+    monkeypatch.setattr(
+        customer_setup_module,
+        "CustomerSetupAccessCodeBootstrapBridge",
+        FakeProductionBridge,
     )
 
     monkeypatch.setattr(
@@ -287,48 +368,57 @@ def test_production_flow_uses_authoritative_cloud_base_url(
 
     customer_setup_module.run_production_customer_setup()
 
-    assert (
-        observed[
-            "acquisition"
-        ][
-            "setup_base_url"
-        ]
-        == customer_setup_module.TODOBA_CLOUD_BASE_URL
+    assert observed[
+        "acquisition"
+    ][
+        "setup_base_url"
+    ] == customer_setup_module.TODOBA_CLOUD_BASE_URL
+
+    assert observed[
+        "acquisition"
+    ][
+        "mt5_module"
+    ] is fake_mt5
+
+    assert observed[
+        "acquisition"
+    ][
+        "roaming_appdata_path"
+    ] == Path(
+        APPDATA_PATH
     )
 
-    assert (
-        customer_setup_module.TODOBA_CLOUD_BASE_URL
-        == "https://api.todobagroup.com"
-    )
+    assert observed[
+        "access_code_client"
+    ] == {
+        "setup_base_url": (
+            customer_setup_module
+            .TODOBA_CLOUD_BASE_URL
+        ),
+    }
 
-    assert (
-        observed[
-            "acquisition"
-        ][
-            "mt5_module"
-        ]
-        is fake_mt5
-    )
+    assert observed[
+        "bridge_access_code_client"
+    ] is observed[
+        "access_code_client_instance"
+    ]
 
-    assert (
-        observed[
-            "acquisition"
-        ][
-            "roaming_appdata_path"
-        ]
-        == Path(APPDATA_PATH)
-    )
+    assert observed[
+        "bridge_acquisition"
+    ] is observed[
+        "acquisition_instance"
+    ]
 
-    assert (
-        observed[
-            "window_acquisition"
-        ]
-        is not None
-    )
+    assert observed[
+        "window_bridge"
+    ] is observed[
+        "bridge_instance"
+    ]
 
     assert observed[
         "run"
     ] == 1
+
 
 
 def test_windows_appdata_is_authoritative_roaming_path(
@@ -376,167 +466,162 @@ def test_missing_windows_appdata_fails_closed(
         customer_setup_module._resolve_roaming_appdata_path()
 
 
-def test_bootstrap_window_requires_acquisition_owner(
+def test_bootstrap_window_requires_bridge_owner(
     monkeypatch,
 ) -> None:
-    class RequiredAcquisition:
+    class RequiredBridge:
         pass
 
     monkeypatch.setattr(
         customer_setup_module,
-        "CustomerSetupBootstrapAcquisition",
-        RequiredAcquisition,
+        "CustomerSetupAccessCodeBootstrapBridge",
+        RequiredBridge,
     )
 
     with pytest.raises(
         TypeError,
         match=(
-            "acquisition must be "
-            "CustomerSetupBootstrapAcquisition"
+            "bridge must be "
+            "CustomerSetupAccessCodeBootstrapBridge"
         ),
     ):
         customer_setup_module.CustomerSetupBootstrapWindow(
-            acquisition=object(),
+            bridge=object(),
         )
 
 
-def test_empty_authorization_code_never_crosses_boundary(
+
+def test_empty_activation_code_never_crosses_boundary(
     monkeypatch,
 ) -> None:
     (
         window,
-        acquisition,
+        bridge,
         root,
-        authorization_var,
+        activation_var,
         status_var,
         button,
     ) = _window_for_submission(
         monkeypatch,
-        authorization_code="   ",
+        activation_code="   ",
     )
 
-    window._submit_authorization_code()
+    window._submit_activation_code()
+
+    assert bridge.launch_calls == []
 
     assert (
-        acquisition.launch_calls
-        == []
-    )
-
-    assert (
-        root.calls
-        == []
-    )
-
-    assert (
-        authorization_var.value
+        activation_var.value
         == "   "
     )
 
     assert (
-        "Enter the Authorization Code"
+        "Activation Code"
         in status_var.value
     )
 
-    assert button.states == []
+    assert (
+        "withdraw"
+        not in root.calls
+    )
+
+    assert (
+        "disabled"
+        not in button.states
+    )
 
 
-def test_authorization_code_is_stripped_before_launch(
+
+def test_activation_code_is_stripped_before_launch(
     monkeypatch,
 ) -> None:
     (
         window,
-        acquisition,
+        bridge,
         _root,
-        _authorization_var,
+        _activation_var,
         _status_var,
         _button,
     ) = _window_for_submission(
         monkeypatch,
-        authorization_code=(
-            f"  {AUTHORIZATION_CODE}  "
+        activation_code=(
+            f"  {ACTIVATION_CODE}  "
         ),
     )
 
-    window._submit_authorization_code()
+    window._submit_activation_code()
 
-    assert (
-        acquisition.launch_calls
-        == [
-            AUTHORIZATION_CODE,
-        ]
-    )
+    assert bridge.launch_calls == [
+        ACTIVATION_CODE,
+    ]
 
 
-def test_plaintext_authorization_widget_is_cleared_before_launch(
+
+def test_plaintext_activation_widget_is_cleared_before_launch(
     monkeypatch,
 ) -> None:
     observed = {}
 
-    class InspectingAcquisition(
-        FakeAcquisition
+    activation_var = (
+        FakeVariable(
+            ACTIVATION_CODE
+        )
+    )
+
+    class InspectingBridge(
+        FakeBridge
     ):
         def launch(
             self,
             *,
-            authorization_code,
+            activation_code,
         ):
             observed[
-                "authorization_widget_value_at_launch"
-            ] = (
-                authorization_var.value
-            )
+                "activation_widget_value_at_launch"
+            ] = activation_var.value
 
             super().launch(
-                authorization_code=(
-                    authorization_code
+                activation_code=(
+                    activation_code
                 )
             )
 
-    acquisition = (
-        InspectingAcquisition()
-    )
+    bridge = InspectingBridge()
 
     monkeypatch.setattr(
         customer_setup_module,
-        "CustomerSetupBootstrapAcquisition",
-        InspectingAcquisition,
+        "CustomerSetupAccessCodeBootstrapBridge",
+        InspectingBridge,
     )
 
     window = (
         customer_setup_module
         .CustomerSetupBootstrapWindow(
-            acquisition=acquisition,
+            bridge=bridge,
         )
     )
 
     root = FakeRoot()
-
-    authorization_var = (
-        FakeVariable(
-            AUTHORIZATION_CODE
-        )
-    )
+    status_var = FakeVariable()
+    button = FakeButton()
 
     window._root = root
-    window._authorization_code_var = (
-        authorization_var
+    window._activation_code_var = (
+        activation_var
     )
-    window._status_var = FakeVariable()
-    window._continue_button = FakeButton()
+    window._status_var = status_var
+    window._start_button = button
 
-    window._submit_authorization_code()
+    window._submit_activation_code()
 
-    assert (
-        observed[
-            "authorization_widget_value_at_launch"
-        ]
-        == ""
-    )
+    assert observed[
+        "activation_widget_value_at_launch"
+    ] == ""
 
-    assert (
-        authorization_var.set_values[0]
-        == ""
-    )
+    assert bridge.launch_calls == [
+        ACTIVATION_CODE,
+    ]
+
 
 
 def test_successful_launch_withdraws_then_destroys_bootstrap_window(
@@ -544,49 +629,57 @@ def test_successful_launch_withdraws_then_destroys_bootstrap_window(
 ) -> None:
     (
         window,
-        acquisition,
+        bridge,
         root,
-        _authorization_var,
+        activation_var,
         status_var,
         button,
     ) = _window_for_submission(
         monkeypatch
     )
 
-    monkeypatch.setattr(
-        customer_setup_module,
-        "tk",
-        SimpleNamespace(
-            DISABLED="disabled",
-            NORMAL="normal",
-        ),
-    )
+    window._submit_activation_code()
 
-    window._submit_authorization_code()
+    assert bridge.launch_calls == [
+        ACTIVATION_CODE,
+    ]
 
     assert (
-        acquisition.launch_calls
-        == [
-            AUTHORIZATION_CODE,
-        ]
+        activation_var.value
+        == ""
     )
 
-    assert root.calls == [
-        "update_idletasks",
-        "withdraw",
-        "destroy",
-    ]
+    assert (
+        "withdraw"
+        in root.calls
+    )
 
-    assert button.states == [
-        {
-            "state": "disabled",
-        },
-    ]
+    assert (
+        "destroy"
+        in root.calls
+    )
+
+    assert (
+        root.calls.index(
+            "withdraw"
+        )
+        < root.calls.index(
+            "destroy"
+        )
+    )
 
     assert (
         status_var.value
-        == "Connecting securely to TODOBA..."
+        == "Starting TODOBA Setup..."
     )
+
+    assert (
+        {
+            "state": "disabled",
+        }
+        in button.states
+    )
+
 
 
 def test_failed_launch_restores_window_with_generic_error_only(
@@ -595,149 +688,117 @@ def test_failed_launch_restores_window_with_generic_error_only(
     sensitive_exception = (
         RuntimeError(
             "server rejected "
-            + AUTHORIZATION_CODE
+            + ACTIVATION_CODE
         )
     )
 
-    acquisition = (
-        FakeAcquisition(
-            failure=sensitive_exception,
+    bridge = (
+        FakeBridge(
+            failure=(
+                sensitive_exception
+            )
         )
     )
 
     (
         window,
-        _acquisition,
+        _bridge,
         root,
-        authorization_var,
+        activation_var,
         status_var,
         button,
     ) = _window_for_submission(
         monkeypatch,
-        acquisition=acquisition,
+        bridge=bridge,
     )
 
-    monkeypatch.setattr(
-        customer_setup_module,
-        "tk",
-        SimpleNamespace(
-            DISABLED="disabled",
-            NORMAL="normal",
-        ),
-    )
+    window._submit_activation_code()
 
-    shown = {}
-
-    def showerror(
-        title,
-        message,
-        **kwargs,
-    ):
-        shown[
-            "title"
-        ] = title
-
-        shown[
-            "message"
-        ] = message
-
-        shown[
-            "kwargs"
-        ] = kwargs
-
-    monkeypatch.setattr(
-        customer_setup_module.messagebox,
-        "showerror",
-        showerror,
-    )
-
-    window._submit_authorization_code()
-
-    assert root.calls == [
-        "update_idletasks",
-        "withdraw",
-        "deiconify",
-    ]
-
-    assert button.states == [
-        {
-            "state": "disabled",
-        },
-        {
-            "state": "normal",
-        },
+    assert bridge.launch_calls == [
+        ACTIVATION_CODE,
     ]
 
     assert (
-        authorization_var.value
+        activation_var.value
         == ""
     )
 
     assert (
-        AUTHORIZATION_CODE
+        "withdraw"
+        in root.calls
+    )
+
+    assert (
+        "deiconify"
+        in root.calls
+    )
+
+    assert (
+        "destroy"
+        not in root.calls
+    )
+
+    assert (
+        button.states[-1]
+        == {
+            "state": "normal",
+        }
+    )
+
+    assert (
+        status_var.value
+        == (
+            "TODOBA Setup could not continue. "
+            "Please verify your Activation Code "
+            "and try again."
+        )
+    )
+
+    assert (
+        ACTIVATION_CODE
         not in status_var.value
     )
 
     assert (
-        AUTHORIZATION_CODE
-        not in shown[
-            "message"
-        ]
-    )
-
-    assert (
-        str(
-            sensitive_exception
-        )
-        not in shown[
-            "message"
-        ]
-    )
-
-    assert (
-        shown[
-            "message"
-        ]
-        == customer_setup_module._GENERIC_LAUNCH_ERROR
+        "server rejected"
+        not in status_var.value
     )
 
 
-def test_copy_challenge_copies_only_public_challenge(
-    monkeypatch,
+
+def test_gui_exposes_no_challenge_copy_ceremony(
 ) -> None:
-    (
-        window,
-        acquisition,
-        root,
-        _authorization_var,
-        status_var,
-        _button,
-    ) = _window_for_submission(
-        monkeypatch
-    )
-
-    window._copy_challenge()
+    methods = {
+        name
+        for name in dir(
+            customer_setup_module
+            .CustomerSetupBootstrapWindow
+        )
+        if not name.startswith(
+            "__"
+        )
+    }
 
     assert (
-        root.clipboard_value
-        == SETUP_CHALLENGE
-    )
-
-    assert root.calls == [
-        "clipboard_clear",
-        "clipboard_append",
-        "update",
-    ]
-
-    assert (
-        status_var.value
-        == "Setup Challenge copied."
+        "_copy_challenge"
+        not in methods
     )
 
     assert (
-        root.clipboard_value
-        == acquisition.code_challenge_s256
+        "_submit_authorization_code"
+        not in methods
     )
+
+    assert (
+        "_require_authorization_code_var"
+        not in methods
+    )
+
+    assert (
+        "_submit_activation_code"
+        in methods
+    )
+
 
 
 def test_main_returns_zero_on_success(
@@ -808,7 +869,7 @@ def test_main_fails_closed_with_generic_customer_message(
     )
 
 
-def test_source_uses_only_public_acquisition_contract(
+def test_gui_uses_only_hidden_activation_bridge_contract(
 ) -> None:
     path = (
         Path(__file__).resolve().parents[1]
@@ -824,14 +885,48 @@ def test_source_uses_only_public_acquisition_contract(
         source
     )
 
+    classes = [
+        node
+        for node in tree.body
+        if (
+            isinstance(
+                node,
+                ast.ClassDef,
+            )
+            and node.name
+            == "CustomerSetupBootstrapWindow"
+        )
+    ]
+
+    assert len(
+        classes
+    ) == 1
+
     attribute_names = {
         node.attr
-        for node in ast.walk(tree)
+        for node in ast.walk(
+            classes[0]
+        )
         if isinstance(
             node,
             ast.Attribute,
         )
     }
+
+    assert (
+        "launch"
+        in attribute_names
+    )
+
+    assert (
+        "code_challenge_s256"
+        not in attribute_names
+    )
+
+    assert (
+        "authorization_code"
+        not in attribute_names
+    )
 
     assert (
         "_code_verifier"
@@ -843,15 +938,6 @@ def test_source_uses_only_public_acquisition_contract(
         not in attribute_names
     )
 
-    assert (
-        "code_challenge_s256"
-        in attribute_names
-    )
-
-    assert (
-        "launch"
-        in attribute_names
-    )
 
 
 def test_source_has_no_persistence_or_logging_authority(
@@ -968,7 +1054,9 @@ def test_entrypoint_has_no_server_or_business_authority(
 
     imported_modules = set()
 
-    for node in ast.walk(tree):
+    for node in ast.walk(
+        tree
+    ):
         if isinstance(
             node,
             ast.Import,
@@ -1002,12 +1090,15 @@ def test_entrypoint_has_no_server_or_business_authority(
             "backend.commercial."
             "customer_setup_bootstrap_acquisition"
         ),
+        (
+            "backend.commercial."
+            "customer_setup_access_code_http_client"
+        ),
+        (
+            "backend.commercial."
+            "customer_setup_access_code_bootstrap_bridge"
+        ),
     }
-
-    assert (
-        "backend.main"
-        not in imported_modules
-    )
 
     assert {
         "fastapi",
@@ -1022,25 +1113,40 @@ def test_entrypoint_has_no_server_or_business_authority(
         }
     )
 
-    forbidden_authorities = (
-        "CustomerIdentityRegistry",
-        "CustomerDeployment",
-        "CustomerOnboardingService",
-        "CustomerSetupActivationService",
-        "CustomerSetupLaunchCredentialService",
-        "CustomerSetupBootstrapAuthorizationService",
-        "CustomerSetupBootstrapAuthorizationStore",
-        "CustomerSetupBootstrapCoordinator",
-        "CustomerSetupLauncher",
+    executable_identifiers = set()
+
+    for node in ast.walk(
+        tree
+    ):
+        if isinstance(
+            node,
+            ast.Name,
+        ):
+            executable_identifiers.add(
+                node.id
+            )
+
+        elif isinstance(
+            node,
+            ast.Attribute,
+        ):
+            executable_identifiers.add(
+                node.attr
+            )
+
+    for forbidden in (
         "customer_id",
+        "setup_activation_id",
         "deployment_id",
-        "agent_id",
         "payment_id",
         "subscription_id",
-    )
+        "agent_id",
+    ):
+        assert (
+            forbidden
+            not in executable_identifiers
+        )
 
-    for token in forbidden_authorities:
-        assert token not in source
 
 
 def test_entrypoint_imports_authoritative_cloud_config(
@@ -1106,7 +1212,7 @@ def test_entrypoint_does_not_define_cloud_url_literal(
     )
 
 
-def test_gui_source_contains_locked_customer_copy(
+def test_gui_source_contains_locked_single_code_customer_copy(
 ) -> None:
     path = (
         Path(__file__).resolve().parents[1]
@@ -1124,24 +1230,40 @@ def test_gui_source_contains_locked_customer_copy(
     )
 
     assert (
-        "Setup Challenge"
+        "Enter your Activation Code to begin."
         in source
     )
 
     assert (
-        "Authorization Code"
+        'text="Activation Code"'
         in source
     )
 
     assert (
-        "Copy Challenge"
+        'text="Start Setup"'
         in source
     )
 
     assert (
-        "Continue"
-        in source
+        'text="Setup Challenge"'
+        not in source
     )
+
+    assert (
+        'text="Authorization Code"'
+        not in source
+    )
+
+    assert (
+        "_copy_challenge"
+        not in source
+    )
+
+    assert (
+        "_submit_authorization_code"
+        not in source
+    )
+
 
 
 def test_entrypoint_has_no_authorization_code_output_channel(

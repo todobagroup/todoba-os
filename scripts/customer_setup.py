@@ -1,24 +1,22 @@
 """
 TODOBA production Windows Customer Setup entrypoint.
 
-Customer-visible bootstrap flow:
+Customer-visible start flow:
 
     Welcome to TODOBA Trading
-        -> generate customer-side PKCE material
-        -> expose only code_challenge_s256
-        -> receive one-time authorization_code
-        -> CustomerSetupBootstrapAcquisition.launch()
+        -> enter one Activation Code
+        -> Start Setup
+        -> hidden activation/bootstrap bridge
         -> existing Coordinator
         -> existing Launcher
         -> existing MT5 discovery/install GUI
 
 Security boundaries:
-- the PKCE code_verifier remains private to
+- customer-visible Setup does not expose PKCE challenge material
+- internal bootstrap authorization codes are never customer-visible
+- the private PKCE verifier remains inside
   CustomerSetupBootstrapAcquisition
-- this entrypoint never reads or persists the verifier
-- authorization_code exists only in GUI memory long enough
-  to hand it to the acquisition owner
-- no customer, deployment, payment, activation, or
+- no customer, deployment, payment, entitlement, or
   launch-credential authority is owned here
 """
 
@@ -37,6 +35,12 @@ from backend.config import (
 from backend.commercial.customer_setup_bootstrap_acquisition import (
     CustomerSetupBootstrapAcquisition,
 )
+from backend.commercial.customer_setup_access_code_bootstrap_bridge import (
+    CustomerSetupAccessCodeBootstrapBridge,
+)
+from backend.commercial.customer_setup_access_code_http_client import (
+    CustomerSetupAccessCodeHttpClient,
+)
 
 
 WINDOW_TITLE = "TODOBA Trading AI Setup"
@@ -44,17 +48,6 @@ WELCOME_HEADLINE = "Welcome to TODOBA Trading"
 
 _WINDOW_WIDTH = 640
 _WINDOW_HEIGHT = 440
-
-_BOOTSTRAP_INSTRUCTIONS = (
-    "To securely start TODOBA Setup, copy the Setup Challenge "
-    "below and provide it to TODOBA support. "
-    "Then enter the one-time Authorization Code you receive."
-)
-
-_GENERIC_LAUNCH_ERROR = (
-    "TODOBA Setup could not continue. "
-    "Please verify the Authorization Code and try again."
-)
 
 _GENERIC_STARTUP_ERROR = (
     "TODOBA Setup could not start. "
@@ -64,358 +57,312 @@ _GENERIC_STARTUP_ERROR = (
 
 class CustomerSetupBootstrapWindow:
     """
-    Minimal pre-bootstrap customer window.
+    Customer-facing TODOBA Setup start window.
 
-    Only the public PKCE challenge is displayed.
+    The customer enters one Activation Code.
+
+    PKCE challenge material and the internal bootstrap authorization
+    ceremony remain hidden behind CustomerSetupAccessCodeBootstrapBridge.
     """
 
     __slots__ = (
-        "_acquisition",
+        "_bridge",
         "_root",
-        "_authorization_code_var",
+        "_activation_code_var",
         "_status_var",
-        "_continue_button",
+        "_start_button",
     )
 
     def __init__(
         self,
         *,
-        acquisition: CustomerSetupBootstrapAcquisition,
+        bridge: CustomerSetupAccessCodeBootstrapBridge,
     ) -> None:
         if not isinstance(
-            acquisition,
-            CustomerSetupBootstrapAcquisition,
+            bridge,
+            CustomerSetupAccessCodeBootstrapBridge,
         ):
             raise TypeError(
-                "acquisition must be "
-                "CustomerSetupBootstrapAcquisition."
+                "bridge must be "
+                "CustomerSetupAccessCodeBootstrapBridge."
             )
 
-        self._acquisition = (
-            acquisition
-        )
+        self._bridge = bridge
 
         self._root = None
-        self._authorization_code_var = None
+        self._activation_code_var = None
         self._status_var = None
-        self._continue_button = None
+        self._start_button = None
 
     def build_window(
-        self,
-    ):
-        if self._root is not None:
-            raise RuntimeError(
-                "Bootstrap window is already built."
+            self,
+        ) -> None:
+            root = tk.Tk()
+
+            self._root = root
+
+            root.title(
+                WINDOW_TITLE
             )
 
-        root = tk.Tk()
+            root.geometry(
+                f"{_WINDOW_WIDTH}x{_WINDOW_HEIGHT}"
+            )
 
-        root.title(
-            WINDOW_TITLE
-        )
+            root.resizable(
+                False,
+                False,
+            )
 
-        root.geometry(
-            f"{_WINDOW_WIDTH}x{_WINDOW_HEIGHT}"
-        )
-
-        root.resizable(
-            False,
-            False,
-        )
-
-        root.configure(
-            padx=28,
-            pady=24,
-        )
-
-        self._root = root
-
-        headline = tk.Label(
-            root,
-            text=WELCOME_HEADLINE,
-            font=(
-                "Segoe UI",
-                20,
-                "bold",
-            ),
-        )
-
-        headline.pack(
-            pady=(
+            root.columnconfigure(
                 0,
-                14,
-            ),
-        )
+                weight=1,
+            )
 
-        instructions = tk.Label(
-            root,
-            text=_BOOTSTRAP_INSTRUCTIONS,
-            font=(
-                "Segoe UI",
-                10,
-            ),
-            justify="left",
-            wraplength=570,
-        )
+            content = tk.Frame(
+                root,
+                padx=42,
+                pady=36,
+            )
 
-        instructions.pack(
-            anchor="w",
-            pady=(
+            content.grid(
+                row=0,
+                column=0,
+                sticky="nsew",
+            )
+
+            content.columnconfigure(
                 0,
-                16,
-            ),
-        )
+                weight=1,
+            )
 
-        challenge_label = tk.Label(
-            root,
-            text="Setup Challenge",
-            font=(
-                "Segoe UI",
-                10,
-                "bold",
-            ),
-        )
+            headline = tk.Label(
+                content,
+                text=WELCOME_HEADLINE,
+                font=(
+                    "Segoe UI",
+                    20,
+                    "bold",
+                ),
+            )
 
-        challenge_label.pack(
-            anchor="w",
-        )
+            headline.grid(
+                row=0,
+                column=0,
+                sticky="w",
+                pady=(
+                    0,
+                    18,
+                ),
+            )
 
-        challenge_var = tk.StringVar(
-            master=root,
-            value=(
-                self._acquisition
-                .code_challenge_s256
-            ),
-        )
+            instructions = tk.Label(
+                content,
+                text=(
+                    "Enter your Activation Code to begin."
+                ),
+                font=(
+                    "Segoe UI",
+                    11,
+                ),
+                anchor="w",
+                justify="left",
+            )
 
-        challenge_entry = tk.Entry(
-            root,
-            textvariable=challenge_var,
-            state="readonly",
-            font=(
-                "Consolas",
-                10,
-            ),
-            width=72,
-        )
+            instructions.grid(
+                row=1,
+                column=0,
+                sticky="ew",
+                pady=(
+                    0,
+                    24,
+                ),
+            )
 
-        challenge_entry.pack(
-            fill="x",
-            pady=(
-                5,
-                8,
-            ),
-        )
+            activation_label = tk.Label(
+                content,
+                text="Activation Code",
+                font=(
+                    "Segoe UI",
+                    10,
+                    "bold",
+                ),
+                anchor="w",
+            )
 
-        copy_button = tk.Button(
-            root,
-            text="Copy Challenge",
-            command=self._copy_challenge,
-            width=18,
-        )
+            activation_label.grid(
+                row=2,
+                column=0,
+                sticky="w",
+                pady=(
+                    0,
+                    7,
+                ),
+            )
 
-        copy_button.pack(
-            anchor="w",
-            pady=(
-                0,
-                18,
-            ),
-        )
-
-        authorization_label = tk.Label(
-            root,
-            text="Authorization Code",
-            font=(
-                "Segoe UI",
-                10,
-                "bold",
-            ),
-        )
-
-        authorization_label.pack(
-            anchor="w",
-        )
-
-        self._authorization_code_var = (
-            tk.StringVar(
+            activation_code_var = tk.StringVar(
                 master=root,
                 value="",
             )
-        )
 
-        authorization_entry = tk.Entry(
-            root,
-            textvariable=(
-                self._authorization_code_var
-            ),
-            font=(
-                "Consolas",
-                10,
-            ),
-            width=72,
-        )
+            self._activation_code_var = (
+                activation_code_var
+            )
 
-        authorization_entry.pack(
-            fill="x",
-            pady=(
-                5,
-                10,
-            ),
-        )
-
-        authorization_entry.focus_set()
-
-        self._status_var = (
-            tk.StringVar(
-                master=root,
-                value=(
-                    "Your private verification key "
-                    "never leaves this Setup."
+            activation_entry = tk.Entry(
+                content,
+                textvariable=(
+                    activation_code_var
+                ),
+                font=(
+                    "Segoe UI",
+                    11,
                 ),
             )
-        )
 
-        status_label = tk.Label(
-            root,
-            textvariable=(
-                self._status_var
-            ),
-            font=(
-                "Segoe UI",
-                9,
-            ),
-            justify="left",
-            wraplength=570,
-        )
+            activation_entry.grid(
+                row=3,
+                column=0,
+                sticky="ew",
+                pady=(
+                    0,
+                    22,
+                ),
+            )
 
-        status_label.pack(
-            anchor="w",
-            pady=(
-                0,
-                16,
-            ),
-        )
-
-        self._continue_button = (
-            tk.Button(
-                root,
-                text="Continue",
+            start_button = tk.Button(
+                content,
+                text="Start Setup",
                 command=(
-                    self._submit_authorization_code
+                    self._submit_activation_code
                 ),
                 width=18,
-                default="active",
             )
-        )
 
-        self._continue_button.pack(
-            anchor="e",
-        )
+            self._start_button = (
+                start_button
+            )
 
-        root.bind(
-            "<Return>",
-            lambda _event: (
-                self._submit_authorization_code()
-            ),
-        )
+            start_button.grid(
+                row=4,
+                column=0,
+                sticky="w",
+            )
 
-        return root
+            status_var = tk.StringVar(
+                master=root,
+                value="",
+            )
+
+            self._status_var = (
+                status_var
+            )
+
+            status_label = tk.Label(
+                content,
+                textvariable=status_var,
+                font=(
+                    "Segoe UI",
+                    9,
+                ),
+                anchor="w",
+                justify="left",
+                wraplength=540,
+            )
+
+            status_label.grid(
+                row=5,
+                column=0,
+                sticky="ew",
+                pady=(
+                    18,
+                    0,
+                ),
+            )
+
+            root.bind(
+                "<Return>",
+                lambda event: (
+                    self._submit_activation_code()
+                ),
+            )
+
+            activation_entry.focus_set()
+
+            return root
 
     def run(
         self,
     ) -> None:
-        root = self.build_window()
+        root = (
+            self.build_window()
+        )
 
         root.mainloop()
 
-    def _copy_challenge(
+    def _submit_activation_code(
         self,
     ) -> None:
         root = self._require_root()
-
-        root.clipboard_clear()
-
-        root.clipboard_append(
-            self._acquisition
-            .code_challenge_s256
+        activation_code_var = (
+            self._require_activation_code_var()
+        )
+        status = (
+            self._require_status_var()
+        )
+        start_button = (
+            self._require_start_button()
         )
 
-        root.update()
-
-        status = self._require_status_var()
-
-        status.set(
-            "Setup Challenge copied."
-        )
-
-    def _submit_authorization_code(
-        self,
-    ) -> None:
-        root = self._require_root()
-
-        authorization_var = (
-            self._require_authorization_code_var()
-        )
-
-        status = self._require_status_var()
-
-        button = (
-            self._require_continue_button()
-        )
-
-        authorization_code = (
-            authorization_var
+        activation_code = (
+            activation_code_var
             .get()
             .strip()
         )
 
-        if not authorization_code:
+        if not activation_code:
             status.set(
-                "Enter the Authorization Code "
-                "to continue."
+                "Enter your Activation Code "
+                "to begin."
             )
 
             return
 
-        # Remove the short-lived plaintext code from the
-        # visible widget before crossing the bootstrap boundary.
-        authorization_var.set(
+        # Remove the plaintext customer code from the visible
+        # widget before crossing the hidden activation boundary.
+        activation_code_var.set(
             ""
         )
 
-        button.configure(
-            state=tk.DISABLED
+        start_button.configure(
+            state="disabled"
         )
 
         status.set(
-            "Connecting securely to TODOBA..."
+            "Starting TODOBA Setup..."
         )
 
         root.update_idletasks()
-
         root.withdraw()
 
         try:
-            self._acquisition.launch(
-                authorization_code=(
-                    authorization_code
+            self._bridge.launch(
+                activation_code=(
+                    activation_code
                 ),
             )
+
         except Exception:
             root.deiconify()
 
-            button.configure(
-                state=tk.NORMAL
+            start_button.configure(
+                state="normal"
             )
 
             status.set(
-                _GENERIC_LAUNCH_ERROR
-            )
-
-            messagebox.showerror(
-                WINDOW_TITLE,
-                _GENERIC_LAUNCH_ERROR,
-                parent=root,
+                "TODOBA Setup could not continue. "
+                "Please verify your Activation Code "
+                "and try again."
             )
 
             return
@@ -427,44 +374,44 @@ class CustomerSetupBootstrapWindow:
     ):
         if self._root is None:
             raise RuntimeError(
-                "Bootstrap window is not built."
+                "Customer Setup window "
+                "is not built."
             )
 
         return self._root
 
-    def _require_authorization_code_var(
+    def _require_activation_code_var(
         self,
     ):
-        if (
-            self._authorization_code_var
-            is None
-        ):
+        if self._activation_code_var is None:
             raise RuntimeError(
-                "Authorization Code input "
+                "Activation Code input "
                 "is not built."
             )
 
-        return self._authorization_code_var
+        return self._activation_code_var
 
     def _require_status_var(
         self,
     ):
         if self._status_var is None:
             raise RuntimeError(
-                "Bootstrap status is not built."
+                "Status output is not built."
             )
 
         return self._status_var
 
-    def _require_continue_button(
+    def _require_start_button(
         self,
     ):
-        if self._continue_button is None:
+        if self._start_button is None:
             raise RuntimeError(
-                "Continue button is not built."
+                "Start Setup button "
+                "is not built."
             )
 
-        return self._continue_button
+        return self._start_button
+
 
 
 def _resolve_roaming_appdata_path(
@@ -507,13 +454,33 @@ def run_production_customer_setup(
         )
     )
 
+    access_code_client = (
+        CustomerSetupAccessCodeHttpClient(
+            setup_base_url=(
+                TODOBA_CLOUD_BASE_URL
+            ),
+        )
+    )
+
+    bridge = (
+        CustomerSetupAccessCodeBootstrapBridge(
+            access_code_client=(
+                access_code_client
+            ),
+            acquisition=(
+                acquisition
+            ),
+        )
+    )
+
     window = (
         CustomerSetupBootstrapWindow(
-            acquisition=acquisition,
+            bridge=bridge
         )
     )
 
     window.run()
+
 
 
 def main(

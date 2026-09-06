@@ -53,7 +53,10 @@ _PREPARING_MESSAGE = (
     'Preparing TODOBA Trading AI for this MetaTrader 5 account. When ready, select Continue.'
 )
 _INSTALLED_MESSAGE = (
-    'TODOBA Trading AI was installed successfully.'
+    'TODOBA Trading AI was installed successfully.\n\n'
+    'If you use MetaTrader VPS, migrate this MetaTrader 5 '
+    'terminal after installation so TODOBA Trading AI can '
+    'run on the VPS.'
 )
 _GENERIC_ERROR_MESSAGE = (
     'Setup could not complete this step. Please try again.'

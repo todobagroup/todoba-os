@@ -701,7 +701,7 @@ def test_installed_enables_finish_only(
 
     assert (
         shell._status_var.get()
-        == 'TODOBA Trading AI was installed successfully.'
+        == 'TODOBA Trading AI was installed successfully.\n\nIf you use MetaTrader VPS, migrate this MetaTrader 5 terminal after installation so TODOBA Trading AI can run on the VPS.'
     )
     assert (
         shell._installation_list.cget(
@@ -1085,4 +1085,16 @@ def test_recoverable_setup_error_uses_retry(
             "Setup could not complete this step. "
             "Please try again."
         )
+    )
+
+
+
+def test_installed_message_includes_metatrader_vps_guidance():
+    from backend.commercial import customer_setup_gui_shell
+
+    assert customer_setup_gui_shell._INSTALLED_MESSAGE == (
+        "TODOBA Trading AI was installed successfully.\n\n"
+        "If you use MetaTrader VPS, migrate this MetaTrader 5 "
+        "terminal after installation so TODOBA Trading AI can "
+        "run on the VPS."
     )

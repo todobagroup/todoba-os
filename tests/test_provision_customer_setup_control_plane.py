@@ -51,6 +51,10 @@ ACTIVATION_FILENAME = (
 
 ACCESS_CODE_FILENAME = "customer_setup_access_codes.json"
 
+VPS_CONNECT_GRANT_FILENAME = (
+    "customer_vps_connect_grants.json"
+)
+
 HANDOFF_FILENAME = (
     "customer_setup_handoffs.json"
 )
@@ -239,6 +243,7 @@ def test_first_provisioning_creates_only_required_ready_state(
         REGISTRATION_FILENAME,
         ACTIVATION_FILENAME,
         ACCESS_CODE_FILENAME,
+        VPS_CONNECT_GRANT_FILENAME,
         HANDOFF_FILENAME,
         CONTINUATION_FILENAME,
         LAUNCH_CREDENTIAL_FILENAME,
@@ -478,6 +483,7 @@ def test_retry_is_byte_for_byte_and_queue_idempotent(
         REGISTRATION_FILENAME,
         ACTIVATION_FILENAME,
         ACCESS_CODE_FILENAME,
+        VPS_CONNECT_GRANT_FILENAME,
         HANDOFF_FILENAME,
         CONTINUATION_FILENAME,
         LAUNCH_CREDENTIAL_FILENAME,
@@ -578,6 +584,11 @@ def test_provisioner_has_store_only_commercial_surface() -> None:
         ),
         (
             "backend.commercial."
+            "customer_vps_connect_grant_service",
+            "CustomerVPSConnectGrantStore",
+        ),
+        (
+            "backend.commercial."
             "customer_setup_activation_service",
             "CustomerSetupActivationStore",
         ),
@@ -607,7 +618,7 @@ def test_provisioner_has_store_only_commercial_surface() -> None:
         called_attributes.count(
             "initialize_empty"
         )
-        == 9
+        == 10
     )
 
     forbidden_business_actions = {

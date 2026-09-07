@@ -9,6 +9,7 @@ package-build flow:
 - customer_registrations.json
 - customer_setup_activations.json
 - customer_setup_access_codes.json
+- customer_vps_connect_grants.json
 - customer_setup_handoffs.json
 - customer_setup_launch_credentials.json
 - customer_setup_bootstrap_authorizations.json
@@ -56,6 +57,9 @@ from backend.commercial.customer_setup_activation_service import (
 from backend.commercial.customer_setup_access_code_service import (
     CustomerSetupAccessCodeStore,
 )
+from backend.commercial.customer_vps_connect_grant_service import (
+    CustomerVPSConnectGrantStore,
+)
 from backend.commercial.customer_setup_build_continuation_service import (
     CustomerSetupBuildContinuationStore,
 )
@@ -84,6 +88,10 @@ _CUSTOMER_SETUP_ACTIVATION_FILENAME = (
 
 _CUSTOMER_SETUP_ACCESS_CODE_FILENAME = (
     "customer_setup_access_codes.json"
+)
+
+_CUSTOMER_VPS_CONNECT_GRANT_FILENAME = (
+    "customer_vps_connect_grants.json"
 )
 
 _CUSTOMER_SETUP_HANDOFF_FILENAME = (
@@ -170,6 +178,11 @@ def provision_customer_setup_control_plane(
     access_code_storage_path = (
         commercial_root
         / _CUSTOMER_SETUP_ACCESS_CODE_FILENAME
+    )
+
+    vps_connect_grant_storage_path = (
+        commercial_root
+        / _CUSTOMER_VPS_CONNECT_GRANT_FILENAME
     )
 
     handoff_storage_path = (
@@ -286,6 +299,23 @@ def provision_customer_setup_control_plane(
 
     if not access_code_store.is_ready():
         access_code_store.initialize_empty()
+
+    vps_connect_grant_store = (
+        CustomerVPSConnectGrantStore(
+            vps_connect_grant_storage_path
+        )
+    )
+
+    if vps_connect_grant_storage_path.exists():
+        vps_connect_grant_store.open_existing()
+    else:
+        vps_connect_grant_store.initialize_empty()
+
+    if not vps_connect_grant_store.is_ready():
+        raise RuntimeError(
+            "Customer VPS Connect grant store did not "
+            "become ready."
+        )
 
     if not handoff_store.is_ready():
         handoff_store.initialize_empty()

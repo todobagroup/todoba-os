@@ -402,3 +402,156 @@ def test_customer_id_is_not_an_issue_input(
         "self",
         "setup_activation_id",
     }
+
+def test_authorize_bound_returns_bound_identity(
+    tmp_path,
+) -> None:
+    activation_store, access_store, service = (
+        _build_service(
+            tmp_path
+        )
+    )
+
+    issued = service.issue(
+        setup_activation_id=(
+            _ACTIVATION_ID
+        )
+    )
+
+    activation_store.bind(
+        setup_activation_id=(
+            _ACTIVATION_ID
+        ),
+        deployment_id=(
+            "deployment-001"
+        ),
+    )
+
+    authorized = service.authorize_bound(
+        activation_code=(
+            issued.activation_code
+        )
+    )
+
+    assert (
+        authorized.setup_activation_id
+        == _ACTIVATION_ID
+    )
+    assert authorized.customer_id == _CUSTOMER_ID
+    assert (
+        authorized.deployment_id
+        == "deployment-001"
+    )
+
+    stored = access_store.get(
+        access_code_id=(
+            issued.access_code_id
+        )
+    )
+
+    assert stored is not None
+    assert (
+        stored.status
+        is CustomerSetupAccessCodeStatus.ACTIVE
+    )
+
+
+def test_authorize_bound_rejects_active_activation(
+    tmp_path,
+) -> None:
+    _, _, service = _build_service(
+        tmp_path
+    )
+
+    issued = service.issue(
+        setup_activation_id=(
+            _ACTIVATION_ID
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="bound",
+    ):
+        service.authorize_bound(
+            activation_code=(
+                issued.activation_code
+            )
+        )
+
+
+def test_existing_authorize_rejects_bound_activation(
+    tmp_path,
+) -> None:
+    activation_store, _, service = (
+        _build_service(
+            tmp_path
+        )
+    )
+
+    issued = service.issue(
+        setup_activation_id=(
+            _ACTIVATION_ID
+        )
+    )
+
+    activation_store.bind(
+        setup_activation_id=(
+            _ACTIVATION_ID
+        ),
+        deployment_id=(
+            "deployment-001"
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="not active",
+    ):
+        service.authorize(
+            activation_code=(
+                issued.activation_code
+            )
+        )
+
+
+def test_authorize_bound_rejects_wrong_code(
+    tmp_path,
+) -> None:
+    activation_store, _, service = (
+        _build_service(
+            tmp_path
+        )
+    )
+
+    issued = service.issue(
+        setup_activation_id=(
+            _ACTIVATION_ID
+        )
+    )
+
+    activation_store.bind(
+        setup_activation_id=(
+            _ACTIVATION_ID
+        ),
+        deployment_id=(
+            "deployment-001"
+        ),
+    )
+
+    wrong = (
+        issued.activation_code[:-1]
+        + (
+            "A"
+            if issued.activation_code[-1] != "A"
+            else "B"
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="access code is invalid",
+    ):
+        service.authorize_bound(
+            activation_code=wrong
+        )

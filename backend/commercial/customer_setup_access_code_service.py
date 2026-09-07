@@ -186,6 +186,43 @@ class CustomerSetupAccessCodeAuthorization:
     customer_id: str
 
 
+
+@dataclass(
+    frozen=True,
+)
+class CustomerSetupBoundAccessCodeAuthorization:
+    """
+    Internal authorization for one already-BOUND Setup right.
+
+    This result is server-derived only. The customer never
+    supplies deployment identity.
+    """
+
+    setup_activation_id: str
+    customer_id: str
+    deployment_id: str
+
+    def __post_init__(
+        self,
+    ) -> None:
+        for name in (
+            "setup_activation_id",
+            "customer_id",
+            "deployment_id",
+        ):
+            object.__setattr__(
+                self,
+                name,
+                CustomerSetupAccessCodeRecord
+                ._normalize_required_string(
+                    getattr(
+                        self,
+                        name,
+                    ),
+                    name=name,
+                ),
+            )
+
 class CustomerSetupAccessCodeStore:
     """
     Durable owner of non-secret access-code verifier state.
@@ -981,6 +1018,135 @@ class CustomerSetupAccessCodeService:
                 activation.customer_id
             ),
         )
+
+
+    def authorize_bound(
+        self,
+        *,
+        activation_code: str,
+    ) -> CustomerSetupBoundAccessCodeAuthorization:
+        """
+        Verify one customer Activation Code against an
+        already-BOUND Setup Activation.
+
+        This path is intentionally separate from authorize():
+        - authorize() remains ACTIVE-only for Setup bootstrap
+        - authorize_bound() is BOUND-only
+        - no code or activation state is mutated here
+        - deployment identity is always server-derived
+        """
+
+        normalized_code = (
+            self._normalize_activation_code(
+                activation_code
+            )
+        )
+
+        access_code_id = (
+            self._parse_access_code_id(
+                normalized_code
+            )
+        )
+
+        record = self._access_code_store.get(
+            access_code_id=(
+                access_code_id
+            )
+        )
+
+        if (
+            record is None
+            or record.status
+            is not CustomerSetupAccessCodeStatus.ACTIVE
+        ):
+            raise ValueError(
+                "Customer setup access code is invalid."
+            )
+
+        supplied_sha256 = (
+            self._derive_code_sha256(
+                normalized_code
+            )
+        )
+
+        if not secrets.compare_digest(
+            record.code_sha256,
+            supplied_sha256,
+        ):
+            raise ValueError(
+                "Customer setup access code is invalid."
+            )
+
+        activation = self._require_bound_activation(
+            record.setup_activation_id
+        )
+
+        deployment_id = getattr(
+            activation,
+            "deployment_id",
+            None,
+        )
+
+        if (
+            not isinstance(
+                deployment_id,
+                str,
+            )
+            or not deployment_id
+            or deployment_id.strip()
+            != deployment_id
+        ):
+            raise RuntimeError(
+                "BOUND customer setup activation "
+                "has invalid deployment identity."
+            )
+
+        return CustomerSetupBoundAccessCodeAuthorization(
+            setup_activation_id=(
+                activation.setup_activation_id
+            ),
+            customer_id=(
+                activation.customer_id
+            ),
+            deployment_id=(
+                deployment_id
+            ),
+        )
+
+    def _require_bound_activation(
+        self,
+        setup_activation_id: str,
+    ):
+        normalized_activation_id = (
+            CustomerSetupAccessCodeRecord
+            ._normalize_required_string(
+                setup_activation_id,
+                name="setup_activation_id",
+            )
+        )
+
+        activation = (
+            self._setup_activation_store.get(
+                setup_activation_id=(
+                    normalized_activation_id
+                )
+            )
+        )
+
+        if activation is None:
+            raise ValueError(
+                "Unknown customer setup activation."
+            )
+
+        if (
+            activation.status
+            is not CustomerSetupActivationStatus.BOUND
+        ):
+            raise ValueError(
+                "Customer setup activation is not bound."
+            )
+
+        return activation
 
     def revoke(
         self,

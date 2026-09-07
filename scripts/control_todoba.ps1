@@ -69,7 +69,7 @@ function Get-TodobaRuntimeProcesses {
             if ($null -ne $_.CommandLine) {
                 $isTodobaRuntime = (
                     $_.CommandLine -match `
-                    "-m\s+backend\.start_(api|executor)(\s|$)"
+                    "-m\s+backend\.start_(api|executor|package_builder)(\s|$)"
                 )
             }
 
@@ -164,6 +164,14 @@ function Get-TodobaRuntimeStatus {
         ExecutorProcessCount = (
             $executorProcesses.Count
         )
+        PackageBuilderProcessCount = @(
+            $processes |
+            Where-Object {
+                $null -ne $_.CommandLine -and
+                $_.CommandLine -match `
+                "-m\s+backend\.start_package_builder(\s|$)"
+            }
+        ).Count
         Port8000Listening = (
             $null -ne $listener
         )
@@ -334,6 +342,7 @@ function Start-TodobaRuntime {
             $status.TaskState -eq "Running" -and
             $status.ApiProcessCount -gt 0 -and
             $status.ExecutorProcessCount -gt 0 -and
+            $status.PackageBuilderProcessCount -gt 0 -and
             $status.Port8000Listening
         )
 

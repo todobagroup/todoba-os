@@ -57,7 +57,7 @@ def test_controller_targets_only_todoba_runtime() -> None:
 
     assert "python.exe" in controller
     assert (
-        "backend\\.start_(api|executor)"
+        "backend\\.start_(api|executor|package_builder)"
         in controller
     )
     assert "start_todoba.ps1" in controller

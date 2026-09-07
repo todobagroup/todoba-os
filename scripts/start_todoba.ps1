@@ -10,6 +10,7 @@ param(
 # Owns:
 # - Cloud API process
 # - supervised Telegram Executor process
+# - supervised customer package builder process
 # - duplicate runtime prevention
 # - child process recovery
 # - runtime logs
@@ -44,6 +45,10 @@ $executorEntryPath = Join-Path `
 $repoRoot `
 "backend\start_executor.py"
 
+$packageBuilderEntryPath = Join-Path `
+$repoRoot `
+"backend\start_package_builder.py"
+
 $logDirectory = Join-Path `
 $repoRoot `
 "data\runtime_logs"
@@ -60,6 +65,7 @@ $requiredPaths = [ordered]@{
     TelegramSession = $telegramSessionPath
     ApiEntry = $apiEntryPath
     ExecutorEntry = $executorEntryPath
+    PackageBuilderEntry = $packageBuilderEntryPath
 }
 
 
@@ -97,6 +103,7 @@ if ($ValidateOnly) {
     Write-Output "PYTHON_PATH=$pythonPath"
     Write-Output "API_MODULE=backend.start_api"
     Write-Output "EXECUTOR_MODULE=backend.start_executor"
+    Write-Output "PACKAGE_BUILDER_MODULE=backend.start_package_builder"
 
     exit 0
 }
@@ -262,6 +269,12 @@ $components = @(
     [PSCustomObject]@{
         Name = "executor"
         Module = "backend.start_executor"
+        Process = $null
+        Owned = $false
+    },
+    [PSCustomObject]@{
+        Name = "package-builder"
+        Module = "backend.start_package_builder"
         Process = $null
         Owned = $false
     }

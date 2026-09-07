@@ -38,6 +38,10 @@ _ACCESS_CODE_EXCHANGE_PATH = (
 
 _DEFAULT_TIMEOUT_SECONDS = 10.0
 
+_PRODUCT_USER_AGENT = (
+    "TODOBA-Trading-AI-Setup/1.0"
+)
+
 _GENERIC_TRANSPORT_ERROR = (
     "Customer setup activation exchange failed."
 )
@@ -196,6 +200,9 @@ class CustomerSetupAccessCodeHttpClient:
                 ),
                 "Accept": (
                     "application/json"
+                ),
+                "User-Agent": (
+                    _PRODUCT_USER_AGENT
                 ),
             },
             method="POST",

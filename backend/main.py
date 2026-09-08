@@ -57,6 +57,9 @@ from backend.commercial.customer_setup_access_code_api import (
 from backend.commercial.customer_vps_connect_grant_api import (
     create_customer_vps_connect_grant_router,
 )
+from backend.commercial.customer_vps_connect_live_proof_api import (
+    create_customer_vps_connect_live_proof_router,
+)
 from backend.commercial.customer_setup_entry_api import (
     create_customer_setup_entry_router,
 )
@@ -91,6 +94,9 @@ from backend.commercial.customer_vps_connect_grant_service import (
 )
 from backend.commercial.customer_vps_connect_grant_composition_service import (
     CustomerVPSConnectGrantCompositionService,
+)
+from backend.commercial.customer_vps_connect_live_proof_service import (
+    CustomerVPSConnectLiveProofService,
 )
 from backend.commercial.customer_setup_access_code_exchange_service import (
     CustomerSetupAccessCodeExchangeService,
@@ -1086,6 +1092,21 @@ def _compose_customer_setup_runtime(
         )
     )
 
+    vps_connect_live_proof_service = (
+        CustomerVPSConnectLiveProofService(
+            grant_service=vps_connect_grant_service,
+            broker_state_store=broker_state_store,
+        )
+    )
+
+    vps_connect_live_proof_router = (
+        create_customer_vps_connect_live_proof_router(
+            verify_vps_connect_live_proof=(
+                vps_connect_live_proof_service.verify
+            ),
+        )
+    )
+
     bootstrap_router = (
         create_customer_setup_bootstrap_router(
             grant_setup_launch=(
@@ -1165,6 +1186,10 @@ def _compose_customer_setup_runtime(
 
     app.include_router(
         vps_connect_grant_router
+    )
+
+    app.include_router(
+        vps_connect_live_proof_router
     )
 
     app.include_router(

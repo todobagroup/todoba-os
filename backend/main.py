@@ -54,6 +54,9 @@ from backend.commercial.customer_setup_bootstrap_api import (
 from backend.commercial.customer_setup_access_code_api import (
     create_customer_setup_access_code_router,
 )
+from backend.commercial.customer_vps_connect_grant_api import (
+    create_customer_vps_connect_grant_router,
+)
 from backend.commercial.customer_setup_entry_api import (
     create_customer_setup_entry_router,
 )
@@ -78,6 +81,16 @@ from backend.commercial.customer_setup_activation_service import (
 from backend.commercial.customer_setup_access_code_service import (
     CustomerSetupAccessCodeService,
     CustomerSetupAccessCodeStore,
+)
+from backend.commercial.customer_vps_connect_deployment_resolver import (
+    CustomerVPSConnectDeploymentResolver,
+)
+from backend.commercial.customer_vps_connect_grant_service import (
+    CustomerVPSConnectGrantService,
+    CustomerVPSConnectGrantStore,
+)
+from backend.commercial.customer_vps_connect_grant_composition_service import (
+    CustomerVPSConnectGrantCompositionService,
 )
 from backend.commercial.customer_setup_access_code_exchange_service import (
     CustomerSetupAccessCodeExchangeService,
@@ -496,6 +509,12 @@ CUSTOMER_SETUP_ACCESS_CODE_STORAGE_PATH = (
     / "customer_setup_access_codes.json"
 )
 
+CUSTOMER_VPS_CONNECT_GRANT_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_vps_connect_grants.json"
+)
+
 CUSTOMER_SETUP_HANDOFF_STORAGE_PATH = (
     TODOBA_CONTROL_PLANE_DATA_ROOT
     / "commercial"
@@ -868,6 +887,37 @@ def _compose_customer_setup_runtime(
         )
     )
 
+    vps_connect_grant_store = (
+        CustomerVPSConnectGrantStore(
+            CUSTOMER_VPS_CONNECT_GRANT_STORAGE_PATH
+        )
+    )
+    vps_connect_grant_store.open_existing()
+
+    vps_connect_deployment_resolver = (
+        CustomerVPSConnectDeploymentResolver(
+            deployment_registry=(
+                customer_deployment_registry
+            ),
+            account_binding_store=(
+                trusted_agent_account_binding_store
+            ),
+        )
+    )
+
+    vps_connect_grant_service = (
+        CustomerVPSConnectGrantService(
+            grant_store=(
+                vps_connect_grant_store
+            ),
+            clock=(
+                lambda: datetime.now(
+                    timezone.utc
+                )
+            ),
+        )
+    )
+
     access_code_service = (
         CustomerSetupAccessCodeService(
             access_code_store=(
@@ -875,6 +925,20 @@ def _compose_customer_setup_runtime(
             ),
             setup_activation_store=(
                 activation_store
+            ),
+        )
+    )
+
+    vps_connect_grant_composition_service = (
+        CustomerVPSConnectGrantCompositionService(
+            authorize_bound_access_code=(
+                access_code_service.authorize_bound
+            ),
+            resolve_deployment=(
+                vps_connect_deployment_resolver.resolve
+            ),
+            issue_grant=(
+                vps_connect_grant_service.issue
             ),
         )
     )
@@ -1014,6 +1078,14 @@ def _compose_customer_setup_runtime(
         )
     )
 
+    vps_connect_grant_router = (
+        create_customer_vps_connect_grant_router(
+            issue_vps_connect_grant=(
+                vps_connect_grant_composition_service.issue
+            ),
+        )
+    )
+
     bootstrap_router = (
         create_customer_setup_bootstrap_router(
             grant_setup_launch=(
@@ -1089,6 +1161,10 @@ def _compose_customer_setup_runtime(
 
     app.include_router(
         access_code_router
+    )
+
+    app.include_router(
+        vps_connect_grant_router
     )
 
     app.include_router(

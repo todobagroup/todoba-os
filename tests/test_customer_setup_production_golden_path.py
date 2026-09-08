@@ -57,6 +57,9 @@ from backend.commercial.customer_deployment_package_publication import (
 from backend.commercial.customer_deployment_registry import (
     CustomerDeploymentRegistry,
 )
+from backend.commercial.customer_vps_connect_grant_service import (
+    CustomerVPSConnectGrantStore,
+)
 from backend.commercial.customer_deployment_runtime_projection import (
     CustomerDeploymentRuntimeProjection,
 )
@@ -391,6 +394,10 @@ def test_production_continuation_golden_path_reaches_installed(
             commercial_root
             / "customer_setup_access_codes.json"
         ),
+        "CUSTOMER_VPS_CONNECT_GRANT_STORAGE_PATH": (
+            commercial_root
+            / "customer_vps_connect_grants.json"
+        ),
         "CUSTOMER_SETUP_HANDOFF_STORAGE_PATH": (
             commercial_root
             / "customer_setup_handoffs.json"
@@ -417,6 +424,15 @@ def test_production_continuation_golden_path_reaches_installed(
             name,
             value,
         )
+
+    vps_connect_grant_store = (
+        CustomerVPSConnectGrantStore(
+            path_overrides[
+                "CUSTOMER_VPS_CONNECT_GRANT_STORAGE_PATH"
+            ]
+        )
+    )
+    vps_connect_grant_store.initialize_empty()
 
     source_owner_overrides = {
         "customer_identity_registry": (

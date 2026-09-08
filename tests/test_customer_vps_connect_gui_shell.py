@@ -67,7 +67,7 @@ class FakeApplicationShell(
         )
 
         return SimpleNamespace(
-            options=self.options,
+            installations=self.options,
         )
 
     def connect(
@@ -770,3 +770,31 @@ def test_gui_shell_has_presentation_authority_only():
         "kill(",
     ):
         assert forbidden not in source
+
+def test_detect_projects_detector_installations_contract(
+    monkeypatch,
+):
+    shell, application, _ = _built_shell(
+        monkeypatch,
+    )
+
+    application.detect = lambda **_: SimpleNamespace(
+        installations=(
+            OPTION_A,
+            OPTION_B,
+        ),
+    )
+
+    shell.detect_mt5()
+
+    assert shell._options == (
+        OPTION_A,
+        OPTION_B,
+    )
+
+    assert shell._mt5_selector.current() == 0
+
+    assert (
+        shell._connect_button.cget("state")
+        == "normal"
+    )

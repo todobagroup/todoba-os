@@ -243,7 +243,7 @@ class CustomerVPSConnectGuiShell:
         options = tuple(
             getattr(
                 result,
-                "options",
+                "installations",
                 (),
             )
         )

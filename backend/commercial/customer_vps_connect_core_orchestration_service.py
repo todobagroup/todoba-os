@@ -21,6 +21,10 @@ from backend.commercial.customer_vps_connect_grant_http_client import (
     CustomerVPSConnectGrantHttpClient,
     CustomerVPSConnectGrantTransportResult,
 )
+from backend.commercial.customer_vps_connect_live_proof_http_client import (
+    CustomerVPSConnectLiveProofHttpClient,
+    CustomerVPSConnectLiveProofTransportResult,
+)
 
 
 def _normalize_required_string(
@@ -68,6 +72,36 @@ class CustomerVPSConnectCoreOrchestrationResult:
         )
 
 
+@dataclass(
+    frozen=True,
+)
+class CustomerVPSConnectCoreLiveProofResult:
+    status: Literal[
+        "vps_pending",
+        "vps_online",
+    ]
+
+    def __post_init__(
+        self,
+    ) -> None:
+        if not isinstance(
+            self.status,
+            str,
+        ):
+            raise TypeError(
+                "status must be str."
+            )
+
+        if self.status not in {
+            "vps_pending",
+            "vps_online",
+        }:
+            raise ValueError(
+                "Unsupported VPS Connect "
+                "live proof status."
+            )
+
+
 class CustomerVPSConnectCoreOrchestrationService:
     """
     Hold one customer VPS Connect grant session in memory.
@@ -77,6 +111,7 @@ class CustomerVPSConnectCoreOrchestrationService:
         self,
         *,
         grant_http_client: CustomerVPSConnectGrantHttpClient,
+        live_proof_http_client: CustomerVPSConnectLiveProofHttpClient | None = None,
     ) -> None:
         if not isinstance(
             grant_http_client,
@@ -87,7 +122,23 @@ class CustomerVPSConnectCoreOrchestrationService:
                 "CustomerVPSConnectGrantHttpClient."
             )
 
+        if (
+            live_proof_http_client is not None
+            and not isinstance(
+                live_proof_http_client,
+                CustomerVPSConnectLiveProofHttpClient,
+            )
+        ):
+            raise TypeError(
+                "live_proof_http_client must be "
+                "CustomerVPSConnectLiveProofHttpClient "
+                "or None."
+            )
+
         self._grant_http_client = grant_http_client
+        self._live_proof_http_client = (
+            live_proof_http_client
+        )
 
         self._grant_credential: str | None = None
         self._grant_expires_at: str | None = None
@@ -187,4 +238,39 @@ class CustomerVPSConnectCoreOrchestrationService:
                     transport_result.expires_at
                 ),
             )
+        )
+
+    def check_live_proof(
+        self,
+    ) -> CustomerVPSConnectCoreLiveProofResult:
+        if self._grant_credential is None:
+            raise RuntimeError(
+                "VPS Connect grant is not ready."
+            )
+
+        if self._live_proof_http_client is None:
+            raise RuntimeError(
+                "VPS Connect live proof transport "
+                "is unavailable."
+            )
+
+        transport_result = (
+            self._live_proof_http_client.verify(
+                grant_credential=(
+                    self._grant_credential
+                ),
+            )
+        )
+
+        if not isinstance(
+            transport_result,
+            CustomerVPSConnectLiveProofTransportResult,
+        ):
+            raise RuntimeError(
+                "VPS Connect live proof transport "
+                "returned invalid result."
+            )
+
+        return CustomerVPSConnectCoreLiveProofResult(
+            status=transport_result.status,
         )

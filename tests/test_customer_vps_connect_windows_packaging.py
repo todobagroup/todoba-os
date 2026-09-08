@@ -133,6 +133,35 @@ def test_build_command_collects_metatrader5_package():
 
     assert "MetaTrader5" in packages
 
+def test_build_command_collects_numpy_runtime_required_by_metatrader5():
+    command = build_owner._build_command()
+
+    collect_indexes = [
+        index
+        for index, value in enumerate(command)
+        if value == "--collect-all"
+    ]
+
+    collected_packages = {
+        command[index + 1]
+        for index in collect_indexes
+    }
+
+    assert "numpy" in collected_packages
+
+    hidden_indexes = [
+        index
+        for index, value in enumerate(command)
+        if value == "--hidden-import"
+    ]
+
+    hidden_imports = {
+        command[index + 1]
+        for index in hidden_indexes
+    }
+
+    assert "numpy._core.multiarray" in hidden_imports
+
 
 def test_validate_build_environment_rejects_wrong_pyinstaller(
     monkeypatch,

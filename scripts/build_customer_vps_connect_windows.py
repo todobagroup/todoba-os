@@ -187,6 +187,10 @@ def _build_command(
         ),
         "--collect-all",
         "MetaTrader5",
+        "--collect-all",
+        "numpy",
+        "--hidden-import",
+        "numpy._core.multiarray",
         "--workpath",
         str(
             _build_root()

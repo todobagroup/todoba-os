@@ -102,6 +102,36 @@ class CustomerVPSConnectCoreLiveProofResult:
             )
 
 
+@dataclass(
+    frozen=True,
+)
+class CustomerVPSConnectCoreFinishReadinessResult:
+    status: Literal[
+        "finish_blocked",
+        "finish_ready",
+    ]
+
+    def __post_init__(
+        self,
+    ) -> None:
+        if not isinstance(
+            self.status,
+            str,
+        ):
+            raise TypeError(
+                "status must be str."
+            )
+
+        if self.status not in {
+            "finish_blocked",
+            "finish_ready",
+        }:
+            raise ValueError(
+                "Unsupported VPS Connect "
+                "finish readiness status."
+            )
+
+
 class CustomerVPSConnectCoreOrchestrationService:
     """
     Hold one customer VPS Connect grant session in memory.
@@ -143,6 +173,10 @@ class CustomerVPSConnectCoreOrchestrationService:
         self._grant_credential: str | None = None
         self._grant_expires_at: str | None = None
         self._account_fingerprint: str | None = None
+        self._last_live_proof_status: Literal[
+            "vps_pending",
+            "vps_online",
+        ] | None = None
 
     def __repr__(
         self,
@@ -271,6 +305,26 @@ class CustomerVPSConnectCoreOrchestrationService:
                 "returned invalid result."
             )
 
+        self._last_live_proof_status = (
+            transport_result.status
+        )
+
         return CustomerVPSConnectCoreLiveProofResult(
             status=transport_result.status,
+        )
+
+    def finish_readiness(
+        self,
+    ) -> CustomerVPSConnectCoreFinishReadinessResult:
+        status = (
+            "finish_ready"
+            if self._last_live_proof_status
+            == "vps_online"
+            else "finish_blocked"
+        )
+
+        return (
+            CustomerVPSConnectCoreFinishReadinessResult(
+                status=status,
+            )
         )

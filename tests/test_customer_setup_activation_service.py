@@ -2425,3 +2425,365 @@ def test_bind_contract_accepts_only_activation_and_deployment_identity() -> None
         "setup_activation_id",
         "deployment_id",
     }
+
+
+def test_store_converges_legacy_bound_fork_to_authoritative_activation(
+    tmp_path: Path,
+) -> None:
+    (
+        identity_registry,
+        deployment_registry,
+        activation_store,
+        service,
+    ) = build_environment(
+        tmp_path
+    )
+
+    register_customer(
+        identity_registry
+    )
+
+    deployment = register_deployment(
+        deployment_registry
+    )
+
+    authoritative = service.activate(
+        activation_request_id=(
+            "authoritative-access-code-request"
+        ),
+        customer_id="customer-001",
+    )
+
+    legacy = service.activate(
+        activation_request_id=(
+            "legacy-entry-launch-request"
+        ),
+        customer_id="customer-001",
+    )
+
+    service.bind(
+        setup_activation_id=(
+            legacy.setup_activation_id
+        ),
+        deployment_id=(
+            deployment.deployment_id
+        ),
+    )
+
+    converged = activation_store.converge_legacy_fork(
+        authoritative_setup_activation_id=(
+            authoritative.setup_activation_id
+        ),
+        superseded_setup_activation_id=(
+            legacy.setup_activation_id
+        ),
+        deployment_id=(
+            deployment.deployment_id
+        ),
+    )
+
+    assert (
+        converged.setup_activation_id
+        == authoritative.setup_activation_id
+    )
+    assert converged.status.value == "BOUND"
+    assert (
+        converged.deployment_id
+        == deployment.deployment_id
+    )
+
+    authoritative_after = service.get(
+        setup_activation_id=(
+            authoritative.setup_activation_id
+        )
+    )
+
+    legacy_after = service.get(
+        setup_activation_id=(
+            legacy.setup_activation_id
+        )
+    )
+
+    assert authoritative_after is not None
+    assert authoritative_after.status.value == "BOUND"
+    assert (
+        authoritative_after.deployment_id
+        == deployment.deployment_id
+    )
+
+    assert legacy_after is not None
+    assert legacy_after.status.value == "SUPERSEDED"
+    assert (
+        legacy_after.deployment_id
+        == deployment.deployment_id
+    )
+
+    restarted = CustomerSetupActivationStore(
+        activation_store.storage_path
+    )
+
+    restarted_authoritative = restarted.get(
+        setup_activation_id=(
+            authoritative.setup_activation_id
+        )
+    )
+
+    restarted_legacy = restarted.get(
+        setup_activation_id=(
+            legacy.setup_activation_id
+        )
+    )
+
+    assert restarted_authoritative is not None
+    assert (
+        restarted_authoritative.status.value
+        == "BOUND"
+    )
+    assert (
+        restarted_authoritative.deployment_id
+        == deployment.deployment_id
+    )
+
+    assert restarted_legacy is not None
+    assert (
+        restarted_legacy.status.value
+        == "SUPERSEDED"
+    )
+    assert (
+        restarted_legacy.deployment_id
+        == deployment.deployment_id
+    )
+
+    assert (
+        restarted._activation_id_by_deployment_id[
+            deployment.deployment_id
+        ]
+        == authoritative.setup_activation_id
+    )
+
+
+def test_store_legacy_fork_write_failure_does_not_advance_ram(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (
+        identity_registry,
+        deployment_registry,
+        activation_store,
+        service,
+    ) = build_environment(
+        tmp_path
+    )
+
+    register_customer(
+        identity_registry
+    )
+
+    deployment = register_deployment(
+        deployment_registry
+    )
+
+    authoritative = service.activate(
+        activation_request_id="authoritative-request",
+        customer_id="customer-001",
+    )
+
+    legacy = service.activate(
+        activation_request_id="legacy-request",
+        customer_id="customer-001",
+    )
+
+    service.bind(
+        setup_activation_id=legacy.setup_activation_id,
+        deployment_id=deployment.deployment_id,
+    )
+
+    before_records = activation_store.all()
+
+    before_owner = activation_store.get_by_deployment_id(
+        deployment_id=deployment.deployment_id
+    )
+
+    def fail_write(_records):
+        raise OSError("simulated durable write failure")
+
+    monkeypatch.setattr(
+        activation_store,
+        "_write_records",
+        fail_write,
+    )
+
+    with pytest.raises(
+        OSError,
+        match="simulated durable write failure",
+    ):
+        activation_store.converge_legacy_fork(
+            authoritative_setup_activation_id=(
+                authoritative.setup_activation_id
+            ),
+            superseded_setup_activation_id=(
+                legacy.setup_activation_id
+            ),
+            deployment_id=deployment.deployment_id,
+        )
+
+    assert activation_store.all() == before_records
+
+    after_owner = activation_store.get_by_deployment_id(
+        deployment_id=deployment.deployment_id
+    )
+
+    assert after_owner == before_owner
+
+    authoritative_after = activation_store.get(
+        setup_activation_id=authoritative.setup_activation_id
+    )
+
+    legacy_after = activation_store.get(
+        setup_activation_id=legacy.setup_activation_id
+    )
+
+    assert authoritative_after is not None
+    assert authoritative_after.status.value == "ACTIVE"
+
+    assert legacy_after is not None
+    assert legacy_after.status.value == "BOUND"
+
+
+def test_superseded_setup_activation_cannot_regain_authority(
+    tmp_path: Path,
+) -> None:
+    (
+        identity_registry,
+        deployment_registry,
+        activation_store,
+        service,
+    ) = build_environment(
+        tmp_path
+    )
+
+    register_customer(
+        identity_registry
+    )
+
+    deployment = register_deployment(
+        deployment_registry
+    )
+
+    authoritative = service.activate(
+        activation_request_id="authoritative-request",
+        customer_id="customer-001",
+    )
+
+    legacy = service.activate(
+        activation_request_id="legacy-request",
+        customer_id="customer-001",
+    )
+
+    service.bind(
+        setup_activation_id=legacy.setup_activation_id,
+        deployment_id=deployment.deployment_id,
+    )
+
+    activation_store.converge_legacy_fork(
+        authoritative_setup_activation_id=(
+            authoritative.setup_activation_id
+        ),
+        superseded_setup_activation_id=(
+            legacy.setup_activation_id
+        ),
+        deployment_id=deployment.deployment_id,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="SUPERSEDED setup activation cannot be suspended",
+    ):
+        activation_store.suspend(
+            setup_activation_id=legacy.setup_activation_id
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="SUPERSEDED setup activation cannot be reactivated",
+    ):
+        activation_store.reactivate(
+            setup_activation_id=legacy.setup_activation_id
+        )
+
+    with pytest.raises(
+        ValueError,
+        match="SUPERSEDED setup activation cannot be bound",
+    ):
+        activation_store.bind(
+            setup_activation_id=legacy.setup_activation_id,
+            deployment_id=deployment.deployment_id,
+        )
+
+
+def test_store_legacy_fork_convergence_retry_is_idempotent(
+    tmp_path: Path,
+) -> None:
+    (
+        identity_registry,
+        deployment_registry,
+        activation_store,
+        service,
+    ) = build_environment(
+        tmp_path
+    )
+
+    register_customer(
+        identity_registry
+    )
+
+    deployment = register_deployment(
+        deployment_registry
+    )
+
+    authoritative = service.activate(
+        activation_request_id="authoritative-request",
+        customer_id="customer-001",
+    )
+
+    legacy = service.activate(
+        activation_request_id="legacy-request",
+        customer_id="customer-001",
+    )
+
+    service.bind(
+        setup_activation_id=legacy.setup_activation_id,
+        deployment_id=deployment.deployment_id,
+    )
+
+    first = activation_store.converge_legacy_fork(
+        authoritative_setup_activation_id=(
+            authoritative.setup_activation_id
+        ),
+        superseded_setup_activation_id=(
+            legacy.setup_activation_id
+        ),
+        deployment_id=deployment.deployment_id,
+    )
+
+    second = activation_store.converge_legacy_fork(
+        authoritative_setup_activation_id=(
+            authoritative.setup_activation_id
+        ),
+        superseded_setup_activation_id=(
+            legacy.setup_activation_id
+        ),
+        deployment_id=deployment.deployment_id,
+    )
+
+    assert second == first
+
+    owner = activation_store.get_by_deployment_id(
+        deployment_id=deployment.deployment_id
+    )
+
+    assert owner is not None
+    assert (
+        owner.setup_activation_id
+        == authoritative.setup_activation_id
+    )

@@ -91,6 +91,7 @@ class CustomerSetupActivationStatus(
     ACTIVE = "ACTIVE"
     SUSPENDED = "SUSPENDED"
     BOUND = "BOUND"
+    SUPERSEDED = "SUPERSEDED"
 
 
 @dataclass(
@@ -145,6 +146,27 @@ class CustomerSetupActivationRecord:
             if deployment_id is None:
                 raise ValueError(
                     "BOUND setup activation requires "
+                    "deployment_id."
+                )
+
+            object.__setattr__(
+                self,
+                "deployment_id",
+                self._normalize_required_string(
+                    deployment_id,
+                    name="deployment_id",
+                ),
+            )
+
+            return
+
+        if (
+            self.status
+            is CustomerSetupActivationStatus.SUPERSEDED
+        ):
+            if deployment_id is None:
+                raise ValueError(
+                    "SUPERSEDED setup activation requires "
                     "deployment_id."
                 )
 
@@ -475,6 +497,15 @@ class CustomerSetupActivationStore:
 
             if (
                 existing.status
+                is CustomerSetupActivationStatus.SUPERSEDED
+            ):
+                raise ValueError(
+                    "SUPERSEDED setup activation cannot be "
+                    "suspended."
+                )
+
+            if (
+                existing.status
                 is CustomerSetupActivationStatus.SUSPENDED
             ):
                 return existing
@@ -529,6 +560,15 @@ class CustomerSetupActivationStore:
             ):
                 raise ValueError(
                     "BOUND setup activation cannot be "
+                    "reactivated."
+                )
+
+            if (
+                existing.status
+                is CustomerSetupActivationStatus.SUPERSEDED
+            ):
+                raise ValueError(
+                    "SUPERSEDED setup activation cannot be "
                     "reactivated."
                 )
 
@@ -606,6 +646,15 @@ class CustomerSetupActivationStore:
 
             if (
                 existing.status
+                is CustomerSetupActivationStatus.SUPERSEDED
+            ):
+                raise ValueError(
+                    "SUPERSEDED setup activation cannot "
+                    "be bound."
+                )
+
+            if (
+                existing.status
                 is CustomerSetupActivationStatus.SUSPENDED
             ):
                 raise ValueError(
@@ -654,6 +703,202 @@ class CustomerSetupActivationStore:
                 existing=existing,
                 updated=updated,
             )
+
+    def converge_legacy_fork(
+        self,
+        *,
+        authoritative_setup_activation_id: str,
+        superseded_setup_activation_id: str,
+        deployment_id: str,
+    ) -> CustomerSetupActivationRecord:
+        """
+        Atomically transfer one deployment binding from a
+        proven legacy setup activation to its authoritative
+        setup activation.
+
+        This store primitive does not decide lineage. A narrow
+        operator boundary must prove the legacy correlation
+        before invoking it.
+
+        Durable postcondition:
+        - authoritative activation is BOUND
+        - legacy activation is SUPERSEDED
+        - both retain the deployment identity as audit truth
+        - only the authoritative activation owns the runtime
+          deployment-binding index
+        """
+
+        normalized_deployment_id = (
+            CustomerSetupActivationRecord
+            ._normalize_required_string(
+                deployment_id,
+                name="deployment_id",
+            )
+        )
+
+        with self._lock:
+            self._require_ready()
+
+            authoritative = self._require_record(
+                setup_activation_id=(
+                    authoritative_setup_activation_id
+                )
+            )
+
+            superseded = self._require_record(
+                setup_activation_id=(
+                    superseded_setup_activation_id
+                )
+            )
+
+            if (
+                authoritative.setup_activation_id
+                == superseded.setup_activation_id
+            ):
+                raise ValueError(
+                    "Legacy fork requires two distinct "
+                    "setup activations."
+                )
+
+            if (
+                authoritative.customer_id
+                != superseded.customer_id
+            ):
+                raise ValueError(
+                    "Legacy fork setup activations belong "
+                    "to different customers."
+                )
+
+            owner = (
+                self._activation_id_by_deployment_id.get(
+                    normalized_deployment_id
+                )
+            )
+
+            if (
+                authoritative.status
+                is CustomerSetupActivationStatus.BOUND
+                and authoritative.deployment_id
+                == normalized_deployment_id
+                and superseded.status
+                is CustomerSetupActivationStatus.SUPERSEDED
+                and superseded.deployment_id
+                == normalized_deployment_id
+                and owner
+                == authoritative.setup_activation_id
+            ):
+                return authoritative
+
+            if (
+                authoritative.status
+                is not CustomerSetupActivationStatus.ACTIVE
+            ):
+                raise ValueError(
+                    "Authoritative setup activation must "
+                    "be ACTIVE."
+                )
+
+            if (
+                superseded.status
+                is not CustomerSetupActivationStatus.BOUND
+            ):
+                raise ValueError(
+                    "Legacy setup activation must be "
+                    "BOUND."
+                )
+
+            if (
+                superseded.deployment_id
+                != normalized_deployment_id
+            ):
+                raise ValueError(
+                    "Legacy setup activation deployment "
+                    "identity mismatch."
+                )
+
+            if (
+                owner
+                != superseded.setup_activation_id
+            ):
+                raise RuntimeError(
+                    "Legacy setup activation is not the "
+                    "authoritative deployment-binding owner."
+                )
+
+            authoritative_updated = (
+                CustomerSetupActivationRecord(
+                    activation_request_id=(
+                        authoritative.activation_request_id
+                    ),
+                    setup_activation_id=(
+                        authoritative.setup_activation_id
+                    ),
+                    customer_id=(
+                        authoritative.customer_id
+                    ),
+                    status=(
+                        CustomerSetupActivationStatus.BOUND
+                    ),
+                    deployment_id=(
+                        normalized_deployment_id
+                    ),
+                )
+            )
+
+            superseded_updated = (
+                CustomerSetupActivationRecord(
+                    activation_request_id=(
+                        superseded.activation_request_id
+                    ),
+                    setup_activation_id=(
+                        superseded.setup_activation_id
+                    ),
+                    customer_id=(
+                        superseded.customer_id
+                    ),
+                    status=(
+                        CustomerSetupActivationStatus
+                        .SUPERSEDED
+                    ),
+                    deployment_id=(
+                        normalized_deployment_id
+                    ),
+                )
+            )
+
+            candidate = dict(
+                self._records
+            )
+
+            candidate[
+                authoritative.setup_activation_id
+            ] = authoritative_updated
+
+            candidate[
+                superseded.setup_activation_id
+            ] = superseded_updated
+
+            # One durable write contains both sides of the
+            # authority transfer. RAM/index advance only after
+            # the atomic filesystem replacement succeeds.
+            self._write_records(
+                candidate
+            )
+
+            deployment_index = dict(
+                self._activation_id_by_deployment_id
+            )
+
+            deployment_index[
+                normalized_deployment_id
+            ] = authoritative.setup_activation_id
+
+            self._records = candidate
+            self._activation_id_by_deployment_id = (
+                deployment_index
+            )
+
+            return authoritative_updated
 
     def all(
         self,
@@ -740,7 +985,23 @@ class CustomerSetupActivationStore:
             self._activation_id_by_deployment_id
         )
 
-        if updated.deployment_id is not None:
+        if (
+            existing.status
+            is CustomerSetupActivationStatus.BOUND
+            and existing.deployment_id is not None
+            and deployment_index.get(
+                existing.deployment_id
+            )
+            == existing.setup_activation_id
+        ):
+            del deployment_index[
+                existing.deployment_id
+            ]
+
+        if (
+            updated.status
+            is CustomerSetupActivationStatus.BOUND
+        ):
             deployment_index[
                 updated.deployment_id
             ] = updated.setup_activation_id
@@ -897,7 +1158,10 @@ class CustomerSetupActivationStore:
                     "Duplicate setup activation request."
                 )
 
-            if record.deployment_id is not None:
+            if (
+                record.status
+                is CustomerSetupActivationStatus.BOUND
+            ):
                 if (
                     record.deployment_id
                     in deployment_index

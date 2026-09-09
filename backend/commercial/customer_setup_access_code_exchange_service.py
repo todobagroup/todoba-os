@@ -244,6 +244,9 @@ class CustomerSetupAccessCodeExchangeService:
                 customer_id=(
                     authorization.customer_id
                 ),
+                setup_activation_id=(
+                    authorization.setup_activation_id
+                ),
                 code_challenge_s256=(
                     normalized_challenge
                 ),

@@ -1028,6 +1028,10 @@ def _compose_customer_setup_runtime(
             handoff_service=(
                 handoff_service
             ),
+            resolve_setup_activation_id=(
+                bootstrap_launch_grant_service
+                .resolve_setup_activation_id
+            ),
         )
     )
 

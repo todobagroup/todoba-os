@@ -897,3 +897,92 @@ def test_constructor_requires_authoritative_owner_methods(
                 launch_owner
             ),
         )
+
+def test_resolve_setup_activation_identity_from_launch_correlation(
+) -> None:
+    expected_setup_activation_id = (
+        "setup-activation-authoritative"
+    )
+
+    expected_request_id = (
+        derive_customer_setup_bootstrap_launch_issuance_request_id(
+            AUTHORIZATION_ID
+        )
+    )
+
+    class AuthorizationRecord:
+        authorization_id = AUTHORIZATION_ID
+        customer_id = CUSTOMER_ID
+        setup_activation_id = (
+            expected_setup_activation_id
+        )
+
+    class AuthorizationOwner:
+        def redeem(
+            self,
+            **kwargs,
+        ):
+            del kwargs
+            raise AssertionError(
+                "resolver must not redeem authority"
+            )
+
+        def recover_consumed_redemption(
+            self,
+            **kwargs,
+        ):
+            del kwargs
+            raise AssertionError(
+                "resolver must not recover authority"
+            )
+
+        def all(
+            self,
+        ):
+            return (
+                AuthorizationRecord(),
+            )
+
+    class LaunchRecord:
+        launch_id = LAUNCH_ID
+        customer_id = CUSTOMER_ID
+        issuance_request_id = (
+            expected_request_id
+        )
+
+    class LaunchOwner:
+        def issue(
+            self,
+            **kwargs,
+        ):
+            del kwargs
+            raise AssertionError(
+                "resolver must not issue credential"
+            )
+
+        def get(
+            self,
+            *,
+            launch_id,
+        ):
+            assert launch_id == LAUNCH_ID
+            return LaunchRecord()
+
+    service = (
+        CustomerSetupBootstrapLaunchGrantService(
+            bootstrap_authorization_service=(
+                AuthorizationOwner()
+            ),
+            launch_credential_service=(
+                LaunchOwner()
+            ),
+        )
+    )
+
+    assert (
+        service.resolve_setup_activation_id(
+            launch_id=LAUNCH_ID,
+            customer_id=CUSTOMER_ID,
+        )
+        == expected_setup_activation_id
+    )

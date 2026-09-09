@@ -321,6 +321,144 @@ class CustomerSetupBootstrapLaunchGrantService:
                 )
             )
 
+    def resolve_setup_activation_id(
+        self,
+        *,
+        launch_id: str,
+        customer_id: str,
+    ) -> str:
+        """
+        Resolve the authoritative Setup Activation identity
+        correlated to one already-issued launch credential.
+
+        This is a read-only server-side correlation:
+        launch_id -> launch issuance_request_id
+        -> bootstrap authorization_id
+        -> setup_activation_id.
+        """
+
+        normalized_launch_id = (
+            _normalize_required_string(
+                launch_id,
+                name="launch_id",
+            )
+        )
+        normalized_customer_id = (
+            _normalize_required_string(
+                customer_id,
+                name="customer_id",
+            )
+        )
+
+        get_launch = getattr(
+            self._launch_credential_service,
+            "get",
+            None,
+        )
+
+        if not callable(
+            get_launch
+        ):
+            raise RuntimeError(
+                "Launch credential owner does not "
+                "support read-only correlation."
+            )
+
+        all_authorizations = getattr(
+            self._bootstrap_authorization_service,
+            "all",
+            None,
+        )
+
+        if not callable(
+            all_authorizations
+        ):
+            raise RuntimeError(
+                "Bootstrap authorization owner does not "
+                "support read-only correlation."
+            )
+
+        launch_record = get_launch(
+            launch_id=(
+                normalized_launch_id
+            )
+        )
+
+        if launch_record is None:
+            raise ValueError(
+                "Unknown setup launch identity."
+            )
+
+        if (
+            launch_record.customer_id
+            != normalized_customer_id
+        ):
+            raise ValueError(
+                "Setup launch identity belongs "
+                "to another customer."
+            )
+
+        issuance_request_id = (
+            _normalize_required_string(
+                launch_record.issuance_request_id,
+                name="issuance_request_id",
+            )
+        )
+
+        matched = None
+
+        for authorization in (
+            all_authorizations()
+        ):
+            expected_request_id = (
+                derive_customer_setup_bootstrap_launch_issuance_request_id(
+                    authorization.authorization_id
+                )
+            )
+
+            if (
+                expected_request_id
+                != issuance_request_id
+            ):
+                continue
+
+            if matched is not None:
+                raise RuntimeError(
+                    "Bootstrap launch correlation "
+                    "is ambiguous."
+                )
+
+            matched = authorization
+
+        if matched is None:
+            raise ValueError(
+                "Setup launch has no authoritative "
+                "bootstrap correlation."
+            )
+
+        if (
+            matched.customer_id
+            != normalized_customer_id
+        ):
+            raise ValueError(
+                "Bootstrap and launch customer "
+                "identity did not converge."
+            )
+
+        if (
+            matched.setup_activation_id
+            is None
+        ):
+            raise ValueError(
+                "Bootstrap authorization has no "
+                "authoritative setup activation."
+            )
+
+        return _normalize_required_string(
+            matched.setup_activation_id,
+            name="setup_activation_id",
+        )
+
     def _redeem_or_recover(
         self,
         *,

@@ -750,3 +750,30 @@ def test_exchange_converges_authoritative_serialized_bootstrap_expiry(
         result.expires_at
         == _EXPIRES_AT
     )
+
+
+def test_exchange_preserves_authoritative_setup_activation_identity(
+) -> None:
+    service, _, issue_calls = (
+        _build_service()
+    )
+
+    service.exchange(
+        activation_code=(
+            _ACTIVATION_CODE
+        ),
+        code_challenge_s256=(
+            _CODE_CHALLENGE
+        ),
+    )
+
+    assert len(
+        issue_calls
+    ) == 1
+
+    assert (
+        issue_calls[0][
+            "setup_activation_id"
+        ]
+        == _SETUP_ACTIVATION_ID
+    )

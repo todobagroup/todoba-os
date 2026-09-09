@@ -764,3 +764,99 @@ def test_owner_has_no_duplicate_persistence_surface() -> None:
 
     for token in forbidden:
         assert token not in source
+
+
+def test_authoritative_activation_resolver_reuses_existing_activation_without_creating_another(
+) -> None:
+    (
+        _,
+        registration_store,
+        setup_activation_service,
+        handoff_service,
+    ) = _build_service()
+
+    authoritative_activation = (
+        setup_activation_service
+        .activate
+        .return_value
+    )
+
+    setup_activation_service.get.return_value = (
+        authoritative_activation
+    )
+
+    resolver_calls = []
+
+    def resolve_setup_activation_id(
+        *,
+        launch_id,
+        customer_id,
+    ):
+        resolver_calls.append(
+            {
+                "launch_id": launch_id,
+                "customer_id": customer_id,
+            }
+        )
+
+        return SETUP_ACTIVATION_ID
+
+    service = (
+        CustomerSetupEntryGrantService(
+            registration_store=(
+                registration_store
+            ),
+            setup_activation_service=(
+                setup_activation_service
+            ),
+            handoff_service=(
+                handoff_service
+            ),
+            resolve_setup_activation_id=(
+                resolve_setup_activation_id
+            ),
+        )
+    )
+
+    service.grant(
+        grant_request_id=(
+            GRANT_REQUEST_ID
+        ),
+        customer_id=(
+            CUSTOMER_ID
+        ),
+        current_time=(
+            CURRENT_TIME
+        ),
+    )
+
+    assert resolver_calls == [
+        {
+            "launch_id": (
+                GRANT_REQUEST_ID
+            ),
+            "customer_id": (
+                CUSTOMER_ID
+            ),
+        }
+    ]
+
+    setup_activation_service.activate.assert_not_called()
+
+    setup_activation_service.get.assert_called_once_with(
+        setup_activation_id=(
+            SETUP_ACTIVATION_ID
+        )
+    )
+
+    handoff_service.issue.assert_called_once_with(
+        issuance_request_id=(
+            GRANT_REQUEST_ID
+        ),
+        setup_activation_id=(
+            SETUP_ACTIVATION_ID
+        ),
+        current_time=(
+            CURRENT_TIME
+        ),
+    )

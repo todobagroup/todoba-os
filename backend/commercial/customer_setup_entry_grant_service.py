@@ -124,6 +124,7 @@ class CustomerSetupEntryGrantService:
         registration_store,
         setup_activation_service,
         handoff_service,
+        resolve_setup_activation_id=None,
     ) -> None:
         _require_owner_method(
             registration_store,
@@ -141,6 +142,30 @@ class CustomerSetupEntryGrantService:
             method_name="issue",
         )
 
+        if (
+            resolve_setup_activation_id
+            is not None
+            and not callable(
+                resolve_setup_activation_id
+            )
+        ):
+            raise TypeError(
+                "resolve_setup_activation_id "
+                "must be callable."
+            )
+
+        if (
+            resolve_setup_activation_id
+            is not None
+        ):
+            _require_owner_method(
+                setup_activation_service,
+                owner_name=(
+                    "setup_activation_service"
+                ),
+                method_name="get",
+            )
+
         self._registration_store = (
             registration_store
         )
@@ -149,6 +174,9 @@ class CustomerSetupEntryGrantService:
         )
         self._handoff_service = (
             handoff_service
+        )
+        self._resolve_setup_activation_id = (
+            resolve_setup_activation_id
         )
         self._lock = threading.RLock()
 
@@ -226,16 +254,52 @@ class CustomerSetupEntryGrantService:
                     "mismatch."
                 )
 
-            activation = (
-                self._setup_activation_service.activate(
-                    activation_request_id=(
-                        normalized_request_id
-                    ),
-                    customer_id=(
-                        normalized_customer_id
-                    ),
+            if (
+                self._resolve_setup_activation_id
+                is None
+            ):
+                activation = (
+                    self._setup_activation_service.activate(
+                        activation_request_id=(
+                            normalized_request_id
+                        ),
+                        customer_id=(
+                            normalized_customer_id
+                        ),
+                    )
                 )
-            )
+            else:
+                expected_setup_activation_id = (
+                    self._resolve_setup_activation_id(
+                        launch_id=(
+                            normalized_request_id
+                        ),
+                        customer_id=(
+                            normalized_customer_id
+                        ),
+                    )
+                )
+
+                expected_setup_activation_id = (
+                    _normalize_required_string(
+                        expected_setup_activation_id,
+                        name="setup_activation_id",
+                    )
+                )
+
+                activation = (
+                    self._setup_activation_service.get(
+                        setup_activation_id=(
+                            expected_setup_activation_id
+                        )
+                    )
+                )
+
+                if activation is None:
+                    raise ValueError(
+                        "Authoritative setup activation "
+                        "does not exist."
+                    )
 
             if not isinstance(
                 activation,
@@ -247,11 +311,23 @@ class CustomerSetupEntryGrantService:
                 )
 
             if (
-                activation.activation_request_id
-                != normalized_request_id
+                self._resolve_setup_activation_id
+                is None
+            ):
+                if (
+                    activation.activation_request_id
+                    != normalized_request_id
+                ):
+                    raise RuntimeError(
+                        "Setup activation request identity "
+                        "did not converge."
+                    )
+            elif (
+                activation.setup_activation_id
+                != expected_setup_activation_id
             ):
                 raise RuntimeError(
-                    "Setup activation request identity "
+                    "Setup activation identity "
                     "did not converge."
                 )
 

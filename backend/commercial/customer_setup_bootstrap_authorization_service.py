@@ -98,6 +98,7 @@ class CustomerSetupBootstrapAuthorizationRecord:
     expires_at: str
     status: CustomerSetupBootstrapAuthorizationStatus
     consumed_at: str | None = None
+    setup_activation_id: str | None = None
 
     def __post_init__(
         self,
@@ -127,6 +128,16 @@ class CustomerSetupBootstrapAuthorizationRecord:
                 name="customer_id",
             ),
         )
+
+        if self.setup_activation_id is not None:
+            object.__setattr__(
+                self,
+                "setup_activation_id",
+                _normalize_required_string(
+                    self.setup_activation_id,
+                    name="setup_activation_id",
+                ),
+            )
 
         object.__setattr__(
             self,
@@ -278,6 +289,7 @@ class CustomerSetupBootstrapAuthorizationRedemption:
     customer_id: str
     consumed_at: str
     customer_identity: CustomerIdentity
+    setup_activation_id: str | None = None
 
 
 def derive_customer_setup_bootstrap_authorization_verifier(
@@ -519,6 +531,25 @@ class CustomerSetupBootstrapAuthorizationStore:
                 authorization_id
             ]
 
+    def all(
+        self,
+    ) -> tuple[
+        CustomerSetupBootstrapAuthorizationRecord,
+        ...,
+    ]:
+        with self._lock:
+            self._require_ready()
+
+            return tuple(
+                self._records[
+                    authorization_id
+                ]
+                for authorization_id
+                in sorted(
+                    self._records
+                )
+            )
+
     def insert(
         self,
         record: CustomerSetupBootstrapAuthorizationRecord,
@@ -652,6 +683,9 @@ class CustomerSetupBootstrapAuthorizationStore:
                     customer_id=(
                         existing.customer_id
                     ),
+                    setup_activation_id=(
+                        existing.setup_activation_id
+                    ),
                     authorization_verifier_sha256=(
                         normalized_verifier
                     ),
@@ -737,6 +771,9 @@ class CustomerSetupBootstrapAuthorizationStore:
                     ),
                     customer_id=(
                         existing.customer_id
+                    ),
+                    setup_activation_id=(
+                        existing.setup_activation_id
                     ),
                     authorization_verifier_sha256=(
                         existing
@@ -965,6 +1002,7 @@ class CustomerSetupBootstrapAuthorizationStore:
                 "authorization_request_id",
                 "authorization_id",
                 "customer_id",
+                "setup_activation_id",
                 "authorization_verifier_sha256",
                 "code_challenge_s256",
                 "issued_at",
@@ -974,10 +1012,13 @@ class CustomerSetupBootstrapAuthorizationStore:
             }
 
             if (
-                set(
-                    item
+                set(item)
+                not in (
+                    allowed_fields,
+                    allowed_fields - {
+                        "setup_activation_id"
+                    },
                 )
-                != allowed_fields
             ):
                 raise ValueError(
                     "Bootstrap authorization item "
@@ -1000,6 +1041,11 @@ class CustomerSetupBootstrapAuthorizationStore:
                         item[
                             "customer_id"
                         ]
+                    ),
+                    setup_activation_id=(
+                        item.get(
+                            "setup_activation_id"
+                        )
                     ),
                     authorization_verifier_sha256=(
                         item[
@@ -1108,6 +1154,9 @@ class CustomerSetupBootstrapAuthorizationStore:
                     ),
                     "customer_id": (
                         record.customer_id
+                    ),
+                    "setup_activation_id": (
+                        record.setup_activation_id
                     ),
                     "authorization_verifier_sha256": (
                         record
@@ -1233,6 +1282,18 @@ class CustomerSetupBootstrapAuthorizationService:
         )
         self._lock = threading.RLock()
 
+    def all(
+        self,
+    ) -> tuple[
+        CustomerSetupBootstrapAuthorizationRecord,
+        ...,
+    ]:
+        self._require_sources_ready()
+
+        return (
+            self._authorization_store.all()
+        )
+
     def issue(
         self,
         *,
@@ -1240,6 +1301,7 @@ class CustomerSetupBootstrapAuthorizationService:
         customer_id: str,
         code_challenge_s256: str,
         current_time: datetime,
+        setup_activation_id: str | None = None,
     ) -> CustomerSetupBootstrapAuthorizationIssuance:
         normalized_request_id = (
             _normalize_required_string(
@@ -1251,6 +1313,14 @@ class CustomerSetupBootstrapAuthorizationService:
             _normalize_required_string(
                 customer_id,
                 name="customer_id",
+            )
+        )
+        normalized_setup_activation_id = (
+            None
+            if setup_activation_id is None
+            else _normalize_required_string(
+                setup_activation_id,
+                name="setup_activation_id",
             )
         )
         normalized_challenge = (
@@ -1300,6 +1370,15 @@ class CustomerSetupBootstrapAuthorizationService:
                     )
 
                 if (
+                    existing.setup_activation_id
+                    != normalized_setup_activation_id
+                ):
+                    raise ValueError(
+                        "Bootstrap authorization request "
+                        "has another setup activation identity."
+                    )
+
+                if (
                     existing.code_challenge_s256
                     != normalized_challenge
                 ):
@@ -1344,6 +1423,9 @@ class CustomerSetupBootstrapAuthorizationService:
                 ),
                 current_time=(
                     normalized_current_time
+                ),
+                setup_activation_id=(
+                    normalized_setup_activation_id
                 ),
             )
 
@@ -1471,6 +1553,9 @@ class CustomerSetupBootstrapAuthorizationService:
                     ),
                     consumed_at=(
                         consumed.consumed_at
+                    ),
+                    setup_activation_id=(
+                        consumed.setup_activation_id
                     ),
                     customer_identity=(
                         identity
@@ -1628,6 +1713,9 @@ class CustomerSetupBootstrapAuthorizationService:
                     consumed_at=(
                         record.consumed_at
                     ),
+                    setup_activation_id=(
+                        record.setup_activation_id
+                    ),
                     customer_identity=(
                         identity
                     ),
@@ -1641,6 +1729,7 @@ class CustomerSetupBootstrapAuthorizationService:
         customer_id: str,
         code_challenge_s256: str,
         current_time: datetime,
+        setup_activation_id: str | None = None,
     ) -> CustomerSetupBootstrapAuthorizationIssuance:
         issued_at = _serialize_timestamp(
             current_time
@@ -1702,6 +1791,9 @@ class CustomerSetupBootstrapAuthorizationService:
                     ),
                     customer_id=(
                         customer_id
+                    ),
+                    setup_activation_id=(
+                        setup_activation_id
                     ),
                     authorization_verifier_sha256=(
                         verifier

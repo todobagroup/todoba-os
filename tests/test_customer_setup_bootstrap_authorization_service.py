@@ -984,6 +984,7 @@ def test_store_persists_exact_schema(
         "authorization_request_id",
         "authorization_id",
         "customer_id",
+        "setup_activation_id",
         "authorization_verifier_sha256",
         "code_challenge_s256",
         "issued_at",
@@ -991,7 +992,6 @@ def test_store_persists_exact_schema(
         "status",
         "consumed_at",
     }
-
 
 @pytest.mark.parametrize(
     "value",

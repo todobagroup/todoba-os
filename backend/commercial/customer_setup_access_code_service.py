@@ -953,6 +953,96 @@ class CustomerSetupAccessCodeService:
                 "setup access code identity."
             )
 
+
+    def reissue_bound(
+        self,
+        *,
+        setup_activation_id: str,
+    ) -> CustomerSetupAccessCodeIssuance:
+        """
+        Rotate the customer-visible code for one BOUND
+        Setup Activation without changing customer,
+        activation, or deployment identity.
+        """
+
+        with self._lock:
+            activation = self._require_bound_activation(
+                setup_activation_id
+            )
+
+            existing = (
+                self._access_code_store
+                .get_active_by_setup_activation_id(
+                    setup_activation_id=(
+                        activation.setup_activation_id
+                    )
+                )
+            )
+
+            if existing is not None:
+                self._access_code_store.revoke(
+                    access_code_id=(
+                        existing.access_code_id
+                    )
+                )
+
+            for _ in range(
+                _ID_GENERATION_ATTEMPTS
+            ):
+                access_code_id = uuid.uuid4().hex
+
+                if (
+                    self._access_code_store.get(
+                        access_code_id=access_code_id
+                    )
+                    is not None
+                ):
+                    continue
+
+                secret = secrets.token_urlsafe(
+                    _SECRET_BYTES
+                )
+
+                activation_code = (
+                    f"{_CODE_PREFIX}."
+                    f"{access_code_id}."
+                    f"{secret}"
+                )
+
+                record = CustomerSetupAccessCodeRecord(
+                    access_code_id=access_code_id,
+                    setup_activation_id=(
+                        activation.setup_activation_id
+                    ),
+                    code_sha256=(
+                        self._derive_code_sha256(
+                            activation_code
+                        )
+                    ),
+                    status=(
+                        CustomerSetupAccessCodeStatus.ACTIVE
+                    ),
+                )
+
+                self._access_code_store.register(
+                    record
+                )
+
+                return CustomerSetupAccessCodeIssuance(
+                    access_code_id=access_code_id,
+                    setup_activation_id=(
+                        activation.setup_activation_id
+                    ),
+                    customer_id=activation.customer_id,
+                    activation_code=activation_code,
+                )
+
+            raise RuntimeError(
+                "Unable to generate unique customer "
+                "setup access code identity."
+            )
+
+
     def authorize(
         self,
         *,

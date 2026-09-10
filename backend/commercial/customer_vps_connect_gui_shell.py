@@ -50,6 +50,7 @@ class CustomerVPSConnectGuiShell:
         self._root = None
         self._activation_entry = None
         self._mt5_selector = None
+        self._detect_button = None
         self._connect_button = None
         self._verify_button = None
         self._finish_button = None
@@ -170,12 +171,12 @@ class CustomerVPSConnectGuiShell:
             pady=(4, 18),
         )
 
-        detect_button = ttk.Button(
+        self._detect_button = ttk.Button(
             button_row,
             text="Detect",
             command=self.detect_mt5,
         )
-        detect_button.pack(
+        self._detect_button.pack(
             side="left",
         )
 
@@ -185,32 +186,18 @@ class CustomerVPSConnectGuiShell:
             command=self.connect_selected,
             state="disabled",
         )
-        self._connect_button.pack(
-            side="left",
-            padx=(8, 0),
-        )
-
         self._verify_button = ttk.Button(
             button_row,
             text="Verify",
             command=self.verify_vps,
             state="disabled",
         )
-        self._verify_button.pack(
-            side="left",
-            padx=(8, 0),
-        )
-
         self._finish_button = ttk.Button(
             button_row,
             text="Finish",
             command=self.finish,
             state="disabled",
         )
-        self._finish_button.pack(
-            side="right",
-        )
-
         self._status_label = ttk.Label(
             outer,
             text=(
@@ -272,16 +259,16 @@ class CustomerVPSConnectGuiShell:
                 0
             )
 
-            self._connect_button.configure(
-                state="normal",
+            self._show_primary_action(
+                "connect"
             )
 
             self._set_status(
                 "MetaTrader 5 detected. Ready to connect."
             )
         else:
-            self._connect_button.configure(
-                state="disabled",
+            self._show_primary_action(
+                "detect"
             )
 
             self._set_status(
@@ -331,12 +318,8 @@ class CustomerVPSConnectGuiShell:
                 option=self._options[index],
             )
         except Exception:
-            self._verify_button.configure(
-                state="disabled",
-            )
-
-            self._finish_button.configure(
-                state="disabled",
+            self._show_primary_action(
+                "connect"
             )
 
             self._set_status(
@@ -350,12 +333,8 @@ class CustomerVPSConnectGuiShell:
                 "end",
             )
 
-        self._verify_button.configure(
-            state="normal",
-        )
-
-        self._finish_button.configure(
-            state="disabled",
+        self._show_primary_action(
+            "verify"
         )
 
         self._set_status(
@@ -372,8 +351,8 @@ class CustomerVPSConnectGuiShell:
                 self._application_shell.verify()
             )
         except Exception:
-            self._finish_button.configure(
-                state="disabled",
+            self._show_primary_action(
+                "verify"
             )
 
             self._set_status(
@@ -382,8 +361,8 @@ class CustomerVPSConnectGuiShell:
             raise
 
         if result.status == "vps_online":
-            self._finish_button.configure(
-                state="normal",
+            self._show_primary_action(
+                "finish"
             )
 
             self._set_status(
@@ -391,8 +370,8 @@ class CustomerVPSConnectGuiShell:
             )
             return
 
-        self._finish_button.configure(
-            state="disabled",
+        self._show_primary_action(
+            "verify"
         )
 
         self._set_status(
@@ -408,8 +387,8 @@ class CustomerVPSConnectGuiShell:
         try:
             self._application_shell.finish()
         except RuntimeError:
-            self._finish_button.configure(
-                state="disabled",
+            self._show_primary_action(
+                "verify"
             )
 
             self._set_status(
@@ -428,6 +407,40 @@ class CustomerVPSConnectGuiShell:
 
         root.quit()
         root.destroy()
+
+    def _show_primary_action(
+        self,
+        action: str,
+    ) -> None:
+        buttons = {
+            "detect": self._detect_button,
+            "connect": self._connect_button,
+            "verify": self._verify_button,
+            "finish": self._finish_button,
+        }
+
+        if action not in buttons:
+            raise ValueError(
+                "Unsupported VPS Connect primary action."
+            )
+
+        for button in buttons.values():
+            button.pack_forget()
+            button.configure(
+                state="disabled",
+            )
+
+        selected = buttons[action]
+        selected.configure(
+            state="normal",
+        )
+        selected.pack(
+            side=(
+                "right"
+                if action == "finish"
+                else "left"
+            ),
+        )
 
     def _set_status(
         self,

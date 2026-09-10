@@ -182,6 +182,7 @@ class FakeWidget:
 
         self.value = ""
         self.current_index = -1
+        self.visible = False
 
         type(self).instances.append(
             self
@@ -192,6 +193,13 @@ class FakeWidget:
         *args,
         **kwargs,
     ):
+        self.visible = True
+        return None
+
+    def pack_forget(
+        self,
+    ):
+        self.visible = False
         return None
 
     def grid(
@@ -343,6 +351,72 @@ def _built_shell(
         application,
         root,
     )
+
+
+def _button_with_text(
+    text,
+):
+    matches = [
+        widget
+        for widget in FakeWidget.instances
+        if widget.text == text
+    ]
+
+    assert len(matches) == 1
+    return matches[0]
+
+
+def test_single_primary_action_progresses_detect_connect_verify_finish(
+    monkeypatch,
+):
+    (
+        shell,
+        _,
+        _,
+    ) = _built_shell(
+        monkeypatch,
+        options=(
+            OPTION_A,
+        ),
+        proof_statuses=(
+            "vps_online",
+        ),
+    )
+
+    detect = _button_with_text("Detect")
+    connect = _button_with_text("Connect")
+    verify = _button_with_text("Verify")
+    finish = _button_with_text("Finish")
+
+    assert detect.visible is True
+    assert connect.visible is False
+    assert verify.visible is False
+    assert finish.visible is False
+
+    shell.detect_mt5()
+
+    assert detect.visible is False
+    assert connect.visible is True
+    assert verify.visible is False
+    assert finish.visible is False
+
+    shell._activation_entry.insert(
+        0,
+        ACTIVATION_CODE,
+    )
+    shell.connect_selected()
+
+    assert detect.visible is False
+    assert connect.visible is False
+    assert verify.visible is True
+    assert finish.visible is False
+
+    shell.verify_vps()
+
+    assert detect.visible is False
+    assert connect.visible is False
+    assert verify.visible is False
+    assert finish.visible is True
 
 
 def test_build_opens_application_and_uses_standalone_window(

@@ -468,11 +468,11 @@ def test_build_opens_application_and_uses_standalone_window(
     assert application.open_calls == 1
 
     assert root.window_title == (
-        "TODOBA VPS Connect"
+        "TODOBA VPS Setup"
     )
 
     assert WINDOW_TITLE == (
-        "TODOBA VPS Connect"
+        "TODOBA VPS Setup"
     )
 
     assert (

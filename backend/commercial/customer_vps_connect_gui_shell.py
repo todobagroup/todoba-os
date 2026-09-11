@@ -13,7 +13,7 @@ from backend.commercial.customer_vps_connect_application_shell import (
 )
 
 
-WINDOW_TITLE = "TODOBA VPS Connect"
+WINDOW_TITLE = "TODOBA VPS Setup"
 
 
 class CustomerVPSConnectGuiShell:
@@ -111,7 +111,7 @@ class CustomerVPSConnectGuiShell:
 
         heading = ttk.Label(
             outer,
-            text="TODOBA VPS Connect",
+            text="TODOBA VPS Setup",
         )
         heading.pack(
             pady=(0, 8),
@@ -376,8 +376,8 @@ class CustomerVPSConnectGuiShell:
 
         if result.status == "runtime_ready":
             self._set_status(
-                "TODOBA is ready on this MT5. "
-                "Complete MetaTrader VPS migration. "
+                "TODOBA is ready. "
+                "Complete the VPS migration in MetaTrader 5. "
                 "TODOBA will verify automatically."
             )
 
@@ -492,8 +492,8 @@ class CustomerVPSConnectGuiShell:
         )
 
         self._set_status(
-            "Waiting for MetaTrader VPS migration. "
-            "TODOBA is verifying automatically."
+            "Waiting for MetaTrader VPS. "
+            "TODOBA will continue automatically."
         )
 
         self._root.after(

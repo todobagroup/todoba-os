@@ -336,7 +336,7 @@ def test_same_assertion_id_cannot_change_facts(
 
     with pytest.raises(
         ValueError,
-        match="assertion",
+        match="verification|authoritative|commercial",
     ):
         service.settle(
             verification_assertion=changed,
@@ -1008,3 +1008,111 @@ def test_same_order_second_assertion_with_forged_customer_does_not_bypass(
         )
 
     assert store.size() == 1
+
+def test_same_assertion_id_cannot_change_external_evidence_identity(
+    tmp_path,
+):
+    (
+        service,
+        store,
+        evidence_service,
+        intent_service,
+        identity_registry,
+        order_service,
+    ) = _built_service(tmp_path)
+
+    (
+        _,
+        _,
+        _,
+        assertion,
+    ) = _create_chain(
+        evidence_service=evidence_service,
+        intent_service=intent_service,
+        identity_registry=identity_registry,
+        order_service=order_service,
+        external_evidence_id="PAYPAL-CAPTURE-001",
+    )
+
+    first = service.settle(
+        verification_assertion=assertion,
+    )
+
+    forged = replace(
+        assertion,
+        external_evidence_id="PAYPAL-CAPTURE-FORGED",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="verification",
+    ):
+        service.settle(
+            verification_assertion=forged,
+        )
+
+    assert store.size() == 1
+    assert (
+        store.get_by_verification_assertion_id(
+            verification_assertion_id=(
+                assertion.verification_assertion_id
+            )
+        )
+        == first
+    )
+
+
+def test_same_assertion_id_cannot_change_evidence_source(
+    tmp_path,
+):
+    (
+        service,
+        store,
+        evidence_service,
+        intent_service,
+        identity_registry,
+        order_service,
+    ) = _built_service(tmp_path)
+
+    (
+        _,
+        _,
+        _,
+        assertion,
+    ) = _create_chain(
+        evidence_service=evidence_service,
+        intent_service=intent_service,
+        identity_registry=identity_registry,
+        order_service=order_service,
+        rail=PaymentRail.PAYPAL,
+        external_evidence_id="PAYPAL-CAPTURE-001",
+    )
+
+    first = service.settle(
+        verification_assertion=assertion,
+    )
+
+    forged = replace(
+        assertion,
+        evidence_source=(
+            PaymentEvidenceSource.VND_BANK_TRANSFER
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="verification",
+    ):
+        service.settle(
+            verification_assertion=forged,
+        )
+
+    assert store.size() == 1
+    assert (
+        store.get_by_verification_assertion_id(
+            verification_assertion_id=(
+                assertion.verification_assertion_id
+            )
+        )
+        == first
+    )

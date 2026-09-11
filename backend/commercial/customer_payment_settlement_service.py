@@ -1038,6 +1038,14 @@ class CustomerPaymentSettlementService:
         with self._lock:
             self._require_sources_ready()
 
+            (
+                evidence,
+                intent,
+                order,
+            ) = self._verify_authoritative_chain(
+                verification_assertion
+            )
+
             existing_assertion = (
                 self._settlement_store
                 .get_by_verification_assertion_id(
@@ -1060,14 +1068,6 @@ class CustomerPaymentSettlementService:
                     )
 
                 return existing_assertion
-
-            (
-                evidence,
-                intent,
-                order,
-            ) = self._verify_authoritative_chain(
-                verification_assertion
-            )
 
             existing_evidence = (
                 self._settlement_store

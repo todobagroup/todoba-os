@@ -385,8 +385,9 @@ class CustomerVPSConnectGuiShell:
             return
 
         self._set_status(
-            "TODOBA VPS is not online yet. "
-            "Complete VPS setup and verify again."
+            "TODOBA VPS is not ready yet. "
+            "Keep MetaTrader 5 open and complete the VPS migration "
+            "if needed, then select Verify."
         )
 
     def _start_migration_observation(
@@ -403,8 +404,8 @@ class CustomerVPSConnectGuiShell:
             )
 
             self._set_status(
-                "Automatic VPS verification could not start. "
-                "Verify again to retry."
+                "TODOBA could not complete the automatic VPS check. "
+                "Select Verify to try again."
             )
             raise
 
@@ -423,8 +424,8 @@ class CustomerVPSConnectGuiShell:
             )
 
             self._set_status(
-                "Automatic VPS verification stopped. "
-                "Verify again to retry."
+                "TODOBA could not complete the automatic VPS check. "
+                "Select Verify to try again."
             )
             raise
 
@@ -444,8 +445,9 @@ class CustomerVPSConnectGuiShell:
             )
 
             self._set_status(
-                "TODOBA VPS is not online yet. "
-                "Complete VPS migration and Verify again."
+                "TODOBA VPS is not ready yet. "
+                "Keep MetaTrader 5 open and complete the VPS migration "
+                "if needed, then select Verify."
             )
             return
 

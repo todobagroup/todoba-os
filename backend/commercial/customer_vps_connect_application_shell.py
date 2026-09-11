@@ -30,6 +30,26 @@ from backend.commercial.customer_vps_connect_mt5_detection_service import (
     CustomerVPSConnectMT5DetectionService,
 )
 
+from backend.commercial.customer_vps_connect_mt5_installed_agent_verifier import (
+    CustomerVPSConnectMT5InstalledAgentVerifier,
+)
+
+from backend.commercial.customer_vps_connect_mt5_launcher_service import (
+    CustomerVPSConnectMT5LauncherService,
+)
+
+from backend.commercial.customer_vps_connect_mt5_runtime_preparation_service import (
+    CustomerVPSConnectMT5RuntimePreparationService,
+)
+
+from backend.commercial.customer_vps_connect_mt5_startup_config_service import (
+    CustomerVPSConnectMT5StartupConfigService,
+)
+
+from backend.commercial.customer_vps_connect_mt5_symbol_discovery_service import (
+    CustomerVPSConnectMT5SymbolDiscoveryService,
+)
+
 
 def _required_string(
     value: Any,
@@ -65,6 +85,22 @@ class CustomerVPSConnectApplicationShell:
         detection_service: CustomerVPSConnectMT5DetectionService,
         account_identity_service: CustomerVPSConnectMT5AccountIdentityService,
         core_service: CustomerVPSConnectCoreOrchestrationService,
+        installed_agent_verifier: (
+            CustomerVPSConnectMT5InstalledAgentVerifier | None
+        ) = None,
+        symbol_discovery_service: (
+            CustomerVPSConnectMT5SymbolDiscoveryService | None
+        ) = None,
+        runtime_preparation_service: (
+            CustomerVPSConnectMT5RuntimePreparationService | None
+        ) = None,
+        startup_config_service: (
+            CustomerVPSConnectMT5StartupConfigService | None
+        ) = None,
+        mt5_launcher_service: (
+            CustomerVPSConnectMT5LauncherService | None
+        ) = None,
+        startup_config_directory: Path | None = None,
     ) -> None:
         if not isinstance(
             detection_service,
@@ -93,11 +129,112 @@ class CustomerVPSConnectApplicationShell:
                 "CustomerVPSConnectCoreOrchestrationService."
             )
 
+        auto_runtime_dependencies = (
+            installed_agent_verifier,
+            symbol_discovery_service,
+            runtime_preparation_service,
+            startup_config_service,
+            mt5_launcher_service,
+            startup_config_directory,
+        )
+
+        dependency_presence = tuple(
+            value is not None
+            for value in auto_runtime_dependencies
+        )
+
+        if any(
+            dependency_presence
+        ) and not all(
+            dependency_presence
+        ):
+            raise ValueError(
+                "AUTO-1 runtime dependencies must be "
+                "provided together."
+            )
+
+        self._auto_runtime_enabled = all(
+            dependency_presence
+        )
+
+        if self._auto_runtime_enabled:
+            if not isinstance(
+                installed_agent_verifier,
+                CustomerVPSConnectMT5InstalledAgentVerifier,
+            ):
+                raise TypeError(
+                    "installed_agent_verifier must be "
+                    "CustomerVPSConnectMT5InstalledAgentVerifier."
+                )
+
+            if not isinstance(
+                symbol_discovery_service,
+                CustomerVPSConnectMT5SymbolDiscoveryService,
+            ):
+                raise TypeError(
+                    "symbol_discovery_service must be "
+                    "CustomerVPSConnectMT5SymbolDiscoveryService."
+                )
+
+            if not isinstance(
+                runtime_preparation_service,
+                CustomerVPSConnectMT5RuntimePreparationService,
+            ):
+                raise TypeError(
+                    "runtime_preparation_service must be "
+                    "CustomerVPSConnectMT5RuntimePreparationService."
+                )
+
+            if not isinstance(
+                startup_config_service,
+                CustomerVPSConnectMT5StartupConfigService,
+            ):
+                raise TypeError(
+                    "startup_config_service must be "
+                    "CustomerVPSConnectMT5StartupConfigService."
+                )
+
+            if not isinstance(
+                mt5_launcher_service,
+                CustomerVPSConnectMT5LauncherService,
+            ):
+                raise TypeError(
+                    "mt5_launcher_service must be "
+                    "CustomerVPSConnectMT5LauncherService."
+                )
+
+            if not isinstance(
+                startup_config_directory,
+                Path,
+            ):
+                raise TypeError(
+                    "startup_config_directory must be Path."
+                )
+
         self._detection_service = detection_service
         self._account_identity_service = (
             account_identity_service
         )
         self._core_service = core_service
+
+        self._installed_agent_verifier = (
+            installed_agent_verifier
+        )
+        self._symbol_discovery_service = (
+            symbol_discovery_service
+        )
+        self._runtime_preparation_service = (
+            runtime_preparation_service
+        )
+        self._startup_config_service = (
+            startup_config_service
+        )
+        self._mt5_launcher_service = (
+            mt5_launcher_service
+        )
+        self._startup_config_directory = (
+            startup_config_directory
+        )
 
         self._opened = False
         self._detected = False
@@ -159,10 +296,56 @@ class CustomerVPSConnectApplicationShell:
                 "MT5 detection is required before connect."
             )
 
-        identity_result = (
-            self._account_identity_service.probe(
+        if not self._auto_runtime_enabled:
+            identity_result = (
+                self._account_identity_service.probe(
+                    option=option,
+                )
+            )
+
+            account_fingerprint = _required_string(
+                getattr(
+                    identity_result,
+                    "account_fingerprint",
+                    None,
+                ),
+                name="account_fingerprint",
+            )
+
+            result = self._core_service.prepare(
+                activation_code=activation_code,
+                account_fingerprint=account_fingerprint,
+            )
+
+            if not isinstance(
+                result,
+                CustomerVPSConnectCoreOrchestrationResult,
+            ):
+                raise RuntimeError(
+                    "VPS Connect Core returned invalid "
+                    "connect result."
+                )
+
+            self._connected = True
+
+            return result
+
+        binding = (
+            self._account_identity_service.probe_binding(
                 option=option,
             )
+        )
+
+        identity_result = getattr(
+            binding,
+            "identity",
+            None,
+        )
+
+        preflight_result = getattr(
+            binding,
+            "preflight_result",
+            None,
         )
 
         account_fingerprint = _required_string(
@@ -187,6 +370,74 @@ class CustomerVPSConnectApplicationShell:
                 "VPS Connect Core returned invalid "
                 "connect result."
             )
+
+        installation_result = (
+            self._installed_agent_verifier.verify(
+                preflight_result=preflight_result,
+            )
+        )
+
+        symbols = (
+            self._symbol_discovery_service.discover(
+                preflight_result=preflight_result,
+            )
+        )
+
+        preparation_result = (
+            self._runtime_preparation_service.prepare(
+                preflight_result=preflight_result,
+                installation_result=installation_result,
+            )
+        )
+
+        gold_symbol = (
+            self._runtime_preparation_service.select_gold_symbol(
+                symbols=symbols,
+            )
+        )
+
+        startup_plan = (
+            self._runtime_preparation_service.build_startup_plan(
+                preparation_result=preparation_result,
+                symbol=gold_symbol,
+            )
+        )
+
+        config_text = (
+            self._runtime_preparation_service.render_startup_config(
+                startup_plan=startup_plan,
+            )
+        )
+
+        config_result = (
+            self._startup_config_service.write(
+                directory=self._startup_config_directory,
+                config_text=config_text,
+            )
+        )
+
+        config_path = _required_string(
+            getattr(
+                config_result,
+                "config_path",
+                None,
+            ),
+            name="config_path",
+        )
+
+        terminal_path = _required_string(
+            getattr(
+                preparation_result,
+                "terminal_path",
+                None,
+            ),
+            name="terminal_path",
+        )
+
+        self._mt5_launcher_service.launch(
+            terminal_path=terminal_path,
+            config_path=config_path,
+        )
 
         self._connected = True
 

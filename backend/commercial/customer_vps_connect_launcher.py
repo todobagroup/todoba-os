@@ -42,6 +42,30 @@ from backend.commercial.customer_vps_connect_mt5_detection_service import (
     CustomerVPSConnectMT5DetectionService,
 )
 
+from backend.commercial.customer_vps_connect_mt5_installed_agent_verifier import (
+    CustomerVPSConnectMT5InstalledAgentVerifier,
+)
+
+from backend.commercial.customer_vps_connect_mt5_launcher_service import (
+    CustomerVPSConnectMT5LauncherService,
+)
+
+from backend.commercial.customer_vps_connect_mt5_runtime_preparation_service import (
+    CustomerVPSConnectMT5RuntimePreparationService,
+)
+
+from backend.commercial.customer_vps_connect_mt5_startup_config_service import (
+    CustomerVPSConnectMT5StartupConfigService,
+)
+
+from backend.commercial.customer_vps_connect_mt5_symbol_discovery_service import (
+    CustomerVPSConnectMT5SymbolDiscoveryService,
+)
+
+from backend.commercial.customer_vps_connect_windows_process_launcher import (
+    CustomerVPSConnectWindowsProcessLauncher,
+)
+
 
 class CustomerVPSConnectLauncher:
     """
@@ -127,6 +151,42 @@ class CustomerVPSConnectLauncher:
             )
         )
 
+        installed_agent_verifier = (
+            CustomerVPSConnectMT5InstalledAgentVerifier()
+        )
+
+        symbol_discovery_service = (
+            CustomerVPSConnectMT5SymbolDiscoveryService(
+                mt5_module=mt5_module,
+            )
+        )
+
+        runtime_preparation_service = (
+            CustomerVPSConnectMT5RuntimePreparationService()
+        )
+
+        startup_config_service = (
+            CustomerVPSConnectMT5StartupConfigService()
+        )
+
+        windows_process_launcher = (
+            CustomerVPSConnectWindowsProcessLauncher()
+        )
+
+        mt5_launcher_service = (
+            CustomerVPSConnectMT5LauncherService(
+                process_launcher=(
+                    windows_process_launcher
+                ),
+            )
+        )
+
+        startup_config_directory = (
+            roaming_appdata_path
+            / "TODOBA"
+            / "VPS Connect"
+        )
+
         application_shell = (
             CustomerVPSConnectApplicationShell(
                 detection_service=detection_service,
@@ -134,6 +194,24 @@ class CustomerVPSConnectLauncher:
                     account_identity_service
                 ),
                 core_service=core_service,
+                installed_agent_verifier=(
+                    installed_agent_verifier
+                ),
+                symbol_discovery_service=(
+                    symbol_discovery_service
+                ),
+                runtime_preparation_service=(
+                    runtime_preparation_service
+                ),
+                startup_config_service=(
+                    startup_config_service
+                ),
+                mt5_launcher_service=(
+                    mt5_launcher_service
+                ),
+                startup_config_directory=(
+                    startup_config_directory
+                ),
             )
         )
 

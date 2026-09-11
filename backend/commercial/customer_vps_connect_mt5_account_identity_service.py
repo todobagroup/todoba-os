@@ -113,6 +113,43 @@ class CustomerVPSConnectMT5AccountIdentityResult:
         )
 
 
+@dataclass(
+    frozen=True,
+)
+class CustomerVPSConnectMT5AccountBindingResult:
+    """
+    Internal authoritative binding for VPS Connect composition.
+
+    The customer-safe identity remains the public projection.
+    The full preflight result stays inside application composition.
+    """
+
+    identity: CustomerVPSConnectMT5AccountIdentityResult
+    preflight_result: CustomerMT5SetupPreflightResult
+
+    def __post_init__(
+        self,
+    ) -> None:
+        if not isinstance(
+            self.identity,
+            CustomerVPSConnectMT5AccountIdentityResult,
+        ):
+            raise TypeError(
+                "identity must be "
+                "CustomerVPSConnectMT5AccountIdentityResult."
+            )
+
+        if not isinstance(
+            self.preflight_result,
+            CustomerMT5SetupPreflightResult,
+        ):
+            raise TypeError(
+                "preflight_result must be "
+                "CustomerMT5SetupPreflightResult."
+            )
+
+
+
 class CustomerVPSConnectMT5AccountIdentityService:
     """
     Probe one selected MT5 installation through the existing
@@ -137,11 +174,11 @@ class CustomerVPSConnectMT5AccountIdentityService:
             mt5_preflight_service
         )
 
-    def probe(
+    def _probe_authoritative(
         self,
         *,
         option: CustomerVPSConnectMT5DetectionOption,
-    ) -> CustomerVPSConnectMT5AccountIdentityResult:
+    ) -> CustomerMT5SetupPreflightResult:
         if not isinstance(
             option,
             CustomerVPSConnectMT5DetectionOption,
@@ -205,20 +242,55 @@ class CustomerVPSConnectMT5AccountIdentityService:
                 "MT5 account fingerprint is not canonical."
             )
 
-        return (
-            CustomerVPSConnectMT5AccountIdentityResult(
-                status="account_ready",
-                terminal_path=(
-                    preflight_result.terminal_path
-                ),
-                login=(
-                    preflight_result.login
-                ),
-                server=(
-                    preflight_result.server
-                ),
-                account_fingerprint=(
-                    preflight_result.account_fingerprint
-                ),
-            )
+        return preflight_result
+
+    @staticmethod
+    def _project_identity(
+        preflight_result: CustomerMT5SetupPreflightResult,
+    ) -> CustomerVPSConnectMT5AccountIdentityResult:
+        return CustomerVPSConnectMT5AccountIdentityResult(
+            status="account_ready",
+            terminal_path=(
+                preflight_result.terminal_path
+            ),
+            login=(
+                preflight_result.login
+            ),
+            server=(
+                preflight_result.server
+            ),
+            account_fingerprint=(
+                preflight_result.account_fingerprint
+            ),
+        )
+
+    def probe(
+        self,
+        *,
+        option: CustomerVPSConnectMT5DetectionOption,
+    ) -> CustomerVPSConnectMT5AccountIdentityResult:
+        preflight_result = self._probe_authoritative(
+            option=option,
+        )
+
+        return self._project_identity(
+            preflight_result
+        )
+
+    def probe_binding(
+        self,
+        *,
+        option: CustomerVPSConnectMT5DetectionOption,
+    ) -> CustomerVPSConnectMT5AccountBindingResult:
+        preflight_result = self._probe_authoritative(
+            option=option,
+        )
+
+        identity = self._project_identity(
+            preflight_result
+        )
+
+        return CustomerVPSConnectMT5AccountBindingResult(
+            identity=identity,
+            preflight_result=preflight_result,
         )

@@ -56,6 +56,18 @@ class FakeIdentity:
         type(self).instances.append(self)
 
 
+class FakeSymbolDiscovery:
+    instances = []
+
+    def __init__(
+        self,
+        *,
+        mt5_module,
+    ):
+        self.mt5_module = mt5_module
+        type(self).instances.append(self)
+
+
 class FakeGrantClient:
     instances = []
 
@@ -107,14 +119,22 @@ class FakeApplicationShell:
         detection_service,
         account_identity_service,
         core_service,
+        **kwargs,
     ):
         self.detection_service = (
             detection_service
         )
+
         self.account_identity_service = (
             account_identity_service
         )
+
         self.core_service = core_service
+
+        self.additional_dependencies = dict(
+            kwargs
+        )
+
         type(self).instances.append(self)
 
 
@@ -145,6 +165,7 @@ def _reset():
         FakePreflight,
         FakeDetection,
         FakeIdentity,
+        FakeSymbolDiscovery,
         FakeGrantClient,
         FakeLiveProofClient,
         FakeCore,
@@ -173,6 +194,12 @@ def _patch(monkeypatch):
         launcher_module,
         "CustomerVPSConnectMT5AccountIdentityService",
         FakeIdentity,
+    )
+
+    monkeypatch.setattr(
+        launcher_module,
+        "CustomerVPSConnectMT5SymbolDiscoveryService",
+        FakeSymbolDiscovery,
     )
 
     monkeypatch.setattr(

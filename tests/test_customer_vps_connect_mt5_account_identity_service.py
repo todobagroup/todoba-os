@@ -313,3 +313,59 @@ def test_owner_does_not_duplicate_mt5_or_gain_extra_authority():
         "'password':",
     ):
         assert forbidden_password_surface not in source
+
+
+def test_probe_binding_preserves_internal_authoritative_preflight():
+    preflight_result = _result()
+
+    preflight_service = FakePreflightService(
+        preflight_result
+    )
+
+    service = (
+        CustomerVPSConnectMT5AccountIdentityService(
+            mt5_preflight_service=preflight_service,
+        )
+    )
+
+    binding = service.probe_binding(
+        option=_option(),
+    )
+
+    assert binding.identity.status == "account_ready"
+
+    assert (
+        binding.identity.account_fingerprint
+        == preflight_result.account_fingerprint
+    )
+
+    assert (
+        binding.preflight_result
+        is preflight_result
+    )
+
+
+def test_probe_remains_customer_safe_after_internal_binding_support():
+    preflight_service = FakePreflightService(
+        _result()
+    )
+
+    service = (
+        CustomerVPSConnectMT5AccountIdentityService(
+            mt5_preflight_service=preflight_service,
+        )
+    )
+
+    result = service.probe(
+        option=_option(),
+    )
+
+    assert not hasattr(
+        result,
+        "data_path",
+    )
+
+    assert not hasattr(
+        result,
+        "preflight_result",
+    )

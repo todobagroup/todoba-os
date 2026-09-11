@@ -1,4 +1,4 @@
-﻿"""
+"""
 Windows packaging owner for standalone TODOBA VPS Connect.
 
 This owner:
@@ -19,7 +19,7 @@ import sys
 
 _VALIDATED_PYINSTALLER_VERSION = "6.22.2"
 
-_PRODUCT_NAME = "TODOBA VPS Connect"
+_PRODUCT_NAME = "TODOBA VPS Setup"
 
 _ENTRYPOINT_RELATIVE_PATH = (
     Path("scripts")

@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 
 import pytest
 
@@ -166,7 +166,7 @@ def test_main_failure_is_customer_safe_and_does_not_leak_exception(
 
     title, message = shown[0]
 
-    assert title == "TODOBA VPS Connect"
+    assert title == "TODOBA VPS Setup"
     assert secret not in message
     assert message
 

@@ -1,4 +1,4 @@
-﻿"""
+"""
 Production Windows entrypoint for TODOBA VPS Connect.
 """
 
@@ -17,10 +17,10 @@ from backend.commercial.customer_vps_connect_launcher import (
 )
 
 
-WINDOW_TITLE = "TODOBA VPS Connect"
+WINDOW_TITLE = "TODOBA VPS Setup"
 
 _GENERIC_STARTUP_ERROR = (
-    "TODOBA VPS Connect could not start. "
+    "TODOBA VPS Setup could not start. "
     "Please try again."
 )
 

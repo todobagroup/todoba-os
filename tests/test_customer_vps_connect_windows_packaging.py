@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 import sys
 
 import pytest
@@ -6,7 +6,7 @@ import pytest
 import scripts.build_customer_vps_connect_windows as build_owner
 
 
-PRODUCT_NAME = "TODOBA VPS Connect"
+PRODUCT_NAME = "TODOBA VPS Setup"
 VALIDATED_PYINSTALLER_VERSION = "6.22.2"
 
 

@@ -1,4 +1,4 @@
-﻿"""
+"""
 Production composition owner for TODOBA VPS Connect.
 
 This launcher wires the already-owned VPS Connect capabilities
@@ -32,6 +32,10 @@ from backend.commercial.customer_vps_connect_gui_shell import (
 
 from backend.commercial.customer_vps_connect_live_proof_http_client import (
     CustomerVPSConnectLiveProofHttpClient,
+)
+
+from backend.commercial.customer_vps_connect_migration_observation_service import (
+    CustomerVPSConnectMigrationObservationService,
 )
 
 from backend.commercial.customer_vps_connect_mt5_account_identity_service import (
@@ -151,6 +155,14 @@ class CustomerVPSConnectLauncher:
             )
         )
 
+        migration_observation_service = (
+            CustomerVPSConnectMigrationObservationService(
+                proof_probe=core_service,
+                max_attempts=36,
+                retry_after_ms=5000,
+            )
+        )
+
         installed_agent_verifier = (
             CustomerVPSConnectMT5InstalledAgentVerifier()
         )
@@ -211,6 +223,9 @@ class CustomerVPSConnectLauncher:
                 ),
                 startup_config_directory=(
                     startup_config_directory
+                ),
+                migration_observation_service=(
+                    migration_observation_service
                 ),
             )
         )

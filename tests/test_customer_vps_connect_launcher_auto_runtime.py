@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 
 import backend.commercial.customer_vps_connect_launcher as launcher_module
 
@@ -111,6 +111,13 @@ class FakeCore(_FakeBase):
         )
         type(self).instances.append(self)
 
+
+
+    def check_live_proof(self):
+        raise AssertionError(
+            "Launcher composition test must not "
+            "perform a live proof request."
+        )
 
 class FakeInstalledAgentVerifier(_FakeBase):
     instances = []

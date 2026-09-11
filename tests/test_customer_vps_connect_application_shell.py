@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -364,3 +364,146 @@ def test_application_shell_has_no_gui_packaging_or_persistence_authority():
         "while True",
     ):
         assert forbidden not in source
+
+
+def test_application_delegates_migration_observation_policy():
+    from backend.commercial.customer_vps_connect_migration_observation_service import (
+        CustomerVPSConnectMigrationObservationService,
+    )
+
+    detection = FakeDetectionService()
+    identity = FakeIdentityService()
+    core = FakeCore(
+        proof_statuses=[
+            "runtime_ready",
+            "vps_online",
+        ]
+    )
+
+    observation = (
+        CustomerVPSConnectMigrationObservationService(
+            proof_probe=core,
+            max_attempts=2,
+            retry_after_ms=5000,
+        )
+    )
+
+    shell = CustomerVPSConnectApplicationShell(
+        detection_service=detection,
+        account_identity_service=identity,
+        core_service=core,
+        migration_observation_service=observation,
+    )
+
+    shell.open()
+    shell.detect(
+        roaming_appdata_path=ROAMING,
+    )
+    shell.connect(
+        activation_code=ACTIVATION_CODE,
+        option=OPTION,
+    )
+
+    shell.begin_migration_observation()
+
+    first = shell.observe_migration()
+
+    assert first.status == "observation_pending"
+    assert first.attempts == 1
+    assert first.retry_after_ms == 5000
+
+    second = shell.observe_migration()
+
+    assert second.status == "vps_online"
+    assert second.attempts == 2
+
+
+def test_begin_migration_observation_requires_connect():
+    from backend.commercial.customer_vps_connect_migration_observation_service import (
+        CustomerVPSConnectMigrationObservationService,
+    )
+
+    detection = FakeDetectionService()
+    identity = FakeIdentityService()
+    core = FakeCore(
+        proof_statuses=[
+            "vps_online",
+        ]
+    )
+
+    observation = (
+        CustomerVPSConnectMigrationObservationService(
+            proof_probe=core,
+            max_attempts=1,
+            retry_after_ms=5000,
+        )
+    )
+
+    shell = CustomerVPSConnectApplicationShell(
+        detection_service=detection,
+        account_identity_service=identity,
+        core_service=core,
+        migration_observation_service=observation,
+    )
+
+    shell.open()
+    shell.detect(
+        roaming_appdata_path=ROAMING,
+    )
+
+    with pytest.raises(RuntimeError):
+        shell.begin_migration_observation()
+
+
+def test_migration_observation_requires_configured_owner():
+    shell, _, _, _ = _shell(
+        proof_statuses=[
+            "vps_online",
+        ]
+    )
+
+    shell.open()
+    shell.detect(
+        roaming_appdata_path=ROAMING,
+    )
+    shell.connect(
+        activation_code=ACTIVATION_CODE,
+        option=OPTION,
+    )
+
+    with pytest.raises(RuntimeError):
+        shell.begin_migration_observation()
+
+    with pytest.raises(RuntimeError):
+        shell.observe_migration()
+
+
+def test_application_shell_does_not_own_observation_policy():
+    source = Path(
+        "backend/commercial/"
+        "customer_vps_connect_application_shell.py"
+    ).read_text(
+        encoding="utf-8-sig",
+    )
+
+    begin_start = source.index(
+        "    def begin_migration_observation("
+    )
+
+    finish_start = source.index(
+        "    def finish(",
+        begin_start,
+    )
+
+    block = source[
+        begin_start:finish_start
+    ]
+
+    assert ".begin()" in block
+    assert ".observe()" in block
+    assert "check_live_proof" not in block
+    assert "max_attempts" not in block
+    assert "retry_after_ms" not in block
+    assert "range(" not in block
+    assert "while " not in block
+    assert "sleep" not in block

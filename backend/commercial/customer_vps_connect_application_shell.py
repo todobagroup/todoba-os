@@ -1,4 +1,4 @@
-﻿"""
+"""
 TODOBA VPS Connect toolkit-neutral application shell.
 
 Owns only customer-flow sequencing:
@@ -13,6 +13,11 @@ this shell.
 """
 
 from pathlib import Path
+
+from backend.commercial.customer_vps_connect_migration_observation_service import (
+    CustomerVPSConnectMigrationObservationResult,
+    CustomerVPSConnectMigrationObservationService,
+)
 from typing import Any
 
 from backend.commercial.customer_vps_connect_core_orchestration_service import (
@@ -101,6 +106,9 @@ class CustomerVPSConnectApplicationShell:
             CustomerVPSConnectMT5LauncherService | None
         ) = None,
         startup_config_directory: Path | None = None,
+        migration_observation_service: (
+            CustomerVPSConnectMigrationObservationService | None
+        ) = None,
     ) -> None:
         if not isinstance(
             detection_service,
@@ -127,6 +135,18 @@ class CustomerVPSConnectApplicationShell:
             raise TypeError(
                 "core_service must be "
                 "CustomerVPSConnectCoreOrchestrationService."
+            )
+
+        if (
+            migration_observation_service is not None
+            and not isinstance(
+                migration_observation_service,
+                CustomerVPSConnectMigrationObservationService,
+            )
+        ):
+            raise TypeError(
+                "migration_observation_service must be "
+                "CustomerVPSConnectMigrationObservationService."
             )
 
         auto_runtime_dependencies = (
@@ -234,6 +254,10 @@ class CustomerVPSConnectApplicationShell:
         )
         self._startup_config_directory = (
             startup_config_directory
+        )
+
+        self._migration_observation_service = (
+            migration_observation_service
         )
 
         self._opened = False
@@ -460,6 +484,51 @@ class CustomerVPSConnectApplicationShell:
             raise RuntimeError(
                 "VPS Connect Core returned invalid "
                 "live proof result."
+            )
+
+        return result
+
+    def begin_migration_observation(
+        self,
+    ) -> None:
+        if not self._connected:
+            raise RuntimeError(
+                "VPS Connect must be connected before "
+                "migration observation."
+            )
+
+        if self._migration_observation_service is None:
+            raise RuntimeError(
+                "VPS migration observation is not configured."
+            )
+
+        self._migration_observation_service.begin()
+
+    def observe_migration(
+        self,
+    ) -> CustomerVPSConnectMigrationObservationResult:
+        if not self._connected:
+            raise RuntimeError(
+                "VPS Connect must be connected before "
+                "migration observation."
+            )
+
+        if self._migration_observation_service is None:
+            raise RuntimeError(
+                "VPS migration observation is not configured."
+            )
+
+        result = (
+            self._migration_observation_service.observe()
+        )
+
+        if not isinstance(
+            result,
+            CustomerVPSConnectMigrationObservationResult,
+        ):
+            raise RuntimeError(
+                "VPS migration observation returned "
+                "invalid result."
             )
 
         return result

@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 
 import pytest
 
@@ -109,6 +109,13 @@ class FakeCore:
         )
         type(self).instances.append(self)
 
+
+
+    def check_live_proof(self):
+        raise AssertionError(
+            "Launcher composition test must not "
+            "perform a live proof request."
+        )
 
 class FakeApplicationShell:
     instances = []
@@ -407,3 +414,40 @@ def test_launcher_has_composition_authority_only():
         "WebRequestUrl",
     ):
         assert forbidden not in source
+
+
+def test_launcher_composes_bounded_migration_observation_policy(
+    monkeypatch,
+):
+    from backend.commercial.customer_vps_connect_migration_observation_service import (
+        CustomerVPSConnectMigrationObservationService,
+    )
+
+    _launcher(monkeypatch)
+
+    assert len(
+        FakeApplicationShell.instances
+    ) == 1
+
+    application = (
+        FakeApplicationShell.instances[0]
+    )
+
+    observation = (
+        application.additional_dependencies[
+            "migration_observation_service"
+        ]
+    )
+
+    assert isinstance(
+        observation,
+        CustomerVPSConnectMigrationObservationService,
+    )
+
+    assert observation._max_attempts == 36
+    assert observation._retry_after_ms == 5000
+
+    assert (
+        observation._proof_probe
+        is FakeCore.instances[0]
+    )

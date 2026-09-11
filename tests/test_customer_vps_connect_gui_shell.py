@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -40,11 +40,15 @@ class FakeApplicationShell(
         *,
         options=(),
         proof_statuses=(),
+        observation_results=(),
         finish_error=False,
     ):
         self.options = tuple(options)
         self.proof_statuses = list(
             proof_statuses
+        )
+        self.observation_results = list(
+            observation_results
         )
         self.finish_error = finish_error
 
@@ -52,6 +56,8 @@ class FakeApplicationShell(
         self.detect_calls = []
         self.connect_calls = []
         self.verify_calls = 0
+        self.begin_observation_calls = 0
+        self.observe_migration_calls = 0
         self.finish_calls = 0
 
     def open(self):
@@ -94,6 +100,19 @@ class FakeApplicationShell(
             status=self.proof_statuses.pop(0),
         )
 
+    def begin_migration_observation(self):
+        self.begin_observation_calls += 1
+
+    def observe_migration(self):
+        self.observe_migration_calls += 1
+
+        if not self.observation_results:
+            raise AssertionError(
+                "Unexpected migration observation."
+            )
+
+        return self.observation_results.pop(0)
+
     def finish(self):
         self.finish_calls += 1
 
@@ -112,6 +131,7 @@ class FakeRoot:
         self.mainloop_calls = 0
         self.quit_calls = 0
         self.destroy_calls = 0
+        self.after_calls = []
 
     def title(
         self,
@@ -141,6 +161,18 @@ class FakeRoot:
         callback,
     ):
         self.protocols[name] = callback
+
+    def after(
+        self,
+        delay_ms,
+        callback,
+    ):
+        self.after_calls.append(
+            (
+                delay_ms,
+                callback,
+            )
+        )
 
     def mainloop(self):
         self.mainloop_calls += 1
@@ -325,6 +357,7 @@ def _built_shell(
     *,
     options=(),
     proof_statuses=(),
+    observation_results=(),
     finish_error=False,
 ):
     root = _patch_gui(
@@ -334,6 +367,7 @@ def _built_shell(
     application = FakeApplicationShell(
         options=options,
         proof_statuses=proof_statuses,
+        observation_results=observation_results,
         finish_error=finish_error,
     )
 
@@ -877,13 +911,24 @@ def test_detect_projects_detector_installations_contract(
 def test_runtime_ready_guides_migration_without_enabling_finish(
     monkeypatch,
 ):
-    shell, _, _ = _built_shell(
+    (
+        shell,
+        application,
+        root,
+    ) = _built_shell(
         monkeypatch,
         options=(
             OPTION_A,
         ),
         proof_statuses=(
             "runtime_ready",
+        ),
+        observation_results=(
+            SimpleNamespace(
+                status="observation_pending",
+                attempts=1,
+                retry_after_ms=7311,
+            ),
         ),
     )
 
@@ -897,14 +942,226 @@ def test_runtime_ready_guides_migration_without_enabling_finish(
     shell.connect_selected()
     shell.verify_vps()
 
+    assert application.verify_calls == 1
+    assert application.begin_observation_calls == 1
+    assert application.observe_migration_calls == 1
+
     assert (
         shell._finish_button.cget("state")
         == "disabled"
     )
 
-    status_text = (
-        shell._status_label.cget("text")
+    assert len(root.after_calls) == 1
+    assert root.after_calls[0][0] == 7311
+
+def test_runtime_ready_starts_automatic_migration_observation(
+    monkeypatch,
+):
+    (
+        shell,
+        application,
+        root,
+    ) = _built_shell(
+        monkeypatch,
+        options=(
+            OPTION_A,
+        ),
+        proof_statuses=(
+            "runtime_ready",
+        ),
+        observation_results=(
+            SimpleNamespace(
+                status="observation_pending",
+                attempts=1,
+                retry_after_ms=7311,
+            ),
+        ),
     )
 
-    assert "ready on this MT5" in status_text
-    assert "MetaTrader VPS migration" in status_text
+    shell.detect_mt5()
+
+    shell._activation_entry.insert(
+        0,
+        ACTIVATION_CODE,
+    )
+
+    shell.connect_selected()
+    shell.verify_vps()
+
+    assert application.verify_calls == 1
+    assert application.begin_observation_calls == 1
+    assert application.observe_migration_calls == 1
+
+    assert len(root.after_calls) == 1
+
+    delay_ms, callback = root.after_calls[0]
+
+    assert delay_ms == 7311
+    assert callback == shell._observe_migration
+
+    assert (
+        shell._finish_button.cget("state")
+        == "disabled"
+    )
+
+
+def test_automatic_observation_reuses_owner_retry_interval(
+    monkeypatch,
+):
+    (
+        shell,
+        application,
+        root,
+    ) = _built_shell(
+        monkeypatch,
+        options=(
+            OPTION_A,
+        ),
+        proof_statuses=(
+            "runtime_ready",
+        ),
+        observation_results=(
+            SimpleNamespace(
+                status="observation_pending",
+                attempts=1,
+                retry_after_ms=7311,
+            ),
+            SimpleNamespace(
+                status="observation_pending",
+                attempts=2,
+                retry_after_ms=9127,
+            ),
+        ),
+    )
+
+    shell.detect_mt5()
+
+    shell._activation_entry.insert(
+        0,
+        ACTIVATION_CODE,
+    )
+
+    shell.connect_selected()
+    shell.verify_vps()
+
+    _, callback = root.after_calls.pop(0)
+
+    callback()
+
+    assert application.observe_migration_calls == 2
+    assert len(root.after_calls) == 1
+    assert root.after_calls[0][0] == 9127
+
+
+def test_automatic_observation_online_enables_finish(
+    monkeypatch,
+):
+    (
+        shell,
+        application,
+        root,
+    ) = _built_shell(
+        monkeypatch,
+        options=(
+            OPTION_A,
+        ),
+        proof_statuses=(
+            "runtime_ready",
+        ),
+        observation_results=(
+            SimpleNamespace(
+                status="vps_online",
+                attempts=1,
+                retry_after_ms=None,
+            ),
+        ),
+    )
+
+    shell.detect_mt5()
+
+    shell._activation_entry.insert(
+        0,
+        ACTIVATION_CODE,
+    )
+
+    shell.connect_selected()
+    shell.verify_vps()
+
+    assert application.begin_observation_calls == 1
+    assert application.observe_migration_calls == 1
+    assert root.after_calls == []
+
+    assert (
+        shell._finish_button.cget("state")
+        == "normal"
+    )
+
+
+def test_automatic_observation_exhaustion_remains_fail_closed(
+    monkeypatch,
+):
+    (
+        shell,
+        application,
+        root,
+    ) = _built_shell(
+        monkeypatch,
+        options=(
+            OPTION_A,
+        ),
+        proof_statuses=(
+            "runtime_ready",
+        ),
+        observation_results=(
+            SimpleNamespace(
+                status="observation_exhausted",
+                attempts=36,
+                retry_after_ms=None,
+            ),
+        ),
+    )
+
+    shell.detect_mt5()
+
+    shell._activation_entry.insert(
+        0,
+        ACTIVATION_CODE,
+    )
+
+    shell.connect_selected()
+    shell.verify_vps()
+
+    assert application.observe_migration_calls == 1
+    assert root.after_calls == []
+
+    assert (
+        shell._finish_button.cget("state")
+        == "disabled"
+    )
+
+
+def test_gui_uses_owner_retry_without_owning_polling_policy():
+    source = Path(
+        "backend/commercial/"
+        "customer_vps_connect_gui_shell.py"
+    ).read_text(
+        encoding="utf-8-sig",
+    )
+
+    assert "retry_after_ms" in source
+    assert "self._root.after(" in source
+
+    for forbidden in (
+        "max_attempts",
+        "retry_after_ms=5000",
+        "5000",
+        "36",
+        "time.sleep",
+        "asyncio.sleep",
+        "threading",
+        "while True",
+        "common.ini",
+        "pywinauto",
+        "uiautomation",
+    ):
+        assert forbidden not in source

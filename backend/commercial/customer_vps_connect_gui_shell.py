@@ -1,4 +1,4 @@
-﻿"""
+"""
 Thin standalone presentation shell for TODOBA VPS Connect.
 """
 
@@ -377,14 +377,128 @@ class CustomerVPSConnectGuiShell:
         if result.status == "runtime_ready":
             self._set_status(
                 "TODOBA is ready on this MT5. "
-                "Complete MetaTrader VPS migration, "
-                "then Verify again."
+                "Complete MetaTrader VPS migration. "
+                "TODOBA will verify automatically."
             )
+
+            self._start_migration_observation()
             return
 
         self._set_status(
             "TODOBA VPS is not online yet. "
             "Complete VPS setup and verify again."
+        )
+
+    def _start_migration_observation(
+        self,
+    ) -> None:
+        self._require_built()
+
+        try:
+            self._application_shell.begin_migration_observation()
+            self._observe_migration()
+        except Exception:
+            self._show_primary_action(
+                "verify"
+            )
+
+            self._set_status(
+                "Automatic VPS verification could not start. "
+                "Verify again to retry."
+            )
+            raise
+
+    def _observe_migration(
+        self,
+    ) -> None:
+        self._require_built()
+
+        try:
+            result = (
+                self._application_shell.observe_migration()
+            )
+        except Exception:
+            self._show_primary_action(
+                "verify"
+            )
+
+            self._set_status(
+                "Automatic VPS verification stopped. "
+                "Verify again to retry."
+            )
+            raise
+
+        if result.status == "vps_online":
+            self._show_primary_action(
+                "finish"
+            )
+
+            self._set_status(
+                "TODOBA VPS is online. Ready to finish."
+            )
+            return
+
+        if result.status == "observation_exhausted":
+            self._show_primary_action(
+                "verify"
+            )
+
+            self._set_status(
+                "TODOBA VPS is not online yet. "
+                "Complete VPS migration and Verify again."
+            )
+            return
+
+        if result.status != "observation_pending":
+            self._show_primary_action(
+                "verify"
+            )
+
+            self._set_status(
+                "Automatic VPS verification stopped."
+            )
+
+            raise RuntimeError(
+                "Unsupported VPS migration observation status."
+            )
+
+        retry_after_ms = getattr(
+            result,
+            "retry_after_ms",
+            None,
+        )
+
+        if (
+            not isinstance(
+                retry_after_ms,
+                int,
+            )
+            or isinstance(
+                retry_after_ms,
+                bool,
+            )
+            or retry_after_ms < 1
+        ):
+            self._show_primary_action(
+                "verify"
+            )
+
+            raise RuntimeError(
+                "Invalid VPS migration retry interval."
+            )
+
+        self._show_primary_action(
+            "verify"
+        )
+
+        self._set_status(
+            "Waiting for MetaTrader VPS migration. "
+            "TODOBA is verifying automatically."
+        )
+
+        self._root.after(
+            retry_after_ms,
+            self._observe_migration,
         )
 
     def finish(

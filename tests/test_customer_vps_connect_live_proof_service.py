@@ -100,6 +100,7 @@ def _state(
         bid=1.1000,
         ask=1.1002,
         spread_points=2.0,
+        runtime_environment="metaquotes_vps",
     )
 
 
@@ -318,3 +319,49 @@ def test_owner_has_no_extra_runtime_authority():
         "initialize_empty",
     ):
         assert forbidden not in source
+
+
+def test_local_runtime_state_is_runtime_ready():
+    from dataclasses import replace
+
+    service = _service(
+        store=_store(
+            received_at=(
+                NOW
+                - timedelta(seconds=5)
+            ),
+            state=replace(
+                _state(),
+                runtime_environment="local",
+            ),
+        ),
+    )
+
+    assert service.verify(
+        grant_credential=GRANT,
+    ) == CustomerVPSConnectLiveProofResult(
+        status="runtime_ready",
+    )
+
+
+def test_missing_runtime_origin_never_proves_vps_online():
+    from dataclasses import replace
+
+    service = _service(
+        store=_store(
+            received_at=(
+                NOW
+                - timedelta(seconds=5)
+            ),
+            state=replace(
+                _state(),
+                runtime_environment=None,
+            ),
+        ),
+    )
+
+    assert service.verify(
+        grant_credential=GRANT,
+    ) == CustomerVPSConnectLiveProofResult(
+        status="vps_pending",
+    )

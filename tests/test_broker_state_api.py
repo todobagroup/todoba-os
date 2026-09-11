@@ -1,4 +1,4 @@
-"""
+﻿"""
 TODOBA Broker State API Tests
 
 Proof:
@@ -281,3 +281,51 @@ def test_unknown_agent_state_returns_not_found(
     assert response.json() == {
         "detail": "Broker state not found."
     }
+
+def test_latest_agent_state_projects_runtime_environment_when_authenticated_agent_supplies_it(
+    tmp_path: Path,
+):
+    client, _ = build_client(
+        tmp_path
+    )
+
+    publish = client.post(
+        "/broker/state",
+        headers={
+            "X-TODOBA-Agent-ID": AGENT_ID,
+            "Authorization": (
+                f"Bearer {AGENT_SECRET}"
+            ),
+        },
+        json={
+            "account_fingerprint": (
+                ACCOUNT_FINGERPRINT
+            ),
+            "equity": 2491.52,
+            "open_position_count": 5,
+            "pending_order_count": 3,
+            "symbol": "XAUUSD",
+            "bid": 4397.96,
+            "ask": 4398.22,
+            "spread_points": 26.0,
+            "runtime_environment": (
+                "metaquotes_vps"
+            ),
+        },
+    )
+
+    assert publish.status_code == 200
+
+    response = client.get(
+        "/broker/state/latest",
+        headers=executor_headers(),
+        params={
+            "agent_id": AGENT_ID,
+        },
+    )
+
+    assert response.status_code == 200
+    assert (
+        response.json()["runtime_environment"]
+        == "metaquotes_vps"
+    )

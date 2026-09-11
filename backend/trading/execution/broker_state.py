@@ -1,4 +1,4 @@
-"""
+﻿"""
 TODOBA Broker State
 
 Represents broker/account facts observed remotely
@@ -35,6 +35,10 @@ class BrokerState:
     ask: float
     spread_points: float
 
+    # Runtime origin is optional for backward compatibility.
+    # Missing origin must never prove MetaTrader VPS.
+    runtime_environment: str | None = None
+
     def __post_init__(self) -> None:
         if not self.account_fingerprint:
             raise ValueError(
@@ -59,4 +63,16 @@ class BrokerState:
         if not self.symbol:
             raise ValueError(
                 "symbol is required."
+            )
+
+        if (
+            self.runtime_environment is not None
+            and self.runtime_environment not in {
+                "local",
+                "metaquotes_vps",
+            }
+        ):
+            raise ValueError(
+                "runtime_environment must be "
+                "local, metaquotes_vps, or None."
             )

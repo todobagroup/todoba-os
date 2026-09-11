@@ -36,6 +36,7 @@ _DEFAULT_TIMEOUT_SECONDS = 5.0
 
 _ALLOWED_STATUSES = frozenset(
     {
+        "runtime_ready",
         "vps_pending",
         "vps_online",
     }
@@ -134,6 +135,7 @@ def _normalize_cloud_base_url(
 )
 class CustomerVPSConnectLiveProofTransportResult:
     status: Literal[
+        "runtime_ready",
         "vps_pending",
         "vps_online",
     ]

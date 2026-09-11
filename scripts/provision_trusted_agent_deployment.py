@@ -1,4 +1,4 @@
-"""
+﻿"""
 TODOBA Trusted Agent Secure Deployment Provisioner
 
 Creates an isolated, agent-specific MQL5 build workspace.
@@ -243,7 +243,33 @@ def _bind_provisioned_agent_source(
         "   )\n"
     )
 
-    vps_guard_count = source.count(
+    on_init_start_marker = "int OnInit()"
+    on_init_end_marker = "\nvoid OnDeinit("
+
+    if source.count(on_init_start_marker) != 1:
+        raise RuntimeError(
+            "Trusted Agent OnInit contract mismatch."
+        )
+
+    if source.count(on_init_end_marker) != 1:
+        raise RuntimeError(
+            "Trusted Agent OnDeinit boundary mismatch."
+        )
+
+    on_init_start = source.index(
+        on_init_start_marker
+    )
+
+    on_init_end = source.index(
+        on_init_end_marker,
+        on_init_start,
+    )
+
+    on_init_source = source[
+        on_init_start:on_init_end
+    ]
+
+    vps_guard_count = on_init_source.count(
         vps_guard
     )
 

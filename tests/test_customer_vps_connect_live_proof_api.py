@@ -232,3 +232,23 @@ def test_missing_grant_credential_is_rejected():
 
     assert response.status_code == 422
     assert calls == []
+
+def test_runtime_ready_live_proof_returns_customer_safe_status():
+    def verify_vps_connect_live_proof(**kwargs):
+        return CustomerVPSConnectLiveProofResult(
+            status="runtime_ready",
+        )
+
+    response = _client(
+        verify_vps_connect_live_proof
+    ).post(
+        _PATH,
+        json={
+            "grant_credential": _GRANT,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "runtime_ready",
+    }

@@ -1,4 +1,4 @@
-"""
+﻿"""
 TODOBA Trusted Agent VPS Runtime Boundary Tests.
 
 Proof:
@@ -60,7 +60,7 @@ def extract_function(
     ]
 
 
-def test_local_terminal_does_not_start_agent_timer():
+def test_local_terminal_starts_readiness_timer_but_execution_remains_vps_only():
     source = read_agent_source()
 
     on_init = extract_function(
@@ -69,27 +69,60 @@ def test_local_terminal_does_not_start_agent_timer():
         end_marker="void OnDeinit(",
     )
 
-    normalized = compact(
+    normalized_init = compact(
         on_init
     )
 
-    vps_guard = normalized.index(
+    assert (
+        "!TerminalInfoInteger(TERMINAL_VPS)"
+        in normalized_init
+    )
+
+    assert (
+        "EventSetTimer("
+        in normalized_init
+    )
+
+    on_timer_start = source.index(
+        "void OnTimer()"
+    )
+
+    on_timer = source[
+        on_timer_start:
+    ]
+
+    normalized_timer = compact(
+        on_timer
+    )
+
+    state_publish = normalized_timer.index(
+        "SendBrokerState();"
+    )
+
+    vps_guard = normalized_timer.index(
         "!TerminalInfoInteger(TERMINAL_VPS)"
     )
 
-    standby_return = normalized.index(
-        "returnINIT_SUCCEEDED;",
+    local_return = normalized_timer.index(
+        "return;",
         vps_guard,
     )
 
-    timer_start = normalized.index(
-        "EventSetTimer(",
+    mission_poll = normalized_timer.index(
+        "PollCloud();"
     )
 
-    assert vps_guard < standby_return
-    assert standby_return < timer_start
+    control_poll = normalized_timer.index(
+        "PollControlCloud();"
+    )
 
-
+    assert (
+        state_publish
+        < vps_guard
+        < local_return
+        < mission_poll
+        < control_poll
+    )
 def test_timer_owns_broker_state_and_mission_polling():
     source = read_agent_source()
 

@@ -872,3 +872,39 @@ def test_detect_projects_detector_installations_contract(
         shell._connect_button.cget("state")
         == "normal"
     )
+
+
+def test_runtime_ready_guides_migration_without_enabling_finish(
+    monkeypatch,
+):
+    shell, _, _ = _built_shell(
+        monkeypatch,
+        options=(
+            OPTION_A,
+        ),
+        proof_statuses=(
+            "runtime_ready",
+        ),
+    )
+
+    shell.detect_mt5()
+
+    shell._activation_entry.insert(
+        0,
+        ACTIVATION_CODE,
+    )
+
+    shell.connect_selected()
+    shell.verify_vps()
+
+    assert (
+        shell._finish_button.cget("state")
+        == "disabled"
+    )
+
+    status_text = (
+        shell._status_label.cget("text")
+    )
+
+    assert "ready on this MT5" in status_text
+    assert "MetaTrader VPS migration" in status_text

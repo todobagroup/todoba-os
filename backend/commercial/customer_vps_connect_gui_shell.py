@@ -374,6 +374,14 @@ class CustomerVPSConnectGuiShell:
             "verify"
         )
 
+        if result.status == "runtime_ready":
+            self._set_status(
+                "TODOBA is ready on this MT5. "
+                "Complete MetaTrader VPS migration, "
+                "then Verify again."
+            )
+            return
+
         self._set_status(
             "TODOBA VPS is not online yet. "
             "Complete VPS setup and verify again."

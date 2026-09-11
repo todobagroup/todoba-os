@@ -77,6 +77,7 @@ class CustomerVPSConnectCoreOrchestrationResult:
 )
 class CustomerVPSConnectCoreLiveProofResult:
     status: Literal[
+        "runtime_ready",
         "vps_pending",
         "vps_online",
     ]
@@ -93,6 +94,7 @@ class CustomerVPSConnectCoreLiveProofResult:
             )
 
         if self.status not in {
+            "runtime_ready",
             "vps_pending",
             "vps_online",
         }:
@@ -174,6 +176,7 @@ class CustomerVPSConnectCoreOrchestrationService:
         self._grant_expires_at: str | None = None
         self._account_fingerprint: str | None = None
         self._last_live_proof_status: Literal[
+            "runtime_ready",
             "vps_pending",
             "vps_online",
         ] | None = None

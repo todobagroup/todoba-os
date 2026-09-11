@@ -63,6 +63,7 @@ def _normalize_aware_datetime(
 )
 class CustomerVPSConnectLiveProofResult:
     status: Literal[
+        "runtime_ready",
         "vps_pending",
         "vps_online",
     ]
@@ -71,12 +72,13 @@ class CustomerVPSConnectLiveProofResult:
         self,
     ) -> None:
         if self.status not in (
+            "runtime_ready",
             "vps_pending",
             "vps_online",
         ):
             raise ValueError(
-                "status must be vps_pending "
-                "or vps_online."
+                "status must be runtime_ready, "
+                "vps_pending, or vps_online."
             )
 
 
@@ -195,9 +197,22 @@ class CustomerVPSConnectLiveProofService:
         if age > _LIVE_PROOF_MAX_AGE:
             return self._pending()
 
-        return CustomerVPSConnectLiveProofResult(
-            status="vps_online",
+        runtime_environment = (
+            broker_state.runtime_environment
         )
+
+        if runtime_environment == "local":
+            return CustomerVPSConnectLiveProofResult(
+                status="runtime_ready",
+            )
+
+        if runtime_environment == "metaquotes_vps":
+            return CustomerVPSConnectLiveProofResult(
+                status="vps_online",
+            )
+
+        # Legacy / unknown origin cannot prove VPS.
+        return self._pending()
 
     @staticmethod
     def _pending(

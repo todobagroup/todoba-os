@@ -92,6 +92,7 @@ class CustomerVPSConnectLiveProofResponse(
     )
 
     status: Literal[
+        "runtime_ready",
         "vps_pending",
         "vps_online",
     ]

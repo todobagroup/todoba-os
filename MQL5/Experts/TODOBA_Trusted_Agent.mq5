@@ -1,4 +1,4 @@
-// TODOBA Trusted Agent
+﻿// TODOBA Trusted Agent
 // Production Cloud Endpoint Upgrade
 
 #property strict
@@ -20,7 +20,7 @@
 #include <TODOBAControl/ControlEngine.mqh>
 #include <TODOBAControl/ControlResult.mqh>
 #define TODOBA_AGENT_NAME "TODOBA Trusted Agent"
-#define TODOBA_AGENT_VERSION "1.8.1"
+#define TODOBA_AGENT_VERSION "1.8.2"
 const long TODOBA_MAGIC_NUMBER = 10001;
 
 input int PollIntervalSeconds = 5;
@@ -632,7 +632,7 @@ void SendBrokerState()
 
    if(
       !TODOBABrokerStateReader::Read(
-         "XAUUSD",
+         _Symbol,
          state
       )
    )
@@ -649,6 +649,15 @@ void SendBrokerState()
       "\"account_fingerprint\":\""
       + EscapeJsonString(
          state.account_fingerprint
+      )
+      + "\","
+      "\"runtime_environment\":\""
+      + (
+         TerminalInfoInteger(
+            TERMINAL_VPS
+         )
+         ? "metaquotes_vps"
+         : "local"
       )
       + "\","
       "\"equity\":"
@@ -1224,10 +1233,9 @@ int OnInit()
    {
       Print(
          TODOBA_AGENT_NAME,
-         " local standby: MetaTrader VPS required."
+         " local readiness mode: "
+         "execution remains disabled until MetaTrader VPS."
       );
-
-      return INIT_SUCCEEDED;
    }
 
    Print(
@@ -1262,6 +1270,15 @@ void OnDeinit(
 void OnTimer()
 {
    SendBrokerState();
+
+   if(
+      !TerminalInfoInteger(
+         TERMINAL_VPS
+      )
+   )
+   {
+      return;
+   }
 
    PollCloud();
 

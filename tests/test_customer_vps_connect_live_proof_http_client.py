@@ -48,6 +48,7 @@ class FakeResponse:
 @pytest.mark.parametrize(
     "status",
     [
+        "runtime_ready",
         "vps_pending",
         "vps_online",
     ],

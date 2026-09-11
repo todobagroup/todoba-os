@@ -1,4 +1,4 @@
-"""
+﻿"""
 TODOBA Broker State API
 
 Provides authenticated HTTP boundaries used by:
@@ -21,6 +21,7 @@ from fastapi import Depends
 from fastapi import HTTPException
 from fastapi import status
 from pydantic import BaseModel
+from typing import Literal
 
 from backend.trading.execution.broker_state import (
     BrokerState,
@@ -57,6 +58,11 @@ class BrokerStateRequest(BaseModel):
     bid: float
     ask: float
     spread_points: float
+
+    runtime_environment: Literal[
+        "local",
+        "metaquotes_vps",
+    ] | None = None
 
 
 def create_broker_state_router(
@@ -156,6 +162,9 @@ def create_broker_state_router(
             bid=request.bid,
             ask=request.ask,
             spread_points=request.spread_points,
+            runtime_environment=(
+                request.runtime_environment
+            ),
         )
 
         store.save(
@@ -223,6 +232,15 @@ def create_broker_state_router(
             "ask": state.ask,
             "spread_points": (
                 state.spread_points
+            ),
+            **(
+                {
+                    "runtime_environment": (
+                        state.runtime_environment
+                    ),
+                }
+                if state.runtime_environment is not None
+                else {}
             ),
             "received_at": (
                 received_at.astimezone(

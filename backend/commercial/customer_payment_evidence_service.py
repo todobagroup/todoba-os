@@ -237,6 +237,21 @@ class CustomerPaymentEvidenceStore:
             self._evidence_id_by_replay_key = {}
             self._ready = True
 
+    def open_existing(
+        self,
+    ) -> None:
+        with self._lock:
+            if not self.storage_path.exists():
+                raise RuntimeError(
+                    "Customer payment evidence store "
+                    "does not exist."
+                )
+
+            if self._ready:
+                return
+
+            self._restore_from_disk()
+
     def is_ready(
         self,
     ) -> bool:

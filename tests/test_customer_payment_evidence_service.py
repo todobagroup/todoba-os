@@ -11,6 +11,7 @@ from backend.commercial.customer_identity_registry import (
     CustomerIdentityRegistry,
 )
 from backend.commercial.customer_payment_evidence_service import (
+    CustomerPaymentEvidenceRecord,
     CustomerPaymentEvidenceService,
     CustomerPaymentEvidenceStatus,
     CustomerPaymentEvidenceStore,
@@ -959,3 +960,87 @@ def test_payment_evidence_record_has_no_sensitive_or_settlement_fields(
         "external_evidence_id",
         "status",
     }
+
+
+def test_payment_evidence_store_open_existing_requires_preprovisioned_file(
+    tmp_path: Path,
+) -> None:
+    storage_path = (
+        tmp_path
+        / "customer_payment_evidence.json"
+    )
+
+    store = CustomerPaymentEvidenceStore(
+        storage_path
+    )
+
+    assert not storage_path.exists()
+    assert not store.is_ready()
+
+    try:
+        store.open_existing()
+    except RuntimeError as exc:
+        assert (
+            str(exc)
+            == "Customer payment evidence store does not exist."
+        )
+    else:
+        raise AssertionError(
+            "Missing payment evidence store did not fail closed."
+        )
+
+    assert not storage_path.exists()
+    assert not store.is_ready()
+
+
+def test_payment_evidence_store_open_existing_restores_without_mutation(
+    tmp_path: Path,
+) -> None:
+    storage_path = (
+        tmp_path
+        / "customer_payment_evidence.json"
+    )
+
+    original = CustomerPaymentEvidenceStore(
+        storage_path
+    )
+    original.initialize_empty()
+
+    record = CustomerPaymentEvidenceRecord(
+        evidence_request_id=(
+            "open-existing-evidence-request-001"
+        ),
+        payment_evidence_id=(
+            "open-existing-evidence-001"
+        ),
+        payment_intent_id="payment-intent-001",
+        evidence_source=PaymentEvidenceSource.PAYPAL,
+        external_evidence_id="capture-001",
+        status=CustomerPaymentEvidenceStatus.RECEIVED,
+    )
+
+    original.register(
+        record
+    )
+
+    before = storage_path.read_bytes()
+
+    restored = CustomerPaymentEvidenceStore(
+        storage_path
+    )
+
+    assert restored.is_ready()
+
+    restored.open_existing()
+
+    after = storage_path.read_bytes()
+
+    assert after == before
+    assert (
+        restored.get(
+            payment_evidence_id=(
+                record.payment_evidence_id
+            )
+        )
+        == record
+    )

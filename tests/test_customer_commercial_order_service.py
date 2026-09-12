@@ -3,6 +3,7 @@
 import pytest
 
 from backend.commercial.customer_commercial_order_service import (
+    CustomerCommercialOrderRecord,
     CustomerCommercialOrderService,
     CustomerCommercialOrderStatus,
     CustomerCommercialOrderStore,
@@ -652,3 +653,81 @@ def test_order_result_contains_no_payment_provider_data(
         "currency",
         "status",
     }
+
+
+def test_order_store_open_existing_requires_preprovisioned_file(
+    tmp_path: Path,
+) -> None:
+    storage_path = (
+        tmp_path
+        / "customer_commercial_orders.json"
+    )
+
+    store = CustomerCommercialOrderStore(
+        storage_path
+    )
+
+    assert not storage_path.exists()
+    assert not store.is_ready()
+
+    try:
+        store.open_existing()
+    except RuntimeError as exc:
+        assert (
+            str(exc)
+            == "Customer commercial order store does not exist."
+        )
+    else:
+        raise AssertionError(
+            "Missing commercial order store did not fail closed."
+        )
+
+    assert not storage_path.exists()
+    assert not store.is_ready()
+
+
+def test_order_store_open_existing_restores_without_mutation(
+    tmp_path: Path,
+) -> None:
+    storage_path = (
+        tmp_path
+        / "customer_commercial_orders.json"
+    )
+
+    original = CustomerCommercialOrderStore(
+        storage_path
+    )
+    original.initialize_empty()
+
+    record = CustomerCommercialOrderRecord(
+        order_request_id="open-existing-request-001",
+        order_id="open-existing-order-001",
+        customer_id="customer-001",
+        amount_minor=1000,
+        currency="VND",
+        status=CustomerCommercialOrderStatus.PENDING,
+    )
+
+    original.register(
+        record
+    )
+
+    before = storage_path.read_bytes()
+
+    restored = CustomerCommercialOrderStore(
+        storage_path
+    )
+
+    assert restored.is_ready()
+
+    restored.open_existing()
+
+    after = storage_path.read_bytes()
+
+    assert after == before
+    assert (
+        restored.get(
+            order_id=record.order_id
+        )
+        == record
+    )

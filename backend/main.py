@@ -91,8 +91,16 @@ from backend.commercial.customer_payment_evidence_service import (
     CustomerPaymentEvidenceStore,
 )
 from backend.commercial.customer_payment_settlement_service import (
+    CustomerPaymentSettlementService,
     CustomerPaymentSettlementStore,
 )
+from backend.commercial.customer_payment_settlement_activation_bridge import (
+    CustomerPaymentSettlementActivationBridge,
+)
+from backend.commercial.customer_payment_settlement_orchestration_service import (
+    CustomerPaymentSettlementOrchestrationService,
+)
+
 from backend.commercial.customer_paypal_order_binding_service import (
     CustomerPayPalOrderBindingStore,
 )
@@ -743,6 +751,10 @@ customer_payment_settlement_store = None
 customer_paypal_order_binding_store = None
 customer_vnd_bank_reconciliation_store = None
 
+customer_payment_settlement_service = None
+customer_payment_settlement_activation_bridge = None
+customer_payment_settlement_orchestration_service = None
+
 _customer_setup_runtime_composed = False
 
 customer_registration_store = None
@@ -779,6 +791,9 @@ def _compose_customer_payment_runtime(
     global customer_payment_settlement_store
     global customer_paypal_order_binding_store
     global customer_vnd_bank_reconciliation_store
+    global customer_payment_settlement_service
+    global customer_payment_settlement_activation_bridge
+    global customer_payment_settlement_orchestration_service
 
     if _customer_payment_runtime_composed:
         return
@@ -881,6 +896,34 @@ def _compose_customer_payment_runtime(
                 f"{owner_name} is not initialized."
             )
 
+    payment_settlement_service = (
+        CustomerPaymentSettlementService(
+            settlement_store=payment_settlement_store,
+            payment_evidence_store=payment_evidence_store,
+            payment_intent_store=payment_intent_store,
+            order_store=commercial_order_store,
+        )
+    )
+
+    payment_settlement_activation_bridge = (
+        CustomerPaymentSettlementActivationBridge(
+            settlement_store=payment_settlement_store,
+            order_store=commercial_order_store,
+            setup_activation_service=(
+                customer_setup_activation_service
+            ),
+        )
+    )
+
+    payment_settlement_orchestration_service = (
+        CustomerPaymentSettlementOrchestrationService(
+            settlement_service=payment_settlement_service,
+            activation_bridge=(
+                payment_settlement_activation_bridge
+            ),
+        )
+    )
+
     customer_commercial_order_store = commercial_order_store
     customer_payment_intent_store = payment_intent_store
     customer_payment_evidence_store = payment_evidence_store
@@ -890,6 +933,16 @@ def _compose_customer_payment_runtime(
     )
     customer_vnd_bank_reconciliation_store = (
         vnd_bank_reconciliation_store
+    )
+
+    customer_payment_settlement_service = (
+        payment_settlement_service
+    )
+    customer_payment_settlement_activation_bridge = (
+        payment_settlement_activation_bridge
+    )
+    customer_payment_settlement_orchestration_service = (
+        payment_settlement_orchestration_service
     )
 
     _customer_payment_runtime_composed = True

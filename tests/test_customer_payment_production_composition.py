@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import ast
 from pathlib import Path
@@ -386,8 +386,25 @@ def _payment_compose_function_for_exec(
         module
     )
 
+    class _CompositionOwner:
+        def __init__(
+            self,
+            **kwargs,
+        ) -> None:
+            self.kwargs = kwargs
+
     namespace = {
         "FastAPI": object,
+        "CustomerPaymentSettlementService": (
+            _CompositionOwner
+        ),
+        "CustomerPaymentSettlementActivationBridge": (
+            _CompositionOwner
+        ),
+        "CustomerPaymentSettlementOrchestrationService": (
+            _CompositionOwner
+        ),
+        "customer_setup_activation_service": object(),
     }
 
     exec(
@@ -710,3 +727,191 @@ def test_payment_runtime_restores_existing_state_without_mutation(
     assert namespace[
         "customer_vnd_bank_reconciliation_store"
     ].is_ready()
+
+
+def test_payment_runtime_composes_settlement_orchestration_chain(
+) -> None:
+    compose = _function(
+        "_compose_customer_payment_runtime"
+    )
+
+    expected = {
+        "CustomerPaymentSettlementService": 1,
+        "CustomerPaymentSettlementActivationBridge": 1,
+        "CustomerPaymentSettlementOrchestrationService": 1,
+    }
+
+    for owner_name, expected_count in expected.items():
+        assert len(
+            _calls_named(
+                compose,
+                owner_name,
+            )
+        ) == expected_count
+
+
+def test_payment_runtime_exports_orchestration_owners(
+) -> None:
+    compose = _function(
+        "_compose_customer_payment_runtime"
+    )
+
+    compose_source = ast.get_source_segment(
+        SOURCE,
+        compose,
+    )
+
+    assert compose_source is not None
+
+    expected = (
+        "customer_payment_settlement_service",
+        "customer_payment_settlement_activation_bridge",
+        "customer_payment_settlement_orchestration_service",
+    )
+
+    for name in expected:
+        assert f"global {name}" in compose_source
+
+        assert (
+            f"{name} = ("
+            in compose_source
+            or f"{name} = "
+            in compose_source
+        )
+
+
+def test_payment_runtime_settlement_service_uses_restored_stores(
+) -> None:
+    compose = _function(
+        "_compose_customer_payment_runtime"
+    )
+
+    compose_source = ast.get_source_segment(
+        SOURCE,
+        compose,
+    )
+
+    assert compose_source is not None
+
+    required = (
+        "settlement_store=payment_settlement_store",
+        "payment_evidence_store=payment_evidence_store",
+        "payment_intent_store=payment_intent_store",
+        "order_store=commercial_order_store",
+    )
+
+    normalized = " ".join(
+        compose_source.split()
+    )
+
+    for token in required:
+        assert token in normalized
+
+
+def test_payment_runtime_activation_bridge_uses_setup_authority(
+) -> None:
+    compose = _function(
+        "_compose_customer_payment_runtime"
+    )
+
+    calls = _calls_named(
+        compose,
+        "CustomerPaymentSettlementActivationBridge",
+    )
+
+    assert len(calls) == 1
+
+    keywords = {
+        keyword.arg: keyword.value
+        for keyword in calls[0].keywords
+    }
+
+    expected = {
+        "settlement_store": "payment_settlement_store",
+        "order_store": "commercial_order_store",
+        "setup_activation_service": (
+            "customer_setup_activation_service"
+        ),
+    }
+
+    assert set(keywords) == set(expected)
+
+    for keyword_name, value_name in expected.items():
+        value = keywords[keyword_name]
+
+        assert isinstance(
+            value,
+            ast.Name,
+        )
+
+        assert value.id == value_name
+
+
+def test_payment_runtime_orchestrator_uses_only_narrow_downstream_owners(
+) -> None:
+    compose = _function(
+        "_compose_customer_payment_runtime"
+    )
+
+    calls = _calls_named(
+        compose,
+        "CustomerPaymentSettlementOrchestrationService",
+    )
+
+    assert len(calls) == 1
+
+    keywords = {
+        keyword.arg: keyword.value
+        for keyword in calls[0].keywords
+    }
+
+    expected = {
+        "settlement_service": "payment_settlement_service",
+        "activation_bridge": (
+            "payment_settlement_activation_bridge"
+        ),
+    }
+
+    assert set(keywords) == set(expected)
+
+    for keyword_name, value_name in expected.items():
+        value = keywords[keyword_name]
+
+        assert isinstance(
+            value,
+            ast.Name,
+        )
+
+        assert value.id == value_name
+
+
+def test_payment_runtime_still_has_no_payment_execution_authority(
+) -> None:
+    compose = _function(
+        "_compose_customer_payment_runtime"
+    )
+
+    compose_source = ast.get_source_segment(
+        SOURCE,
+        compose,
+    )
+
+    assert compose_source is not None
+
+    forbidden = (
+        ".settle(",
+        ".activate(",
+        ".activate_from_settlement(",
+        ".complete_verified_payment(",
+        ".receive(",
+        ".publish(",
+        ".build_assertion(",
+        ".confirm(",
+        ".capture(",
+        "include_router(",
+        "operator_id",
+        "webhook_verification",
+    )
+
+    for token in forbidden:
+        assert token not in compose_source

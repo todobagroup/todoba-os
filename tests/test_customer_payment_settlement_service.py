@@ -22,6 +22,7 @@ from backend.commercial.customer_payment_intent_service import (
     PaymentRail,
 )
 from backend.commercial.customer_payment_settlement_service import (
+    CustomerPaymentSettlementRecord,
     CustomerPaymentSettlementService,
     CustomerPaymentSettlementStatus,
     CustomerPaymentSettlementStore,
@@ -1115,4 +1116,87 @@ def test_same_assertion_id_cannot_change_evidence_source(
             )
         )
         == first
+    )
+
+
+def test_payment_settlement_store_open_existing_requires_preprovisioned_file(
+    tmp_path: Path,
+) -> None:
+    storage_path = (
+        tmp_path
+        / "customer_payment_settlements.json"
+    )
+
+    store = CustomerPaymentSettlementStore(
+        storage_path
+    )
+
+    assert not storage_path.exists()
+    assert not store.is_ready()
+
+    try:
+        store.open_existing()
+    except RuntimeError as exc:
+        assert (
+            str(exc)
+            == "Customer payment settlement store does not exist."
+        )
+    else:
+        raise AssertionError(
+            "Missing payment settlement store did not fail closed."
+        )
+
+    assert not storage_path.exists()
+    assert not store.is_ready()
+
+
+def test_payment_settlement_store_open_existing_restores_without_mutation(
+    tmp_path: Path,
+) -> None:
+    storage_path = (
+        tmp_path
+        / "customer_payment_settlements.json"
+    )
+
+    original = CustomerPaymentSettlementStore(
+        storage_path
+    )
+    original.initialize_empty()
+
+    record = CustomerPaymentSettlementRecord(
+        settlement_id="open-existing-settlement-001",
+        verification_assertion_id=(
+            "verification-assertion-001"
+        ),
+        payment_evidence_id="payment-evidence-001",
+        payment_intent_id="payment-intent-001",
+        order_id="order-001",
+        customer_id="customer-001",
+        amount_minor=1000,
+        currency="USD",
+        status=CustomerPaymentSettlementStatus.SETTLED,
+    )
+
+    original.register(
+        record
+    )
+
+    before = storage_path.read_bytes()
+
+    restored = CustomerPaymentSettlementStore(
+        storage_path
+    )
+
+    assert restored.is_ready()
+
+    restored.open_existing()
+
+    after = storage_path.read_bytes()
+
+    assert after == before
+    assert (
+        restored.get(
+            settlement_id=record.settlement_id
+        )
+        == record
     )

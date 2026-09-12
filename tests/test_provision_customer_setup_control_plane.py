@@ -79,6 +79,30 @@ PACKAGE_BUILD_REQUEST_DIRECTORY = (
     "customer_deployment_package_build_requests"
 )
 
+COMMERCIAL_ORDER_FILENAME = (
+    "customer_commercial_orders.json"
+)
+
+PAYMENT_INTENT_FILENAME = (
+    "customer_payment_intents.json"
+)
+
+PAYMENT_EVIDENCE_FILENAME = (
+    "customer_payment_evidence.json"
+)
+
+PAYMENT_SETTLEMENT_FILENAME = (
+    "customer_payment_settlements.json"
+)
+
+PAYPAL_ORDER_BINDING_FILENAME = (
+    "customer_paypal_order_bindings.json"
+)
+
+VND_BANK_RECONCILIATION_FILENAME = (
+    "customer_vnd_bank_reconciliations.json"
+)
+
 
 def _prepare_authoritative_identity_store(
     control_plane_root: Path,
@@ -249,6 +273,12 @@ def test_first_provisioning_creates_only_required_ready_state(
         LAUNCH_CREDENTIAL_FILENAME,
         BOOTSTRAP_AUTHORIZATION_FILENAME,
         BOOTSTRAP_FILENAME,
+        COMMERCIAL_ORDER_FILENAME,
+        PAYMENT_INTENT_FILENAME,
+        PAYMENT_EVIDENCE_FILENAME,
+        PAYMENT_SETTLEMENT_FILENAME,
+        PAYPAL_ORDER_BINDING_FILENAME,
+        VND_BANK_RECONCILIATION_FILENAME,
     }
 
     directories = {
@@ -489,6 +519,12 @@ def test_retry_is_byte_for_byte_and_queue_idempotent(
         LAUNCH_CREDENTIAL_FILENAME,
         BOOTSTRAP_AUTHORIZATION_FILENAME,
         BOOTSTRAP_FILENAME,
+        COMMERCIAL_ORDER_FILENAME,
+        PAYMENT_INTENT_FILENAME,
+        PAYMENT_EVIDENCE_FILENAME,
+        PAYMENT_SETTLEMENT_FILENAME,
+        PAYPAL_ORDER_BINDING_FILENAME,
+        VND_BANK_RECONCILIATION_FILENAME,
     }
 
     commercial_directories = {
@@ -574,6 +610,36 @@ def test_provisioner_has_store_only_commercial_surface() -> None:
         ),
         (
             "backend.commercial."
+            "customer_commercial_order_service",
+            "CustomerCommercialOrderStore",
+        ),
+        (
+            "backend.commercial."
+            "customer_payment_intent_service",
+            "CustomerPaymentIntentStore",
+        ),
+        (
+            "backend.commercial."
+            "customer_payment_evidence_service",
+            "CustomerPaymentEvidenceStore",
+        ),
+        (
+            "backend.commercial."
+            "customer_payment_settlement_service",
+            "CustomerPaymentSettlementStore",
+        ),
+        (
+            "backend.commercial."
+            "customer_paypal_order_binding_service",
+            "CustomerPayPalOrderBindingStore",
+        ),
+        (
+            "backend.commercial."
+            "customer_vnd_bank_reconciliation_service",
+            "CustomerVndBankReconciliationStore",
+        ),
+        (
+            "backend.commercial."
             "customer_registration_service",
             "CustomerRegistrationStore",
         ),
@@ -618,7 +684,7 @@ def test_provisioner_has_store_only_commercial_surface() -> None:
         called_attributes.count(
             "initialize_empty"
         )
-        == 10
+        == 16
     )
 
     forbidden_business_actions = {
@@ -642,3 +708,408 @@ def test_provisioner_has_store_only_commercial_surface() -> None:
         )
         == set()
     )
+
+def test_provisions_required_payment_durable_state(
+    tmp_path: Path,
+) -> None:
+    from backend.commercial.customer_commercial_order_service import (
+        CustomerCommercialOrderStore,
+    )
+    from backend.commercial.customer_payment_evidence_service import (
+        CustomerPaymentEvidenceStore,
+    )
+    from backend.commercial.customer_payment_intent_service import (
+        CustomerPaymentIntentStore,
+    )
+    from backend.commercial.customer_payment_settlement_service import (
+        CustomerPaymentSettlementStore,
+    )
+    from backend.commercial.customer_paypal_order_binding_service import (
+        CustomerPayPalOrderBindingStore,
+    )
+    from backend.commercial.customer_vnd_bank_reconciliation_service import (
+        CustomerVndBankReconciliationStore,
+    )
+
+    control_plane_root = (
+        tmp_path
+        / "control-plane"
+    )
+
+    _prepare_authoritative_identity_store(
+        control_plane_root
+    )
+
+    provision_customer_setup_control_plane(
+        control_plane_root=control_plane_root,
+        confirm_runtime_stopped=True,
+    )
+
+    commercial_root = (
+        control_plane_root
+        / "commercial"
+    )
+
+    order_path = (
+        commercial_root
+        / "customer_commercial_orders.json"
+    )
+    intent_path = (
+        commercial_root
+        / "customer_payment_intents.json"
+    )
+    evidence_path = (
+        commercial_root
+        / "customer_payment_evidence.json"
+    )
+    settlement_path = (
+        commercial_root
+        / "customer_payment_settlements.json"
+    )
+    paypal_binding_path = (
+        commercial_root
+        / "customer_paypal_order_bindings.json"
+    )
+    vnd_reconciliation_path = (
+        commercial_root
+        / "customer_vnd_bank_reconciliations.json"
+    )
+
+    required_paths = (
+        order_path,
+        intent_path,
+        evidence_path,
+        settlement_path,
+        paypal_binding_path,
+        vnd_reconciliation_path,
+    )
+
+    for required_path in required_paths:
+        assert required_path.is_file()
+
+    order_store = CustomerCommercialOrderStore(
+        order_path
+    )
+    intent_store = CustomerPaymentIntentStore(
+        intent_path
+    )
+    evidence_store = CustomerPaymentEvidenceStore(
+        evidence_path
+    )
+    settlement_store = CustomerPaymentSettlementStore(
+        settlement_path
+    )
+    paypal_binding_store = CustomerPayPalOrderBindingStore(
+        paypal_binding_path
+    )
+
+    vnd_reconciliation_store = (
+        CustomerVndBankReconciliationStore(
+            vnd_reconciliation_path
+        )
+    )
+    vnd_reconciliation_store.open_existing()
+
+    assert order_store.is_ready()
+    assert intent_store.is_ready()
+    assert evidence_store.is_ready()
+    assert settlement_store.is_ready()
+    assert paypal_binding_store.is_ready()
+    assert vnd_reconciliation_store.is_ready()
+
+def test_retry_preserves_existing_payment_state_byte_for_byte(
+    tmp_path: Path,
+) -> None:
+    from backend.commercial.customer_commercial_order_service import (
+        CustomerCommercialOrderRecord,
+        CustomerCommercialOrderStatus,
+        CustomerCommercialOrderStore,
+    )
+    from backend.commercial.customer_payment_evidence_service import (
+        CustomerPaymentEvidenceRecord,
+        CustomerPaymentEvidenceStatus,
+        CustomerPaymentEvidenceStore,
+        PaymentEvidenceSource,
+    )
+    from backend.commercial.customer_payment_intent_service import (
+        CustomerPaymentIntentRecord,
+        CustomerPaymentIntentStatus,
+        CustomerPaymentIntentStore,
+        PaymentRail,
+    )
+    from backend.commercial.customer_payment_settlement_service import (
+        CustomerPaymentSettlementRecord,
+        CustomerPaymentSettlementStatus,
+        CustomerPaymentSettlementStore,
+    )
+    from backend.commercial.customer_paypal_order_binding_service import (
+        CustomerPayPalOrderBindingRecord,
+        CustomerPayPalOrderBindingStatus,
+        CustomerPayPalOrderBindingStore,
+    )
+    from backend.commercial.customer_vnd_bank_reconciliation_service import (
+        CustomerVndBankReconciliationRecord,
+        CustomerVndBankReconciliationStatus,
+        CustomerVndBankReconciliationStore,
+    )
+
+    control_plane_root = (
+        tmp_path
+        / "control-plane"
+    )
+
+    _prepare_authoritative_identity_store(
+        control_plane_root
+    )
+
+    provision_customer_setup_control_plane(
+        control_plane_root=control_plane_root,
+        confirm_runtime_stopped=True,
+    )
+
+    commercial_root = (
+        control_plane_root
+        / "commercial"
+    )
+
+    order_path = (
+        commercial_root
+        / COMMERCIAL_ORDER_FILENAME
+    )
+    intent_path = (
+        commercial_root
+        / PAYMENT_INTENT_FILENAME
+    )
+    evidence_path = (
+        commercial_root
+        / PAYMENT_EVIDENCE_FILENAME
+    )
+    settlement_path = (
+        commercial_root
+        / PAYMENT_SETTLEMENT_FILENAME
+    )
+    paypal_binding_path = (
+        commercial_root
+        / PAYPAL_ORDER_BINDING_FILENAME
+    )
+    vnd_reconciliation_path = (
+        commercial_root
+        / VND_BANK_RECONCILIATION_FILENAME
+    )
+
+    order_store = CustomerCommercialOrderStore(
+        order_path
+    )
+    intent_store = CustomerPaymentIntentStore(
+        intent_path
+    )
+    evidence_store = CustomerPaymentEvidenceStore(
+        evidence_path
+    )
+    settlement_store = CustomerPaymentSettlementStore(
+        settlement_path
+    )
+    paypal_binding_store = CustomerPayPalOrderBindingStore(
+        paypal_binding_path
+    )
+
+    vnd_reconciliation_store = (
+        CustomerVndBankReconciliationStore(
+            vnd_reconciliation_path
+        )
+    )
+    vnd_reconciliation_store.open_existing()
+
+    paypal_order = CustomerCommercialOrderRecord(
+        order_request_id="order-request-paypal-001",
+        order_id="order-paypal-001",
+        customer_id="customer-001",
+        amount_minor=2500,
+        currency="USD",
+        status=CustomerCommercialOrderStatus.PENDING,
+    )
+    order_store.register(
+        paypal_order
+    )
+
+    vnd_order = CustomerCommercialOrderRecord(
+        order_request_id="order-request-vnd-001",
+        order_id="order-vnd-001",
+        customer_id="customer-001",
+        amount_minor=250000,
+        currency="VND",
+        status=CustomerCommercialOrderStatus.PENDING,
+    )
+    order_store.register(
+        vnd_order
+    )
+
+    paypal_intent = CustomerPaymentIntentRecord(
+        payment_intent_request_id=(
+            "payment-intent-request-paypal-001"
+        ),
+        payment_intent_id="payment-intent-paypal-001",
+        order_id=paypal_order.order_id,
+        payment_rail=PaymentRail.PAYPAL,
+        status=CustomerPaymentIntentStatus.PENDING,
+    )
+    intent_store.register(
+        paypal_intent
+    )
+
+    vnd_intent = CustomerPaymentIntentRecord(
+        payment_intent_request_id=(
+            "payment-intent-request-vnd-001"
+        ),
+        payment_intent_id="payment-intent-vnd-001",
+        order_id=vnd_order.order_id,
+        payment_rail=PaymentRail.VND_BANK_TRANSFER,
+        status=CustomerPaymentIntentStatus.PENDING,
+    )
+    intent_store.register(
+        vnd_intent
+    )
+
+    paypal_evidence = CustomerPaymentEvidenceRecord(
+        evidence_request_id="evidence-request-paypal-001",
+        payment_evidence_id="payment-evidence-paypal-001",
+        payment_intent_id=paypal_intent.payment_intent_id,
+        evidence_source=PaymentEvidenceSource.PAYPAL,
+        external_evidence_id="capture-paypal-001",
+        status=CustomerPaymentEvidenceStatus.RECEIVED,
+    )
+    evidence_store.register(
+        paypal_evidence
+    )
+
+    paypal_settlement = CustomerPaymentSettlementRecord(
+        verification_assertion_id="verification-paypal-001",
+        settlement_id="payment-settlement-paypal-001",
+        payment_evidence_id=(
+            paypal_evidence.payment_evidence_id
+        ),
+        payment_intent_id=paypal_intent.payment_intent_id,
+        order_id=paypal_order.order_id,
+        customer_id=paypal_order.customer_id,
+        amount_minor=paypal_order.amount_minor,
+        currency=paypal_order.currency,
+        status=CustomerPaymentSettlementStatus.SETTLED,
+    )
+    settlement_store.register(
+        paypal_settlement
+    )
+
+    paypal_binding = CustomerPayPalOrderBindingRecord(
+        paypal_binding_id="paypal-binding-001",
+        paypal_order_id="paypal-order-001",
+        paypal_request_id=paypal_intent.payment_intent_id,
+        payment_intent_id=paypal_intent.payment_intent_id,
+        order_id=paypal_order.order_id,
+        amount_minor=paypal_order.amount_minor,
+        currency=paypal_order.currency,
+        status=CustomerPayPalOrderBindingStatus.BOUND,
+    )
+    paypal_binding_store.register(
+        paypal_binding
+    )
+
+    vnd_reconciliation = CustomerVndBankReconciliationRecord(
+        reconciliation_request_id=(
+            "vnd-reconciliation-request-001"
+        ),
+        reconciliation_id="vnd-bank-reconciliation-001",
+        payment_intent_id=vnd_intent.payment_intent_id,
+        order_id=vnd_order.order_id,
+        customer_id=vnd_order.customer_id,
+        bank_reference="VND-BANK-REFERENCE-001",
+        amount_minor=vnd_order.amount_minor,
+        currency=vnd_order.currency,
+        operator_id="operator-001",
+        status=CustomerVndBankReconciliationStatus.CONFIRMED,
+    )
+    vnd_reconciliation_store.register(
+        vnd_reconciliation
+    )
+
+    payment_paths = (
+        order_path,
+        intent_path,
+        evidence_path,
+        settlement_path,
+        paypal_binding_path,
+        vnd_reconciliation_path,
+    )
+
+    before_retry_bytes = {
+        path: path.read_bytes()
+        for path in payment_paths
+    }
+
+    provision_customer_setup_control_plane(
+        control_plane_root=control_plane_root,
+        confirm_runtime_stopped=True,
+    )
+
+    after_retry_bytes = {
+        path: path.read_bytes()
+        for path in payment_paths
+    }
+
+    assert after_retry_bytes == before_retry_bytes
+
+    reopened_order_store = CustomerCommercialOrderStore(
+        order_path
+    )
+    reopened_intent_store = CustomerPaymentIntentStore(
+        intent_path
+    )
+    reopened_evidence_store = CustomerPaymentEvidenceStore(
+        evidence_path
+    )
+    reopened_settlement_store = CustomerPaymentSettlementStore(
+        settlement_path
+    )
+    reopened_paypal_binding_store = (
+        CustomerPayPalOrderBindingStore(
+            paypal_binding_path
+        )
+    )
+
+    reopened_vnd_reconciliation_store = (
+        CustomerVndBankReconciliationStore(
+            vnd_reconciliation_path
+        )
+    )
+    reopened_vnd_reconciliation_store.open_existing()
+
+    assert reopened_order_store.get(
+        order_id=paypal_order.order_id
+    ) == paypal_order
+
+    assert reopened_order_store.get(
+        order_id=vnd_order.order_id
+    ) == vnd_order
+
+    assert reopened_intent_store.get(
+        payment_intent_id=paypal_intent.payment_intent_id
+    ) == paypal_intent
+
+    assert reopened_intent_store.get(
+        payment_intent_id=vnd_intent.payment_intent_id
+    ) == vnd_intent
+
+    assert reopened_evidence_store.get(
+        payment_evidence_id=paypal_evidence.payment_evidence_id
+    ) == paypal_evidence
+
+    assert reopened_settlement_store.get(
+        settlement_id=paypal_settlement.settlement_id
+    ) == paypal_settlement
+
+    assert reopened_paypal_binding_store.get(
+        paypal_binding_id=paypal_binding.paypal_binding_id
+    ) == paypal_binding
+
+    assert reopened_vnd_reconciliation_store.get(
+        reconciliation_id=vnd_reconciliation.reconciliation_id
+    ) == vnd_reconciliation

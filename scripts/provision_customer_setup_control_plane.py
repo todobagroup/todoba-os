@@ -15,6 +15,12 @@ package-build flow:
 - customer_setup_bootstrap_authorizations.json
 - customer_deployment_bootstraps.json
 - customer_deployment_package_build_requests/
+- customer_commercial_orders.json
+- customer_payment_intents.json
+- customer_payment_evidence.json
+- customer_payment_settlements.json
+- customer_paypal_order_bindings.json
+- customer_vnd_bank_reconciliations.json
 
 Safety contract:
 - runtime must be explicitly confirmed stopped
@@ -27,8 +33,9 @@ Safety contract:
 - no setup launch credential is issued
 - no setup bootstrap authorization is issued
 - no customer package build request is registered
-- no customer, deployment, account, payment, package, secret,
-  entitlement, or runtime state is mutated
+- no customer, deployment, account, payment record, package,
+  secret, entitlement, or runtime state is created or mutated
+- payment provisioning creates only empty durable substrate
 - package-build lock state is not provisioned here because it
   is synchronization state owned by the lock manager
 - cloud runtime must never call this provisioning helper
@@ -47,6 +54,24 @@ from backend.commercial.customer_deployment_package_build_request_store import (
 )
 from backend.commercial.customer_identity_registry import (
     CustomerIdentityRegistry,
+)
+from backend.commercial.customer_commercial_order_service import (
+    CustomerCommercialOrderStore,
+)
+from backend.commercial.customer_payment_intent_service import (
+    CustomerPaymentIntentStore,
+)
+from backend.commercial.customer_payment_evidence_service import (
+    CustomerPaymentEvidenceStore,
+)
+from backend.commercial.customer_payment_settlement_service import (
+    CustomerPaymentSettlementStore,
+)
+from backend.commercial.customer_paypal_order_binding_service import (
+    CustomerPayPalOrderBindingStore,
+)
+from backend.commercial.customer_vnd_bank_reconciliation_service import (
+    CustomerVndBankReconciliationStore,
 )
 from backend.commercial.customer_registration_service import (
     CustomerRegistrationStore,
@@ -116,6 +141,30 @@ _CUSTOMER_DEPLOYMENT_BOOTSTRAP_FILENAME = (
 
 _CUSTOMER_PACKAGE_BUILD_REQUEST_DIRECTORY = (
     "customer_deployment_package_build_requests"
+)
+
+_CUSTOMER_COMMERCIAL_ORDER_FILENAME = (
+    "customer_commercial_orders.json"
+)
+
+_CUSTOMER_PAYMENT_INTENT_FILENAME = (
+    "customer_payment_intents.json"
+)
+
+_CUSTOMER_PAYMENT_EVIDENCE_FILENAME = (
+    "customer_payment_evidence.json"
+)
+
+_CUSTOMER_PAYMENT_SETTLEMENT_FILENAME = (
+    "customer_payment_settlements.json"
+)
+
+_CUSTOMER_PAYPAL_ORDER_BINDING_FILENAME = (
+    "customer_paypal_order_bindings.json"
+)
+
+_CUSTOMER_VND_BANK_RECONCILIATION_FILENAME = (
+    "customer_vnd_bank_reconciliations.json"
 )
 
 
@@ -215,6 +264,36 @@ def provision_customer_setup_control_plane(
         / _CUSTOMER_PACKAGE_BUILD_REQUEST_DIRECTORY
     )
 
+    commercial_order_storage_path = (
+        commercial_root
+        / _CUSTOMER_COMMERCIAL_ORDER_FILENAME
+    )
+
+    payment_intent_storage_path = (
+        commercial_root
+        / _CUSTOMER_PAYMENT_INTENT_FILENAME
+    )
+
+    payment_evidence_storage_path = (
+        commercial_root
+        / _CUSTOMER_PAYMENT_EVIDENCE_FILENAME
+    )
+
+    payment_settlement_storage_path = (
+        commercial_root
+        / _CUSTOMER_PAYMENT_SETTLEMENT_FILENAME
+    )
+
+    paypal_order_binding_storage_path = (
+        commercial_root
+        / _CUSTOMER_PAYPAL_ORDER_BINDING_FILENAME
+    )
+
+    vnd_bank_reconciliation_storage_path = (
+        commercial_root
+        / _CUSTOMER_VND_BANK_RECONCILIATION_FILENAME
+    )
+
     customer_identity_registry = (
         CustomerIdentityRegistry(
             identity_storage_path
@@ -282,6 +361,32 @@ def provision_customer_setup_control_plane(
         )
     )
 
+    commercial_order_store = CustomerCommercialOrderStore(
+        commercial_order_storage_path
+    )
+
+    payment_intent_store = CustomerPaymentIntentStore(
+        payment_intent_storage_path
+    )
+
+    payment_evidence_store = CustomerPaymentEvidenceStore(
+        payment_evidence_storage_path
+    )
+
+    payment_settlement_store = CustomerPaymentSettlementStore(
+        payment_settlement_storage_path
+    )
+
+    paypal_order_binding_store = CustomerPayPalOrderBindingStore(
+        paypal_order_binding_storage_path
+    )
+
+    vnd_bank_reconciliation_store = (
+        CustomerVndBankReconciliationStore(
+            vnd_bank_reconciliation_storage_path
+        )
+    )
+
     if not registration_store.is_ready():
         registration_store.initialize_empty()
 
@@ -339,6 +444,26 @@ def provision_customer_setup_control_plane(
     if not package_build_request_store.is_ready():
         package_build_request_store.initialize_empty()
 
+    if not commercial_order_store.is_ready():
+        commercial_order_store.initialize_empty()
+
+    if not payment_intent_store.is_ready():
+        payment_intent_store.initialize_empty()
+
+    if not payment_evidence_store.is_ready():
+        payment_evidence_store.initialize_empty()
+
+    if not payment_settlement_store.is_ready():
+        payment_settlement_store.initialize_empty()
+
+    if not paypal_order_binding_store.is_ready():
+        paypal_order_binding_store.initialize_empty()
+
+    if vnd_bank_reconciliation_storage_path.exists():
+        vnd_bank_reconciliation_store.open_existing()
+    else:
+        vnd_bank_reconciliation_store.initialize_empty()
+
     if not registration_store.is_ready():
         raise RuntimeError(
             "Customer registration store did not "
@@ -391,6 +516,36 @@ def provision_customer_setup_control_plane(
         raise RuntimeError(
             "Customer deployment package build request "
             "store did not become ready."
+        )
+
+    if not commercial_order_store.is_ready():
+        raise RuntimeError(
+            "Customer commercial order store did not become ready."
+        )
+
+    if not payment_intent_store.is_ready():
+        raise RuntimeError(
+            "Customer payment intent store did not become ready."
+        )
+
+    if not payment_evidence_store.is_ready():
+        raise RuntimeError(
+            "Customer payment evidence store did not become ready."
+        )
+
+    if not payment_settlement_store.is_ready():
+        raise RuntimeError(
+            "Customer payment settlement store did not become ready."
+        )
+
+    if not paypal_order_binding_store.is_ready():
+        raise RuntimeError(
+            "Customer PayPal order binding store did not become ready."
+        )
+
+    if not vnd_bank_reconciliation_store.is_ready():
+        raise RuntimeError(
+            "Customer VND bank reconciliation store did not become ready."
         )
 
     return (

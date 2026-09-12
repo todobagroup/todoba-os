@@ -269,6 +269,21 @@ class CustomerPaymentIntentStore:
             self._intent_id_by_request_id = {}
             self._ready = True
 
+    def open_existing(
+        self,
+    ) -> None:
+        with self._lock:
+            if not self.storage_path.exists():
+                raise RuntimeError(
+                    "Customer payment intent store "
+                    "does not exist."
+                )
+
+            if self._ready:
+                return
+
+            self._restore_from_disk()
+
     def is_ready(
         self,
     ) -> bool:

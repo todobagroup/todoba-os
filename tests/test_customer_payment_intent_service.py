@@ -11,6 +11,7 @@ from backend.commercial.customer_identity_registry import (
     CustomerIdentityRegistry,
 )
 from backend.commercial.customer_payment_intent_service import (
+    CustomerPaymentIntentRecord,
     CustomerPaymentIntentService,
     CustomerPaymentIntentStatus,
     CustomerPaymentIntentStore,
@@ -1065,3 +1066,87 @@ def test_payment_intent_result_contains_no_money_or_provider_evidence(
         "payment_rail",
         "status",
     }
+
+
+def test_payment_intent_store_open_existing_requires_preprovisioned_file(
+    tmp_path: Path,
+) -> None:
+    storage_path = (
+        tmp_path
+        / "customer_payment_intents.json"
+    )
+
+    store = CustomerPaymentIntentStore(
+        storage_path
+    )
+
+    assert not storage_path.exists()
+    assert not store.is_ready()
+
+    try:
+        store.open_existing()
+    except RuntimeError as exc:
+        assert (
+            str(exc)
+            == "Customer payment intent store does not exist."
+        )
+    else:
+        raise AssertionError(
+            "Missing payment intent store did not fail closed."
+        )
+
+    assert not storage_path.exists()
+    assert not store.is_ready()
+
+
+def test_payment_intent_store_open_existing_restores_without_mutation(
+    tmp_path: Path,
+) -> None:
+    storage_path = (
+        tmp_path
+        / "customer_payment_intents.json"
+    )
+
+    original = CustomerPaymentIntentStore(
+        storage_path
+    )
+    original.initialize_empty()
+
+    record = CustomerPaymentIntentRecord(
+        payment_intent_request_id=(
+            "open-existing-intent-request-001"
+        ),
+        payment_intent_id=(
+            "open-existing-intent-001"
+        ),
+        order_id="order-001",
+        payment_rail=PaymentRail.PAYPAL,
+        status=CustomerPaymentIntentStatus.PENDING,
+    )
+
+    original.register(
+        record
+    )
+
+    before = storage_path.read_bytes()
+
+    restored = CustomerPaymentIntentStore(
+        storage_path
+    )
+
+    assert restored.is_ready()
+
+    restored.open_existing()
+
+    after = storage_path.read_bytes()
+
+    assert after == before
+
+    assert (
+        restored.get(
+            payment_intent_id=(
+                record.payment_intent_id
+            )
+        )
+        == record
+    )

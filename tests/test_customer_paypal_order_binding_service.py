@@ -17,6 +17,7 @@ from backend.commercial.customer_payment_intent_service import (
     PaymentRail,
 )
 from backend.commercial.customer_paypal_order_binding_service import (
+    CustomerPayPalOrderBindingRecord,
     CustomerPayPalOrderBindingService,
     CustomerPayPalOrderBindingStatus,
     CustomerPayPalOrderBindingStore,
@@ -938,3 +939,79 @@ def test_paypal_binding_persists_no_custom_id_or_secrets(
     assert "access_token" not in record.__dict__
     assert "webhook_signature" not in record.__dict__
     assert "raw_payload" not in record.__dict__
+
+
+def test_paypal_order_binding_store_open_existing_requires_preprovisioned_file(
+    tmp_path: Path,
+) -> None:
+    storage_path = (
+        tmp_path
+        / "customer_paypal_order_bindings.json"
+    )
+
+    store = CustomerPayPalOrderBindingStore(
+        storage_path
+    )
+
+    assert not storage_path.exists()
+    assert not store.is_ready()
+
+    try:
+        store.open_existing()
+    except RuntimeError as exc:
+        assert (
+            str(exc)
+            == "Customer PayPal order binding store does not exist."
+        )
+    else:
+        raise AssertionError(
+            "Missing PayPal order binding store did not fail closed."
+        )
+
+    assert not storage_path.exists()
+    assert not store.is_ready()
+
+
+def test_paypal_order_binding_store_open_existing_restores_without_mutation(
+    tmp_path: Path,
+) -> None:
+    storage_path = (
+        tmp_path
+        / "customer_paypal_order_bindings.json"
+    )
+
+    original = CustomerPayPalOrderBindingStore(
+        storage_path
+    )
+    original.initialize_empty()
+
+    record = CustomerPayPalOrderBindingRecord(
+        paypal_binding_id=(
+            "open-existing-paypal-binding-001"
+        ),
+        paypal_order_id="paypal-order-001",
+        paypal_request_id="payment-intent-001",
+        payment_intent_id="payment-intent-001",
+        order_id="order-001",
+        amount_minor=1000,
+        currency="USD",
+        status=CustomerPayPalOrderBindingStatus.BOUND,
+    )
+
+    original.register(
+        record
+    )
+
+    before = storage_path.read_bytes()
+
+    restored = CustomerPayPalOrderBindingStore(
+        storage_path
+    )
+
+    assert restored.is_ready()
+
+    restored.open_existing()
+
+    after = storage_path.read_bytes()
+
+    assert after == before

@@ -81,6 +81,24 @@ from backend.commercial.customer_setup_activation_service import (
     CustomerSetupActivationService,
     CustomerSetupActivationStore,
 )
+from backend.commercial.customer_commercial_order_service import (
+    CustomerCommercialOrderStore,
+)
+from backend.commercial.customer_payment_intent_service import (
+    CustomerPaymentIntentStore,
+)
+from backend.commercial.customer_payment_evidence_service import (
+    CustomerPaymentEvidenceStore,
+)
+from backend.commercial.customer_payment_settlement_service import (
+    CustomerPaymentSettlementStore,
+)
+from backend.commercial.customer_paypal_order_binding_service import (
+    CustomerPayPalOrderBindingStore,
+)
+from backend.commercial.customer_vnd_bank_reconciliation_service import (
+    CustomerVndBankReconciliationStore,
+)
 from backend.commercial.customer_setup_access_code_service import (
     CustomerSetupAccessCodeService,
     CustomerSetupAccessCodeStore,
@@ -515,6 +533,37 @@ CUSTOMER_SETUP_ACCESS_CODE_STORAGE_PATH = (
     / "customer_setup_access_codes.json"
 )
 
+CUSTOMER_COMMERCIAL_ORDER_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_commercial_orders.json"
+)
+CUSTOMER_PAYMENT_INTENT_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_payment_intents.json"
+)
+CUSTOMER_PAYMENT_EVIDENCE_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_payment_evidence.json"
+)
+CUSTOMER_PAYMENT_SETTLEMENT_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_payment_settlements.json"
+)
+CUSTOMER_PAYPAL_ORDER_BINDING_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_paypal_order_bindings.json"
+)
+CUSTOMER_VND_BANK_RECONCILIATION_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_vnd_bank_reconciliations.json"
+)
+
 CUSTOMER_VPS_CONNECT_GRANT_STORAGE_PATH = (
     TODOBA_CONTROL_PLANE_DATA_ROOT
     / "commercial"
@@ -686,6 +735,14 @@ customer_deployment_runtime_projection = (
 )
 
 
+_customer_payment_runtime_composed = False
+customer_commercial_order_store = None
+customer_payment_intent_store = None
+customer_payment_evidence_store = None
+customer_payment_settlement_store = None
+customer_paypal_order_binding_store = None
+customer_vnd_bank_reconciliation_store = None
+
 _customer_setup_runtime_composed = False
 
 customer_registration_store = None
@@ -710,6 +767,132 @@ customer_setup_handoff_authorizer = None
 customer_setup_build_continuation_service = None
 customer_deployment_enrollment_service = None
 customer_deployment_bootstrap_service = None
+
+
+def _compose_customer_payment_runtime(
+    app: FastAPI,
+) -> None:
+    global _customer_payment_runtime_composed
+    global customer_commercial_order_store
+    global customer_payment_intent_store
+    global customer_payment_evidence_store
+    global customer_payment_settlement_store
+    global customer_paypal_order_binding_store
+    global customer_vnd_bank_reconciliation_store
+
+    if _customer_payment_runtime_composed:
+        return
+
+    required_paths = (
+        (
+            "Customer commercial order store",
+            CUSTOMER_COMMERCIAL_ORDER_STORAGE_PATH,
+        ),
+        (
+            "Customer payment intent store",
+            CUSTOMER_PAYMENT_INTENT_STORAGE_PATH,
+        ),
+        (
+            "Customer payment evidence store",
+            CUSTOMER_PAYMENT_EVIDENCE_STORAGE_PATH,
+        ),
+        (
+            "Customer payment settlement store",
+            CUSTOMER_PAYMENT_SETTLEMENT_STORAGE_PATH,
+        ),
+        (
+            "Customer PayPal order binding store",
+            CUSTOMER_PAYPAL_ORDER_BINDING_STORAGE_PATH,
+        ),
+        (
+            "Customer VND bank reconciliation store",
+            CUSTOMER_VND_BANK_RECONCILIATION_STORAGE_PATH,
+        ),
+    )
+
+    for owner_name, storage_path in required_paths:
+        if not storage_path.is_file():
+            raise RuntimeError(
+                f"{owner_name} is not provisioned."
+            )
+
+    commercial_order_store = CustomerCommercialOrderStore(
+        CUSTOMER_COMMERCIAL_ORDER_STORAGE_PATH
+    )
+    commercial_order_store.open_existing()
+
+    payment_intent_store = CustomerPaymentIntentStore(
+        CUSTOMER_PAYMENT_INTENT_STORAGE_PATH
+    )
+    payment_intent_store.open_existing()
+
+    payment_evidence_store = CustomerPaymentEvidenceStore(
+        CUSTOMER_PAYMENT_EVIDENCE_STORAGE_PATH
+    )
+    payment_evidence_store.open_existing()
+
+    payment_settlement_store = CustomerPaymentSettlementStore(
+        CUSTOMER_PAYMENT_SETTLEMENT_STORAGE_PATH
+    )
+    payment_settlement_store.open_existing()
+
+    paypal_order_binding_store = CustomerPayPalOrderBindingStore(
+        CUSTOMER_PAYPAL_ORDER_BINDING_STORAGE_PATH
+    )
+    paypal_order_binding_store.open_existing()
+
+    vnd_bank_reconciliation_store = (
+        CustomerVndBankReconciliationStore(
+            CUSTOMER_VND_BANK_RECONCILIATION_STORAGE_PATH
+        )
+    )
+    vnd_bank_reconciliation_store.open_existing()
+
+    required_owners = (
+        (
+            "Customer commercial order store",
+            commercial_order_store,
+        ),
+        (
+            "Customer payment intent store",
+            payment_intent_store,
+        ),
+        (
+            "Customer payment evidence store",
+            payment_evidence_store,
+        ),
+        (
+            "Customer payment settlement store",
+            payment_settlement_store,
+        ),
+        (
+            "Customer PayPal order binding store",
+            paypal_order_binding_store,
+        ),
+        (
+            "Customer VND bank reconciliation store",
+            vnd_bank_reconciliation_store,
+        ),
+    )
+
+    for owner_name, owner in required_owners:
+        if not owner.is_ready():
+            raise RuntimeError(
+                f"{owner_name} is not initialized."
+            )
+
+    customer_commercial_order_store = commercial_order_store
+    customer_payment_intent_store = payment_intent_store
+    customer_payment_evidence_store = payment_evidence_store
+    customer_payment_settlement_store = payment_settlement_store
+    customer_paypal_order_binding_store = (
+        paypal_order_binding_store
+    )
+    customer_vnd_bank_reconciliation_store = (
+        vnd_bank_reconciliation_store
+    )
+
+    _customer_payment_runtime_composed = True
 
 
 def _compose_customer_setup_runtime(
@@ -1390,6 +1573,9 @@ async def lifespan(
     _require_trusted_agent_account_bindings()
 
     _compose_customer_setup_runtime(
+        app
+    )
+    _compose_customer_payment_runtime(
         app
     )
 

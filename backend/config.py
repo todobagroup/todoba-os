@@ -867,3 +867,50 @@ def validate_trusted_agent_config() -> None:
             "Invalid Trusted Agent configuration:\n"
             f"- {joined_errors}"
         )
+# Commercial operator production authentication.
+#
+# These values are deployment-owned secrets/configuration.
+# Runtime composition must fail closed when they are absent.
+TODOBA_COMMERCIAL_OPERATOR_ID = os.getenv(
+    "TODOBA_COMMERCIAL_OPERATOR_ID",
+    "",
+)
+
+TODOBA_COMMERCIAL_OPERATOR_SECRET = os.getenv(
+    "TODOBA_COMMERCIAL_OPERATOR_SECRET",
+    "",
+)
+
+
+def get_commercial_operator_credentials() -> tuple[str, str]:
+    """
+    Return the configured production commercial operator
+    identity and opaque authentication secret.
+
+    The operator identity is normalized as an identity value.
+    The secret is validated for non-blank content but otherwise
+    preserved as opaque credential material.
+    """
+    operator_id = TODOBA_COMMERCIAL_OPERATOR_ID
+    operator_secret = TODOBA_COMMERCIAL_OPERATOR_SECRET
+
+    if (
+        not isinstance(operator_id, str)
+        or not operator_id.strip()
+    ):
+        raise RuntimeError(
+            "TODOBA_COMMERCIAL_OPERATOR_ID is required."
+        )
+
+    if (
+        not isinstance(operator_secret, str)
+        or not operator_secret.strip()
+    ):
+        raise RuntimeError(
+            "TODOBA_COMMERCIAL_OPERATOR_SECRET is required."
+        )
+
+    return (
+        operator_id.strip(),
+        operator_secret,
+    )

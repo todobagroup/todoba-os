@@ -38,6 +38,15 @@ def test_main_converges_evidence_before_mission_delivery(
             "customer_payment"
         )
 
+    def compose_authenticated_vnd_reconciliation_ingress(
+        app,
+    ) -> None:
+        assert app is main.app
+
+        calls.append(
+            "vnd_ingress"
+        )
+
     def restore_records() -> int:
         calls.append(
             "records"
@@ -124,6 +133,12 @@ def test_main_converges_evidence_before_mission_delivery(
     )
 
     monkeypatch.setattr(
+        main,
+        "_compose_authenticated_vnd_reconciliation_ingress",
+        compose_authenticated_vnd_reconciliation_ingress,
+    )
+
+    monkeypatch.setattr(
         main.execution_mission_record_recovery,
         "restore",
         restore_records,
@@ -173,6 +188,7 @@ def test_main_converges_evidence_before_mission_delivery(
                 "account_bindings",
                 "customer_setup",
                 "customer_payment",
+                "vnd_ingress",
                 "records",
                 "delivery_leases",
                 "evidence",
@@ -189,6 +205,7 @@ def test_main_converges_evidence_before_mission_delivery(
         "account_bindings",
         "customer_setup",
         "customer_payment",
+        "vnd_ingress",
         "records",
         "delivery_leases",
         "evidence",

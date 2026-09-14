@@ -414,6 +414,23 @@ from backend.trading.execution.security_sequence_assignment_service import (
     SecuritySequenceAssignmentService,
 )
 
+from backend.config import (
+    get_commercial_operator_credentials,
+)
+from backend.commercial.commercial_operator_authenticator import (
+    CommercialOperatorAuthenticator,
+)
+from backend.commercial.commercial_operator_authentication_dependency import (
+    create_commercial_operator_authentication_dependency,
+)
+from backend.commercial.customer_vnd_bank_reconciliation_admin_api import (
+    create_customer_vnd_bank_reconciliation_admin_router,
+)
+from backend.commercial.customer_vnd_bank_reconciliation_service import (
+    CustomerVndBankReconciliationService,
+)
+
+
 
 MISSION_STORAGE_PATH = (
     Path("data")
@@ -946,6 +963,60 @@ def _compose_customer_payment_runtime(
     )
 
     _customer_payment_runtime_composed = True
+
+
+_authenticated_vnd_reconciliation_ingress_composed = False
+
+
+def _compose_authenticated_vnd_reconciliation_ingress(
+    app: FastAPI,
+) -> None:
+    global _authenticated_vnd_reconciliation_ingress_composed
+
+    if _authenticated_vnd_reconciliation_ingress_composed:
+        return
+    (
+        commercial_operator_id,
+        commercial_operator_secret,
+    ) = get_commercial_operator_credentials()
+
+    commercial_operator_authenticator = (
+        CommercialOperatorAuthenticator(
+            operator_id=commercial_operator_id,
+            operator_secret=commercial_operator_secret,
+        )
+    )
+
+    commercial_operator_authentication_dependency = (
+        create_commercial_operator_authentication_dependency(
+            commercial_operator_authenticator
+        )
+    )
+
+    customer_vnd_bank_reconciliation_service = (
+        CustomerVndBankReconciliationService(
+            reconciliation_store=(customer_vnd_bank_reconciliation_store),
+            payment_intent_store=(customer_payment_intent_store),
+            order_store=(customer_commercial_order_store),
+        )
+    )
+
+    authenticated_vnd_reconciliation_router = (
+        create_customer_vnd_bank_reconciliation_admin_router(
+            commercial_operator_authentication_dependency=(
+                commercial_operator_authentication_dependency
+            ),
+            reconciliation_service=(
+                customer_vnd_bank_reconciliation_service
+            ),
+        )
+    )
+
+    app.include_router(
+        authenticated_vnd_reconciliation_router
+    )
+
+    _authenticated_vnd_reconciliation_ingress_composed = True
 
 
 def _compose_customer_setup_runtime(
@@ -1629,6 +1700,9 @@ async def lifespan(
         app
     )
     _compose_customer_payment_runtime(
+        app
+    )
+    _compose_authenticated_vnd_reconciliation_ingress(
         app
     )
 

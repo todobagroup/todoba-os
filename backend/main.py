@@ -107,6 +107,12 @@ from backend.commercial.customer_paypal_order_binding_service import (
 from backend.commercial.customer_vnd_bank_reconciliation_service import (
     CustomerVndBankReconciliationStore,
 )
+from backend.commercial.customer_vnd_bank_evidence_publication_service import (
+    CustomerVndBankEvidencePublicationService,
+)
+from backend.commercial.customer_vnd_bank_reconciliation_evidence_orchestration_service import (
+    CustomerVndBankReconciliationEvidenceOrchestrationService,
+)
 from backend.commercial.customer_setup_access_code_service import (
     CustomerSetupAccessCodeService,
     CustomerSetupAccessCodeStore,
@@ -1001,13 +1007,41 @@ def _compose_authenticated_vnd_reconciliation_ingress(
         )
     )
 
+    vnd_bank_evidence_publication_service = (
+        CustomerVndBankEvidencePublicationService(
+            reconciliation_store=(
+                customer_vnd_bank_reconciliation_store
+            ),
+            payment_evidence_service=(
+                customer_payment_evidence_service
+            ),
+            payment_intent_service=(
+                customer_payment_intent_service
+            ),
+            order_service=(
+                customer_commercial_order_service
+            ),
+        )
+    )
+
+    reconciliation_orchestration_service = (
+        CustomerVndBankReconciliationEvidenceOrchestrationService(
+            reconciliation_service=(
+                customer_vnd_bank_reconciliation_service
+            ),
+            evidence_publication_service=(
+                vnd_bank_evidence_publication_service
+            ),
+        )
+    )
+
     authenticated_vnd_reconciliation_router = (
         create_customer_vnd_bank_reconciliation_admin_router(
             commercial_operator_authentication_dependency=(
                 commercial_operator_authentication_dependency
             ),
             reconciliation_service=(
-                customer_vnd_bank_reconciliation_service
+                reconciliation_orchestration_service
             ),
         )
     )

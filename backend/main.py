@@ -113,6 +113,12 @@ from backend.commercial.customer_vnd_bank_evidence_publication_service import (
 from backend.commercial.customer_vnd_bank_reconciliation_evidence_orchestration_service import (
     CustomerVndBankReconciliationEvidenceOrchestrationService,
 )
+from backend.commercial.customer_vnd_bank_reconciliation_verification_adapter import (
+    CustomerVndBankReconciliationVerificationAdapter,
+)
+from backend.commercial.customer_vnd_bank_payment_completion_orchestration_service import (
+    CustomerVndBankPaymentCompletionOrchestrationService,
+)
 from backend.commercial.customer_setup_access_code_service import (
     CustomerSetupAccessCodeService,
     CustomerSetupAccessCodeStore,
@@ -1031,6 +1037,34 @@ def _compose_authenticated_vnd_reconciliation_ingress(
             ),
             evidence_publication_service=(
                 vnd_bank_evidence_publication_service
+            ),
+        )
+    )
+
+    vnd_bank_reconciliation_verification_adapter = (
+        CustomerVndBankReconciliationVerificationAdapter(
+            reconciliation_store=(
+                customer_vnd_bank_reconciliation_store
+            ),
+            payment_evidence_store=(
+                customer_payment_evidence_store
+            ),
+            payment_intent_store=(
+                customer_payment_intent_store
+            ),
+            order_store=(
+                customer_commercial_order_store
+            ),
+        )
+    )
+
+    vnd_bank_payment_completion_orchestration_service = (
+        CustomerVndBankPaymentCompletionOrchestrationService(
+            verification_adapter=(
+                vnd_bank_reconciliation_verification_adapter
+            ),
+            settlement_orchestration_service=(
+                customer_payment_settlement_orchestration_service
             ),
         )
     )

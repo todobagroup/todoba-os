@@ -205,3 +205,168 @@ def test_payment_runtime_remains_free_of_verified_vnd_ingress_authority():
 
     for token in forbidden:
         assert token not in payment_source
+
+
+def test_production_setup_payment_and_authenticated_vnd_ingress_compose_at_runtime(
+    monkeypatch,
+    tmp_path,
+):
+    import importlib.util
+    from pathlib import Path
+
+    from fastapi import FastAPI
+
+    import backend.main as production
+
+    from backend.commercial.customer_identity_registry import (
+        CustomerIdentityRegistry,
+    )
+
+    production_root = (
+        production.TODOBA_CONTROL_PLANE_DATA_ROOT
+    )
+
+    # Redirect every production-owned Path under the real control-plane
+    # root into this test's isolated tmp_path. This keeps the actual
+    # production durable state completely untouched while exercising
+    # the real composition functions.
+    redirected = 0
+
+    for name, value in tuple(
+        vars(production).items()
+    ):
+        if not isinstance(value, Path):
+            continue
+
+        try:
+            relative = value.relative_to(
+                production_root
+            )
+        except ValueError:
+            continue
+
+        monkeypatch.setattr(
+            production,
+            name,
+            tmp_path / relative,
+        )
+
+        redirected += 1
+
+    assert redirected > 0
+
+    monkeypatch.setattr(
+        production,
+        "TODOBA_CONTROL_PLANE_DATA_ROOT",
+        tmp_path,
+    )
+
+    # Official provisioner requires the identity registry to exist
+    # before provisioning the rest of the control plane.
+    identity_path = (
+        production.CUSTOMER_IDENTITY_STORAGE_PATH
+    )
+
+    identity_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    identity_registry = CustomerIdentityRegistry(
+        identity_path
+    )
+
+    identity_registry.initialize_empty()
+
+    provisioner_path = (
+        Path(__file__).parents[1]
+        / "scripts"
+        / "provision_customer_setup_control_plane.py"
+    )
+
+    spec = importlib.util.spec_from_file_location(
+        "p8e2_runtime_control_plane_provisioner",
+        provisioner_path,
+    )
+
+    assert spec is not None
+    assert spec.loader is not None
+
+    provisioner_module = (
+        importlib.util.module_from_spec(spec)
+    )
+
+    spec.loader.exec_module(
+        provisioner_module
+    )
+
+    provisioner_module.provision_customer_setup_control_plane(
+        control_plane_root=tmp_path,
+        confirm_runtime_stopped=True,
+    )
+
+    monkeypatch.setenv(
+        "TODOBA_COMMERCIAL_OPERATOR_ID",
+        "p8e2-runtime-regression-operator",
+    )
+
+    monkeypatch.setenv(
+        "TODOBA_COMMERCIAL_OPERATOR_SECRET",
+        (
+            "p8e2-runtime-regression-secret-"
+            "0123456789abcdef"
+        ),
+    )
+
+    # Isolate composition guards from wider suite ordering.
+    monkeypatch.setattr(
+        production,
+        "_customer_setup_runtime_composed",
+        False,
+    )
+
+    monkeypatch.setattr(
+        production,
+        "_customer_payment_runtime_composed",
+        False,
+    )
+
+    monkeypatch.setattr(
+        production,
+        "_authenticated_vnd_reconciliation_ingress_composed",
+        False,
+    )
+
+    app = FastAPI()
+
+    production._compose_customer_setup_runtime(
+        app
+    )
+
+    production._compose_customer_payment_runtime(
+        app
+    )
+
+    production._compose_authenticated_vnd_reconciliation_ingress(
+        app
+    )
+
+    openapi_paths = app.openapi()["paths"]
+
+    assert (
+        "/internal/commercial/vnd-bank/reconciliations"
+        in openapi_paths
+    )
+
+    assert (
+        "post"
+        in openapi_paths[
+            "/internal/commercial/vnd-bank/reconciliations"
+        ]
+    )
+
+    assert (
+        production
+        ._authenticated_vnd_reconciliation_ingress_composed
+        is True
+    )

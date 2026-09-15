@@ -83,12 +83,15 @@ from backend.commercial.customer_setup_activation_service import (
 )
 from backend.commercial.customer_commercial_order_service import (
     CustomerCommercialOrderStore,
+    CustomerCommercialOrderService,
 )
 from backend.commercial.customer_payment_intent_service import (
     CustomerPaymentIntentStore,
+    CustomerPaymentIntentService,
 )
 from backend.commercial.customer_payment_evidence_service import (
     CustomerPaymentEvidenceStore,
+    CustomerPaymentEvidenceService,
 )
 from backend.commercial.customer_payment_settlement_service import (
     CustomerPaymentSettlementService,
@@ -1010,6 +1013,39 @@ def _compose_authenticated_vnd_reconciliation_ingress(
             reconciliation_store=(customer_vnd_bank_reconciliation_store),
             payment_intent_store=(customer_payment_intent_store),
             order_store=(customer_commercial_order_store),
+        )
+    )
+
+    customer_commercial_order_service = (
+        CustomerCommercialOrderService(
+            order_store=(
+                customer_commercial_order_store
+            ),
+            customer_identity_registry=(
+                customer_identity_registry
+            ),
+        )
+    )
+
+    customer_payment_intent_service = (
+        CustomerPaymentIntentService(
+            payment_intent_store=(
+                customer_payment_intent_store
+            ),
+            order_store=(
+                customer_commercial_order_store
+            ),
+        )
+    )
+
+    customer_payment_evidence_service = (
+        CustomerPaymentEvidenceService(
+            payment_evidence_store=(
+                customer_payment_evidence_store
+            ),
+            payment_intent_store=(
+                customer_payment_intent_store
+            ),
         )
     )
 

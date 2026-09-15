@@ -12,13 +12,65 @@ from backend.commercial.customer_identity_registry import (
     CustomerIdentity,
     CustomerIdentityRegistry,
 )
+from backend.commercial.customer_registration_service import (
+    CustomerRegistrationRecord,
+    CustomerRegistrationStore,
+)
+
+
+class _RegisteredCustomerFixtureRegistry(
+    CustomerIdentityRegistry
+):
+    """
+    Test-only registry that keeps legacy owner tests on the
+    production invariant: every authoritative identity used to
+    create an order also has authoritative registration truth.
+
+    Dedicated identity-only regression tests intentionally use
+    the real CustomerIdentityRegistry directly instead.
+    """
+
+    def __init__(
+        self,
+        identity_path: Path,
+        *,
+        registration_store: CustomerRegistrationStore,
+    ) -> None:
+        super().__init__(identity_path)
+        self._registration_store = registration_store
+
+    def register(
+        self,
+        customer: CustomerIdentity,
+    ) -> CustomerIdentity:
+        identity = super().register(customer)
+
+        existing = self._registration_store.get_by_customer_id(
+            customer_id=identity.customer_id
+        )
+
+        if existing is None:
+            self._registration_store.register(
+                CustomerRegistrationRecord(
+                    registration_request_id=(
+                        "test-registration-"
+                        f"{identity.customer_id}"
+                    ),
+                    customer_id=identity.customer_id,
+                )
+            )
+
+        return identity
 
 
 def _identity_registry(
     tmp_path: Path,
+    *,
+    registration_store: CustomerRegistrationStore,
 ) -> CustomerIdentityRegistry:
-    registry = CustomerIdentityRegistry(
-        tmp_path / "customer_identities.json"
+    registry = _RegisteredCustomerFixtureRegistry(
+        tmp_path / "customer_identities.json",
+        registration_store=registration_store,
     )
     registry.initialize_empty()
     return registry
@@ -31,7 +83,15 @@ def _built_service(
     CustomerCommercialOrderStore,
     CustomerIdentityRegistry,
 ]:
-    identity_registry = _identity_registry(tmp_path)
+    registration_store = CustomerRegistrationStore(
+        tmp_path / "customer_registrations.json"
+    )
+    registration_store.initialize_empty()
+
+    identity_registry = _identity_registry(
+        tmp_path,
+        registration_store=registration_store,
+    )
 
     order_store = CustomerCommercialOrderStore(
         tmp_path / "customer_commercial_orders.json"
@@ -41,6 +101,7 @@ def _built_service(
     service = CustomerCommercialOrderService(
         order_store=order_store,
         customer_identity_registry=identity_registry,
+        registration_store=registration_store,
     )
 
     return (
@@ -213,6 +274,99 @@ def test_order_request_cannot_move_to_another_customer(
             currency="VND",
         )
 
+    assert order_store.size() == 1
+
+
+
+def test_authoritative_identity_without_registration_is_rejected(
+    tmp_path: Path,
+):
+    identity_registry = CustomerIdentityRegistry(
+        tmp_path / "customer_identities.json"
+    )
+    identity_registry.initialize_empty()
+
+    registration_store = CustomerRegistrationStore(
+        tmp_path / "customer_registrations.json"
+    )
+    registration_store.initialize_empty()
+
+    order_store = CustomerCommercialOrderStore(
+        tmp_path / "customer_commercial_orders.json"
+    )
+    order_store.initialize_empty()
+
+    service = CustomerCommercialOrderService(
+        order_store=order_store,
+        customer_identity_registry=identity_registry,
+        registration_store=registration_store,
+    )
+
+    identity_only_customer = identity_registry.register(
+        CustomerIdentity(
+            customer_id="customer-identity-only",
+        )
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="registration",
+    ):
+        service.create(
+            order_request_id="order-request-identity-only",
+            authorized_customer=identity_only_customer,
+            amount_minor=10_000,
+            currency="VND",
+        )
+
+    assert order_store.size() == 0
+
+
+def test_registered_authoritative_customer_may_create_order(
+    tmp_path: Path,
+):
+    identity_registry = CustomerIdentityRegistry(
+        tmp_path / "customer_identities.json"
+    )
+    identity_registry.initialize_empty()
+
+    registration_store = CustomerRegistrationStore(
+        tmp_path / "customer_registrations.json"
+    )
+    registration_store.initialize_empty()
+
+    order_store = CustomerCommercialOrderStore(
+        tmp_path / "customer_commercial_orders.json"
+    )
+    order_store.initialize_empty()
+
+    customer = identity_registry.register(
+        CustomerIdentity(
+            customer_id="customer-registered",
+        )
+    )
+
+    registration_store.register(
+        CustomerRegistrationRecord(
+            registration_request_id="registration-request-001",
+            customer_id=customer.customer_id,
+        )
+    )
+
+    service = CustomerCommercialOrderService(
+        order_store=order_store,
+        customer_identity_registry=identity_registry,
+        registration_store=registration_store,
+    )
+
+    result = service.create(
+        order_request_id="order-request-registered",
+        authorized_customer=customer,
+        amount_minor=10_000,
+        currency="VND",
+    )
+
+    assert result.customer_id == customer.customer_id
     assert order_store.size() == 1
 
 

@@ -832,6 +832,7 @@ def _compose_customer_payment_runtime(
     global customer_payment_settlement_service
     global customer_payment_settlement_activation_bridge
     global customer_payment_settlement_orchestration_service
+    global customer_registration_store
 
     if _customer_payment_runtime_composed:
         return
@@ -1041,6 +1042,9 @@ def _compose_authenticated_vnd_reconciliation_ingress(
             ),
             customer_identity_registry=(
                 customer_identity_registry
+            ),
+            registration_store=(
+                customer_registration_store
             ),
         )
     )

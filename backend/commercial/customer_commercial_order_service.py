@@ -51,6 +51,9 @@ from backend.commercial.customer_identity_registry import (
     CustomerIdentity,
     CustomerIdentityRegistry,
 )
+from backend.commercial.customer_registration_service import (
+    CustomerRegistrationStore,
+)
 
 
 STORE_VERSION = 1
@@ -762,6 +765,7 @@ class CustomerCommercialOrderService:
         customer_identity_registry: (
             CustomerIdentityRegistry
         ),
+        registration_store: CustomerRegistrationStore,
     ) -> None:
         if not isinstance(
             order_store,
@@ -781,6 +785,15 @@ class CustomerCommercialOrderService:
                 "CustomerIdentityRegistry."
             )
 
+        if not isinstance(
+            registration_store,
+            CustomerRegistrationStore,
+        ):
+            raise TypeError(
+                "registration_store must be "
+                "CustomerRegistrationStore."
+            )
+
         if not order_store.is_ready():
             raise RuntimeError(
                 "Customer commercial order store "
@@ -793,10 +806,17 @@ class CustomerCommercialOrderService:
                 "is not initialized."
             )
 
+        if not registration_store.is_ready():
+            raise RuntimeError(
+                "Customer registration store "
+                "is not initialized."
+            )
+
         self._order_store = order_store
         self._customer_identity_registry = (
             customer_identity_registry
         )
+        self._registration_store = registration_store
         self._lock = threading.RLock()
 
     def create(
@@ -856,6 +876,20 @@ class CustomerCommercialOrderService:
             ):
                 raise ValueError(
                     "Customer identity is not "
+                    "authoritative."
+                )
+
+            authoritative_registration = (
+                self._registration_store.get_by_customer_id(
+                    customer_id=(
+                        authoritative_customer.customer_id
+                    )
+                )
+            )
+
+            if authoritative_registration is None:
+                raise ValueError(
+                    "Customer registration is not "
                     "authoritative."
                 )
 

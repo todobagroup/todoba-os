@@ -1,5 +1,77 @@
+from pathlib import Path
 import pytest
 
+
+
+
+def _registered_identity_registry(
+    storage_path: Path,
+    *,
+    registration_store=None,
+):
+    """
+    Test-only identity registry preserving the production invariant:
+    every authoritative identity registered here also owns one
+    authoritative customer registration.
+    """
+    from backend.commercial.customer_identity_registry import (
+        CustomerIdentityRegistry,
+    )
+    from backend.commercial.customer_registration_service import (
+        CustomerRegistrationRecord,
+        CustomerRegistrationStore,
+    )
+
+    if registration_store is None:
+        registration_store = CustomerRegistrationStore(
+            storage_path.with_name("customer_registrations.json")
+        )
+
+        if not registration_store.is_ready():
+            registration_store.initialize_empty()
+
+    elif not isinstance(
+        registration_store,
+        CustomerRegistrationStore,
+    ):
+        raise TypeError(
+            "registration_store must be CustomerRegistrationStore."
+        )
+
+    if not registration_store.is_ready():
+        raise RuntimeError(
+            "Customer registration store is not initialized."
+        )
+
+    class _RegisteredIdentityRegistry(
+        CustomerIdentityRegistry
+    ):
+        def register(
+            self,
+            customer,
+        ):
+            identity = super().register(customer)
+
+            existing = registration_store.get_by_customer_id(
+                customer_id=identity.customer_id
+            )
+
+            if existing is None:
+                registration_store.register(
+                    CustomerRegistrationRecord(
+                        registration_request_id=(
+                            "test-registration-"
+                            f"{identity.customer_id}"
+                        ),
+                        customer_id=identity.customer_id,
+                    )
+                )
+
+            return identity
+
+    registry = _RegisteredIdentityRegistry(storage_path)
+    registry.registration_store = registration_store
+    return registry
 
 def test_vnd_payment_instruction_service_contract_exists():
     from backend.commercial.customer_vnd_bank_payment_instruction_service import (
@@ -147,7 +219,7 @@ def test_vnd_payment_instruction_uses_authoritative_order_and_intent_only(
         tmp_path / "customer_payment_intents.json"
     )
 
-    identity_registry = CustomerIdentityRegistry(
+    identity_registry = _registered_identity_registry(
         identity_path
     )
     identity_registry.initialize_empty()
@@ -170,7 +242,8 @@ def test_vnd_payment_instruction_uses_authoritative_order_and_intent_only(
     order_service = CustomerCommercialOrderService(
         order_store=order_store,
         customer_identity_registry=identity_registry,
-    )
+
+        registration_store=(identity_registry.registration_store),)
 
     order = order_service.create(
         order_request_id="instruction-order-request-001",
@@ -262,7 +335,7 @@ def test_vnd_payment_instruction_rejects_non_vnd_rail(
     order_path = tmp_path / "orders.json"
     intent_path = tmp_path / "intents.json"
 
-    identity_registry = CustomerIdentityRegistry(
+    identity_registry = _registered_identity_registry(
         identity_path
     )
     identity_registry.initialize_empty()
@@ -285,7 +358,8 @@ def test_vnd_payment_instruction_rejects_non_vnd_rail(
     order = CustomerCommercialOrderService(
         order_store=order_store,
         customer_identity_registry=identity_registry,
-    ).create(
+
+        registration_store=(identity_registry.registration_store),).create(
         order_request_id="instruction-order-paypal",
         authorized_customer=customer,
         amount_minor=10000,
@@ -342,7 +416,7 @@ def test_vnd_payment_instruction_rejects_non_vnd_currency(
         CustomerVndBankPaymentInstructionService,
     )
 
-    identity_registry = CustomerIdentityRegistry(
+    identity_registry = _registered_identity_registry(
         tmp_path / "identities.json"
     )
     identity_registry.initialize_empty()
@@ -365,7 +439,8 @@ def test_vnd_payment_instruction_rejects_non_vnd_currency(
     order = CustomerCommercialOrderService(
         order_store=order_store,
         customer_identity_registry=identity_registry,
-    ).create(
+
+        registration_store=(identity_registry.registration_store),).create(
         order_request_id="instruction-order-usd",
         authorized_customer=customer,
         amount_minor=10000,

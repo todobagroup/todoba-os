@@ -32,8 +32,79 @@ from backend.commercial.customer_vnd_bank_reconciliation_verification_adapter im
 )
 
 
+
+
+def _registered_identity_registry(
+    storage_path: Path,
+    *,
+    registration_store=None,
+):
+    """
+    Test-only identity registry preserving the production invariant:
+    every authoritative identity registered here also owns one
+    authoritative customer registration.
+    """
+    from backend.commercial.customer_identity_registry import (
+        CustomerIdentityRegistry,
+    )
+    from backend.commercial.customer_registration_service import (
+        CustomerRegistrationRecord,
+        CustomerRegistrationStore,
+    )
+
+    if registration_store is None:
+        registration_store = CustomerRegistrationStore(
+            storage_path.with_name("customer_registrations.json")
+        )
+
+        if not registration_store.is_ready():
+            registration_store.initialize_empty()
+
+    elif not isinstance(
+        registration_store,
+        CustomerRegistrationStore,
+    ):
+        raise TypeError(
+            "registration_store must be CustomerRegistrationStore."
+        )
+
+    if not registration_store.is_ready():
+        raise RuntimeError(
+            "Customer registration store is not initialized."
+        )
+
+    class _RegisteredIdentityRegistry(
+        CustomerIdentityRegistry
+    ):
+        def register(
+            self,
+            customer,
+        ):
+            identity = super().register(customer)
+
+            existing = registration_store.get_by_customer_id(
+                customer_id=identity.customer_id
+            )
+
+            if existing is None:
+                registration_store.register(
+                    CustomerRegistrationRecord(
+                        registration_request_id=(
+                            "test-registration-"
+                            f"{identity.customer_id}"
+                        ),
+                        customer_id=identity.customer_id,
+                    )
+                )
+
+            return identity
+
+    registry = _RegisteredIdentityRegistry(storage_path)
+    registry.registration_store = registration_store
+    return registry
+
 def _build(tmp_path: Path):
-    identity_registry = CustomerIdentityRegistry(
+    identity_registry = _registered_identity_registry(
         tmp_path / "customer-identities.json"
     )
     identity_registry.initialize_empty()
@@ -52,7 +123,8 @@ def _build(tmp_path: Path):
     order_service = CustomerCommercialOrderService(
         order_store=order_store,
         customer_identity_registry=identity_registry,
-    )
+
+        registration_store=(identity_registry.registration_store),)
 
     order = order_service.create(
         order_request_id="order-request-001",

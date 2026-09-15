@@ -1803,12 +1803,18 @@ async def lifespan(
     _compose_customer_setup_runtime(
         app
     )
-    _compose_customer_payment_runtime(
-        app
-    )
-    _compose_authenticated_vnd_reconciliation_ingress(
-        app
-    )
+    try:
+        _compose_customer_payment_runtime(
+            app
+        )
+        _compose_authenticated_vnd_reconciliation_ingress(
+            app
+        )
+    except RuntimeError as payment_startup_error:
+        print(
+            "TODOBA_PAYMENT_STARTUP_ISOLATED: "
+            f"{payment_startup_error}"
+        )
 
     execution_mission_record_recovery.restore()
 

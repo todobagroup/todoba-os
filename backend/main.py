@@ -107,6 +107,9 @@ from backend.commercial.customer_payment_settlement_orchestration_service import
 from backend.commercial.customer_paypal_order_binding_service import (
     CustomerPayPalOrderBindingStore,
 )
+from backend.commercial.customer_vnd_bank_payment_instruction_service import (
+    CustomerVndBankPaymentInstructionService,
+)
 from backend.commercial.customer_vnd_bank_reconciliation_service import (
     CustomerVndBankReconciliationStore,
 )
@@ -431,6 +434,7 @@ from backend.trading.execution.security_sequence_assignment_service import (
 
 from backend.config import (
     get_commercial_operator_credentials,
+    get_vnd_bank_payment_destination,
 )
 from backend.commercial.commercial_operator_authenticator import (
     CommercialOperatorAuthenticator,
@@ -783,6 +787,7 @@ customer_payment_settlement_store = None
 customer_paypal_order_binding_store = None
 customer_vnd_bank_reconciliation_store = None
 
+customer_vnd_bank_payment_instruction_service = None
 customer_payment_settlement_service = None
 customer_payment_settlement_activation_bridge = None
 customer_payment_settlement_orchestration_service = None
@@ -823,6 +828,7 @@ def _compose_customer_payment_runtime(
     global customer_payment_settlement_store
     global customer_paypal_order_binding_store
     global customer_vnd_bank_reconciliation_store
+    global customer_vnd_bank_payment_instruction_service
     global customer_payment_settlement_service
     global customer_payment_settlement_activation_bridge
     global customer_payment_settlement_orchestration_service
@@ -895,6 +901,14 @@ def _compose_customer_payment_runtime(
     )
     vnd_bank_reconciliation_store.open_existing()
 
+    vnd_bank_payment_instruction_service = (
+        CustomerVndBankPaymentInstructionService(
+            payment_intent_store=payment_intent_store,
+            order_store=commercial_order_store,
+            destination=get_vnd_bank_payment_destination(),
+        )
+    )
+
     required_owners = (
         (
             "Customer commercial order store",
@@ -965,6 +979,10 @@ def _compose_customer_payment_runtime(
     )
     customer_vnd_bank_reconciliation_store = (
         vnd_bank_reconciliation_store
+    )
+
+    customer_vnd_bank_payment_instruction_service = (
+        vnd_bank_payment_instruction_service
     )
 
     customer_payment_settlement_service = (

@@ -395,6 +395,12 @@ def _payment_compose_function_for_exec(
 
     namespace = {
         "FastAPI": object,
+        "CustomerVndBankPaymentInstructionService": (
+            _CompositionOwner
+        ),
+        "get_vnd_bank_payment_destination": (
+            lambda: object()
+        ),
         "CustomerPaymentSettlementService": (
             _CompositionOwner
         ),

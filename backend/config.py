@@ -914,3 +914,62 @@ def get_commercial_operator_credentials() -> tuple[str, str]:
         operator_id.strip(),
         operator_secret,
     )
+
+
+def get_vnd_bank_payment_destination():
+    """
+    Return the server-owned VND bank-transfer destination.
+
+    Destination authority comes only from server environment
+    configuration. Payment amount/order/reference authority is
+    intentionally not part of this configuration surface.
+    """
+    from backend.commercial.customer_vnd_bank_payment_instruction_service import (
+        CustomerVndBankPaymentDestination,
+    )
+
+    bank_code = os.getenv(
+        "TODOBA_VND_BANK_CODE",
+        "",
+    ).strip()
+
+    account_number = os.getenv(
+        "TODOBA_VND_BANK_ACCOUNT_NUMBER",
+        "",
+    ).strip()
+
+    account_name = os.getenv(
+        "TODOBA_VND_BANK_ACCOUNT_NAME",
+        "",
+    ).strip()
+
+    missing = []
+
+    if not bank_code:
+        missing.append(
+            "TODOBA_VND_BANK_CODE"
+        )
+
+    if not account_number:
+        missing.append(
+            "TODOBA_VND_BANK_ACCOUNT_NUMBER"
+        )
+
+    if not account_name:
+        missing.append(
+            "TODOBA_VND_BANK_ACCOUNT_NAME"
+        )
+
+    if missing:
+        raise RuntimeError(
+            "VND bank payment destination configuration "
+            "is incomplete: "
+            + ", ".join(missing)
+            + " is required."
+        )
+
+    return CustomerVndBankPaymentDestination(
+        bank_code=bank_code,
+        account_number=account_number,
+        account_name=account_name,
+    )

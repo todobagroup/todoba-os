@@ -211,6 +211,20 @@ def test_production_setup_payment_and_authenticated_vnd_ingress_compose_at_runti
     monkeypatch,
     tmp_path,
 ):
+
+    monkeypatch.setenv(
+        "TODOBA_VND_BANK_CODE",
+        "TESTBANK",
+    )
+    monkeypatch.setenv(
+        "TODOBA_VND_BANK_ACCOUNT_NUMBER",
+        "0123456789",
+    )
+    monkeypatch.setenv(
+        "TODOBA_VND_BANK_ACCOUNT_NAME",
+        "TODOBA TEST",
+    )
+
     import importlib.util
     from pathlib import Path
 

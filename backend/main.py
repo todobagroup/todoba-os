@@ -445,6 +445,9 @@ from backend.commercial.commercial_operator_authentication_dependency import (
 from backend.commercial.customer_vnd_bank_reconciliation_admin_api import (
     create_customer_vnd_bank_reconciliation_admin_router,
 )
+from backend.commercial.customer_bank_transaction_reference_resolver import (
+    CustomerBankTransactionReferenceResolver,
+)
 from backend.commercial.customer_vnd_bank_reconciliation_service import (
     CustomerVndBankReconciliationService,
 )
@@ -1099,6 +1102,17 @@ def _compose_authenticated_vnd_reconciliation_ingress(
         )
     )
 
+    bank_transaction_reference_resolver = (
+        CustomerBankTransactionReferenceResolver(
+            payment_intent_store=(
+                customer_payment_intent_store
+            ),
+            reconciliation_service=(
+                reconciliation_orchestration_service
+            ),
+        )
+    )
+
     vnd_bank_reconciliation_verification_adapter = (
         CustomerVndBankReconciliationVerificationAdapter(
             reconciliation_store=(
@@ -1132,8 +1146,8 @@ def _compose_authenticated_vnd_reconciliation_ingress(
             commercial_operator_authentication_dependency=(
                 commercial_operator_authentication_dependency
             ),
-            reconciliation_service=(
-                reconciliation_orchestration_service
+            transaction_reference_resolver=(
+                bank_transaction_reference_resolver
             ),
         )
     )

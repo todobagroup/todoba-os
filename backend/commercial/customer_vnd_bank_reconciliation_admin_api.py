@@ -10,7 +10,7 @@ Security rules:
 - caller cannot supply operator_id, customer_id, order_id,
   currency, reconciliation_id, or status
 - caller supplies only reconciliation request identity,
-  payment intent identity, observed bank reference, and observed
+  canonical transfer reference, observed bank reference, and observed
   amount
 - currency is server-owned VND
 - authoritative customer/order/amount/currency binding and replay
@@ -48,13 +48,13 @@ class CustomerVndBankReconciliationAdminRequest(
     )
 
     reconciliation_request_id: str
-    payment_intent_id: str
+    transfer_reference: str
     bank_reference: str
     amount_minor: int
 
     @field_validator(
         "reconciliation_request_id",
-        "payment_intent_id",
+        "transfer_reference",
         "bank_reference",
     )
     @classmethod
@@ -107,7 +107,7 @@ def create_customer_vnd_bank_reconciliation_admin_router(
     commercial_operator_authentication_dependency: (
         Callable[..., str]
     ),
-    reconciliation_service,
+    transaction_reference_resolver,
 ) -> APIRouter:
     if not callable(
         commercial_operator_authentication_dependency
@@ -118,9 +118,9 @@ def create_customer_vnd_bank_reconciliation_admin_router(
         )
 
     _require_owner_method(
-        reconciliation_service,
-        owner_name="reconciliation_service",
-        method_name="confirm",
+        transaction_reference_resolver,
+        owner_name="transaction_reference_resolver",
+        method_name="resolve_and_reconcile",
     )
 
     router = APIRouter()
@@ -137,12 +137,12 @@ def create_customer_vnd_bank_reconciliation_admin_router(
             commercial_operator_authentication_dependency
         ),
     ) -> CustomerVndBankReconciliationAdminResponse:
-        result = reconciliation_service.confirm(
+        result = transaction_reference_resolver.resolve_and_reconcile(
             reconciliation_request_id=(
                 request.reconciliation_request_id
             ),
-            payment_intent_id=(
-                request.payment_intent_id
+            transfer_reference=(
+                request.transfer_reference
             ),
             bank_reference=(
                 request.bank_reference

@@ -124,7 +124,7 @@ def test_orchestrator_wraps_reconciliation_and_publication_owners():
     )
 
 
-def test_admin_router_receives_trusted_evidence_orchestrator():
+def test_admin_router_receives_transaction_reference_resolver():
     source, node = _function(
         "_compose_authenticated_vnd_reconciliation_ingress"
     )
@@ -149,12 +149,12 @@ def test_admin_router_receives_trusted_evidence_orchestrator():
     ]
 
     assert (
-        "reconciliation_service="
+        "transaction_reference_resolver="
         in tail
     )
 
     assert (
-        "reconciliation_orchestration_service"
+        "bank_transaction_reference_resolver"
         in tail
     )
 
@@ -223,3 +223,49 @@ def test_payment_runtime_remains_free_of_authenticated_vnd_ingress_authority():
 
     for token in forbidden:
         assert token not in payment_source
+
+
+
+def test_transaction_reference_resolver_wraps_trusted_evidence_orchestrator():
+    source, node = _function(
+        "_compose_authenticated_vnd_reconciliation_ingress"
+    )
+
+    ingress_source = ast.get_source_segment(
+        source,
+        node,
+    )
+
+    assert ingress_source is not None
+
+    marker = "CustomerBankTransactionReferenceResolver("
+
+    assert marker in ingress_source
+
+    resolver_offset = ingress_source.index(
+        marker
+    )
+
+    tail = ingress_source[
+        resolver_offset:
+    ]
+
+    assert (
+        "payment_intent_store="
+        in tail
+    )
+
+    assert (
+        "customer_payment_intent_store"
+        in tail
+    )
+
+    assert (
+        "reconciliation_service="
+        in tail
+    )
+
+    assert (
+        "reconciliation_orchestration_service"
+        in tail
+    )

@@ -97,6 +97,7 @@ def test_authenticated_vnd_ingress_has_dedicated_composition_owner():
         "CommercialOperatorAuthenticator",
         "create_commercial_operator_authentication_dependency",
         "CustomerVndBankReconciliationService",
+        "CustomerBankTransactionReferenceResolver",
         "create_customer_vnd_bank_reconciliation_admin_router",
         "include_router",
     }
@@ -272,6 +273,7 @@ def test_main_imports_authenticated_vnd_ingress_owners():
         "CommercialOperatorAuthenticator",
         "create_commercial_operator_authentication_dependency",
         "CustomerVndBankReconciliationService",
+        "CustomerBankTransactionReferenceResolver",
         "create_customer_vnd_bank_reconciliation_admin_router",
     }
 

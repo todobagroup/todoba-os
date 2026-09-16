@@ -18,11 +18,11 @@ class RecordingReconciliationService:
     def __init__(self):
         self.calls = []
 
-    def confirm(
+    def resolve_and_reconcile(
         self,
         *,
+        transfer_reference,
         reconciliation_request_id,
-        payment_intent_id,
         bank_reference,
         amount_minor,
         currency,
@@ -31,7 +31,7 @@ class RecordingReconciliationService:
         self.calls.append(
             {
                 "reconciliation_request_id": reconciliation_request_id,
-                "payment_intent_id": payment_intent_id,
+                "transfer_reference": transfer_reference,
                 "bank_reference": bank_reference,
                 "amount_minor": amount_minor,
                 "currency": currency,
@@ -42,7 +42,7 @@ class RecordingReconciliationService:
         return CustomerVndBankReconciliationRecord(
             reconciliation_request_id=reconciliation_request_id,
             reconciliation_id="vnd-bank-reconciliation-001",
-            payment_intent_id=payment_intent_id,
+            payment_intent_id="payment-intent-server-resolved-001",
             order_id="order-001",
             customer_id="customer-001",
             bank_reference=bank_reference,
@@ -68,7 +68,7 @@ def _build_client(
 
     router = create_customer_vnd_bank_reconciliation_admin_router(
         commercial_operator_authentication_dependency=require_operator,
-        reconciliation_service=service,
+        transaction_reference_resolver=service,
     )
 
     app = FastAPI()
@@ -80,7 +80,7 @@ def _build_client(
 def _valid_payload():
     return {
         "reconciliation_request_id": "reconcile-request-001",
-        "payment_intent_id": "payment-intent-001",
+        "transfer_reference": "TDV1-REFERENCE-001",
         "bank_reference": "VCB-20260913-000001",
         "amount_minor": 2500000,
     }
@@ -105,7 +105,7 @@ def test_authenticated_operator_confirms_vnd_reconciliation():
     assert service.calls == [
         {
             "reconciliation_request_id": "reconcile-request-001",
-            "payment_intent_id": "payment-intent-001",
+            "transfer_reference": "TDV1-REFERENCE-001",
             "bank_reference": "VCB-20260913-000001",
             "amount_minor": 2500000,
             "currency": "VND",
@@ -220,7 +220,7 @@ def test_router_requires_authentication_dependency():
     try:
         create_customer_vnd_bank_reconciliation_admin_router(
             commercial_operator_authentication_dependency=object(),
-            reconciliation_service=RecordingReconciliationService(),
+            transaction_reference_resolver=RecordingReconciliationService(),
         )
     except TypeError:
         pass
@@ -230,7 +230,7 @@ def test_router_requires_authentication_dependency():
         )
 
 
-def test_router_requires_reconciliation_confirm_owner():
+def test_router_requires_transaction_reference_resolver_owner():
     class NoConfirmOwner:
         pass
 
@@ -239,13 +239,13 @@ def test_router_requires_reconciliation_confirm_owner():
             commercial_operator_authentication_dependency=lambda: (
                 "operator-founder"
             ),
-            reconciliation_service=NoConfirmOwner(),
+            transaction_reference_resolver=NoConfirmOwner(),
         )
     except TypeError:
         pass
     else:
         raise AssertionError(
-            "Reconciliation owner without confirm() was accepted."
+            "Transaction reference resolver without resolve_and_reconcile() was accepted."
         )
 
 
@@ -276,3 +276,133 @@ def test_api_boundary_exposes_no_downstream_payment_authority():
             service,
             method_name,
         )
+
+
+class RecordingTransactionReferenceResolver:
+    def __init__(self):
+        self.calls = []
+
+    def resolve_and_reconcile(
+        self,
+        *,
+        transfer_reference,
+        reconciliation_request_id,
+        bank_reference,
+        amount_minor,
+        currency,
+        operator_id,
+    ):
+        self.calls.append(
+            {
+                "transfer_reference": transfer_reference,
+                "reconciliation_request_id": (
+                    reconciliation_request_id
+                ),
+                "bank_reference": bank_reference,
+                "amount_minor": amount_minor,
+                "currency": currency,
+                "operator_id": operator_id,
+            }
+        )
+
+        return CustomerVndBankReconciliationRecord(
+            reconciliation_request_id=(
+                reconciliation_request_id
+            ),
+            reconciliation_id=(
+                "vnd-bank-reconciliation-reference-001"
+            ),
+            payment_intent_id=(
+                "payment-intent-server-resolved-001"
+            ),
+            order_id="order-001",
+            customer_id="customer-001",
+            bank_reference=bank_reference,
+            amount_minor=amount_minor,
+            currency=currency,
+            operator_id=operator_id,
+            status=(
+                CustomerVndBankReconciliationStatus.CONFIRMED
+            ),
+        )
+
+
+def test_authenticated_ingress_resolves_transfer_reference_not_payment_intent():
+    resolver = RecordingTransactionReferenceResolver()
+
+    def require_operator():
+        return "operator-server-owned"
+
+    router = create_customer_vnd_bank_reconciliation_admin_router(
+        commercial_operator_authentication_dependency=(
+            require_operator
+        ),
+        transaction_reference_resolver=resolver,
+    )
+
+    app = FastAPI()
+    app.include_router(router)
+
+    client = TestClient(app)
+
+    response = client.post(
+        _PATH,
+        json={
+            "reconciliation_request_id": (
+                "reconcile-reference-request-001"
+            ),
+            "transfer_reference": "TDV1-REFERENCE-001",
+            "bank_reference": "VCB-REFERENCE-001",
+            "amount_minor": 2500000,
+        },
+    )
+
+    assert response.status_code == 200
+
+    assert resolver.calls == [
+        {
+            "transfer_reference": "TDV1-REFERENCE-001",
+            "reconciliation_request_id": (
+                "reconcile-reference-request-001"
+            ),
+            "bank_reference": "VCB-REFERENCE-001",
+            "amount_minor": 2500000,
+            "currency": "VND",
+            "operator_id": "operator-server-owned",
+        }
+    ]
+
+
+def test_caller_cannot_supply_payment_intent_identity():
+    resolver = RecordingTransactionReferenceResolver()
+
+    def require_operator():
+        return "operator-server-owned"
+
+    router = create_customer_vnd_bank_reconciliation_admin_router(
+        commercial_operator_authentication_dependency=(
+            require_operator
+        ),
+        transaction_reference_resolver=resolver,
+    )
+
+    app = FastAPI()
+    app.include_router(router)
+
+    client = TestClient(app)
+
+    response = client.post(
+        _PATH,
+        json={
+            "reconciliation_request_id": (
+                "reconcile-reference-request-002"
+            ),
+            "transfer_reference": "TDV1-REFERENCE-002",
+            "bank_reference": "VCB-REFERENCE-002",
+            "amount_minor": 2500000,
+            "payment_intent_id": "payment-intent-forged",
+        },
+    )
+
+    assert response.status_code == 422
+    assert resolver.calls == []

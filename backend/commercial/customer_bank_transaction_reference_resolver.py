@@ -25,7 +25,6 @@ from backend.commercial.customer_payment_transfer_reference_codec import (
 )
 from backend.commercial.customer_vnd_bank_reconciliation_service import (
     CustomerVndBankReconciliationRecord,
-    CustomerVndBankReconciliationService,
 )
 
 
@@ -39,7 +38,7 @@ class CustomerBankTransactionReferenceResolver:
         self,
         *,
         payment_intent_store: CustomerPaymentIntentStore,
-        reconciliation_service: CustomerVndBankReconciliationService,
+        reconciliation_service,
     ) -> None:
         if not isinstance(
             payment_intent_store,
@@ -50,13 +49,15 @@ class CustomerBankTransactionReferenceResolver:
                 "CustomerPaymentIntentStore."
             )
 
-        if not isinstance(
+        confirm = getattr(
             reconciliation_service,
-            CustomerVndBankReconciliationService,
-        ):
+            "confirm",
+            None,
+        )
+
+        if not callable(confirm):
             raise TypeError(
-                "reconciliation_service must be "
-                "CustomerVndBankReconciliationService."
+                "reconciliation_service must expose callable confirm()."
             )
 
         if not payment_intent_store.is_ready():

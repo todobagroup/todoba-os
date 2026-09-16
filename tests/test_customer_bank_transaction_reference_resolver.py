@@ -26,6 +26,7 @@ from backend.commercial.customer_registration_service import (
     CustomerRegistrationStore,
 )
 from backend.commercial.customer_vnd_bank_reconciliation_service import (
+    CustomerVndBankReconciliationRecord,
     CustomerVndBankReconciliationService,
     CustomerVndBankReconciliationStatus,
     CustomerVndBankReconciliationStore,
@@ -529,3 +530,133 @@ def test_resolver_source_does_not_scan_or_create_reference_mapping():
 
     for token in forbidden:
         assert token not in source
+
+
+def test_resolver_accepts_confirm_owner_wrapper_not_only_raw_reconciliation_service(
+    tmp_path,
+):
+    (
+        order_service,
+        intent_service,
+        _,
+        _,
+    ) = _build(tmp_path)
+
+    order = order_service.create(
+        order_request_id="order-request-wrapper-001",
+        authorized_customer=CustomerIdentity(
+            customer_id="customer-001",
+        ),
+        amount_minor=2500000,
+        currency="VND",
+    )
+
+    intent = intent_service.create(
+        payment_intent_request_id="intent-request-wrapper-001",
+        authorized_order=order,
+        payment_rail=PaymentRail.VND_BANK_TRANSFER,
+    )
+
+    class RecordingConfirmOwner:
+        def __init__(self):
+            self.calls = []
+
+        def confirm(self, **kwargs):
+            self.calls.append(kwargs)
+
+            return CustomerVndBankReconciliationRecord(
+                reconciliation_request_id=(
+                    kwargs["reconciliation_request_id"]
+                ),
+                reconciliation_id=(
+                    "vnd-bank-reconciliation-wrapper-001"
+                ),
+                payment_intent_id=(
+                    kwargs["payment_intent_id"]
+                ),
+                order_id=order.order_id,
+                customer_id=order.customer_id,
+                bank_reference=(
+                    kwargs["bank_reference"]
+                ),
+                amount_minor=(
+                    kwargs["amount_minor"]
+                ),
+                currency=kwargs["currency"],
+                operator_id=(
+                    kwargs["operator_id"]
+                ),
+                status=(
+                    CustomerVndBankReconciliationStatus.CONFIRMED
+                ),
+            )
+
+    confirm_owner = RecordingConfirmOwner()
+
+    resolver = CustomerBankTransactionReferenceResolver(
+        payment_intent_store=(
+            intent_service._payment_intent_store
+        ),
+        reconciliation_service=confirm_owner,
+    )
+
+    transfer_reference = (
+        encode_payment_transfer_reference(
+            payment_intent_id=(
+                intent.payment_intent_id
+            )
+        )
+    )
+
+    result = resolver.resolve_and_reconcile(
+        transfer_reference=transfer_reference,
+        reconciliation_request_id=(
+            "generic-wrapper-request-001"
+        ),
+        bank_reference=(
+            "GENERIC-WRAPPER-BANK-001"
+        ),
+        amount_minor=2500000,
+        currency="VND",
+        operator_id="operator-founder",
+    )
+
+    assert (
+        result.payment_intent_id
+        == intent.payment_intent_id
+    )
+
+    assert confirm_owner.calls == [
+        {
+            "reconciliation_request_id": (
+                "generic-wrapper-request-001"
+            ),
+            "payment_intent_id": (
+                intent.payment_intent_id
+            ),
+            "bank_reference": (
+                "GENERIC-WRAPPER-BANK-001"
+            ),
+            "amount_minor": 2500000,
+            "currency": "VND",
+            "operator_id": "operator-founder",
+        }
+    ]
+
+
+def test_resolver_rejects_dependency_without_confirm_owner_contract(
+    tmp_path,
+):
+    intent_store = CustomerPaymentIntentStore(
+        storage_path=tmp_path / "intents.json"
+    )
+    intent_store.initialize_empty()
+
+    with pytest.raises(
+        TypeError,
+        match="confirm",
+    ):
+        CustomerBankTransactionReferenceResolver(
+            payment_intent_store=intent_store,
+            reconciliation_service=object(),
+        )

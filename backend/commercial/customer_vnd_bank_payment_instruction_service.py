@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import base64
-import hashlib
 from dataclasses import dataclass
 
 from backend.commercial.customer_commercial_order_service import (
@@ -13,44 +11,9 @@ from backend.commercial.customer_payment_intent_service import (
     CustomerPaymentIntentStore,
     PaymentRail,
 )
-
-
-_PAYMENT_TRANSFER_REFERENCE_PREFIX = "TODOBA SOFTWARE"
-_PAYMENT_TRANSFER_REFERENCE_TOKEN_LENGTH = 16
-
-
-def _build_payment_transfer_reference(
-    *,
-    payment_intent_id: str,
-) -> str:
-    if not isinstance(payment_intent_id, str):
-        raise TypeError(
-            "payment_intent_id must be str."
-        )
-
-    normalized_payment_intent_id = (
-        payment_intent_id.strip()
-    )
-
-    if not normalized_payment_intent_id:
-        raise ValueError(
-            "payment_intent_id is required."
-        )
-
-    digest = hashlib.sha256(
-        normalized_payment_intent_id.encode("utf-8")
-    ).digest()
-
-    token = base64.b32encode(
-        digest
-    ).decode("ascii")[
-        :_PAYMENT_TRANSFER_REFERENCE_TOKEN_LENGTH
-    ]
-
-    return (
-        f"{_PAYMENT_TRANSFER_REFERENCE_PREFIX} "
-        f"{token}"
-    )
+from backend.commercial.customer_payment_transfer_reference_codec import (
+    encode_payment_transfer_reference,
+)
 
 
 @dataclass(frozen=True)
@@ -298,7 +261,7 @@ class CustomerVndBankPaymentInstructionService:
                 self._destination.account_name
             ),
             transfer_reference=(
-                _build_payment_transfer_reference(
+                encode_payment_transfer_reference(
                     payment_intent_id=(
                         payment_intent.payment_intent_id
                     )

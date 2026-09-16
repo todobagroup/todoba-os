@@ -3,6 +3,10 @@ import inspect
 
 import pytest
 
+from backend.commercial.customer_payment_transfer_reference_codec import (
+    encode_payment_transfer_reference,
+)
+
 
 
 
@@ -314,18 +318,11 @@ def test_payment_instruction_production_composition_uses_server_destination(
     assert result.account_name == "TODOBA TEST"
     assert result.amount_minor == 10000
     assert result.currency == "VND"
-    import base64
-    import hashlib
-
-    expected_reference_token = base64.b32encode(
-        hashlib.sha256(
-            intent.payment_intent_id.encode("utf-8")
-        ).digest()
-    ).decode("ascii")[:16]
-
-    assert result.transfer_reference == (
-        f"TODOBA SOFTWARE {expected_reference_token}"
+    expected_reference = encode_payment_transfer_reference(
+        payment_intent_id=intent.payment_intent_id
     )
+
+    assert result.transfer_reference == expected_reference
 
     assert (
         intent.payment_intent_id

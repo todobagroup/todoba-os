@@ -1,5 +1,10 @@
 from pathlib import Path
+
 import pytest
+
+from backend.commercial.customer_payment_transfer_reference_codec import (
+    encode_payment_transfer_reference,
+)
 
 
 
@@ -297,19 +302,12 @@ def test_vnd_payment_instruction_uses_authoritative_order_and_intent_only(
     assert result.account_number == "0123456789"
     assert result.account_name == "TODOBA TEST"
 
-    # Transfer reference is server-owned and deterministic.
-    import base64
-    import hashlib
-
-    expected_reference_token = base64.b32encode(
-        hashlib.sha256(
-            intent.payment_intent_id.encode("utf-8")
-        ).digest()
-    ).decode("ascii")[:16]
-
-    assert result.transfer_reference == (
-        f"TODOBA SOFTWARE {expected_reference_token}"
+    # Transfer reference is server-owned and codec-derived.
+    expected_reference = encode_payment_transfer_reference(
+        payment_intent_id=intent.payment_intent_id
     )
+
+    assert result.transfer_reference == expected_reference
     assert (
         intent.payment_intent_id
         not in result.transfer_reference
@@ -567,21 +565,20 @@ def test_vnd_payment_instruction_projects_global_todoba_software_reference(
         payment_intent_id=intent.payment_intent_id
     )
 
-    expected_reference = base64.b32encode(
-        hashlib.sha256(
-            intent.payment_intent_id.encode("utf-8")
-        ).digest()
-    ).decode("ascii")[:16]
-
-    assert result.transfer_reference == (
-        f"TODOBA SOFTWARE {expected_reference}"
+    expected_reference = encode_payment_transfer_reference(
+        payment_intent_id=intent.payment_intent_id
     )
 
+    assert result.transfer_reference == expected_reference
     assert result.transfer_reference != intent.payment_intent_id
 
-    assert len(expected_reference) == 16
-    assert expected_reference.isalnum()
-    assert expected_reference == expected_reference.upper()
+    token = expected_reference.removeprefix(
+        "TODOBA SOFTWARE "
+    )
+
+    assert len(token) == 26
+    assert token.isalnum()
+    assert token == token.upper()
 
     retry = service.build(
         payment_intent_id=intent.payment_intent_id
@@ -593,22 +590,18 @@ def test_vnd_payment_instruction_projects_global_todoba_software_reference(
 def test_vnd_payment_instruction_reference_changes_with_payment_intent(
     tmp_path,
 ):
-    import base64
-    import hashlib
-
     first = "payment-intent-00000000000000000000000000000001"
     second = "payment-intent-00000000000000000000000000000002"
 
-    def project(payment_intent_id: str) -> str:
-        token = base64.b32encode(
-            hashlib.sha256(
-                payment_intent_id.encode("utf-8")
-            ).digest()
-        ).decode("ascii")[:16]
+    first_reference = encode_payment_transfer_reference(
+        payment_intent_id=first
+    )
 
-        return f"TODOBA SOFTWARE {token}"
+    second_reference = encode_payment_transfer_reference(
+        payment_intent_id=second
+    )
 
-    assert project(first) != project(second)
+    assert first_reference != second_reference
 
 
 def test_vnd_payment_instruction_public_build_still_accepts_only_payment_intent_id():

@@ -298,9 +298,21 @@ def test_vnd_payment_instruction_uses_authoritative_order_and_intent_only(
     assert result.account_name == "TODOBA TEST"
 
     # Transfer reference is server-owned and deterministic.
+    import base64
+    import hashlib
+
+    expected_reference_token = base64.b32encode(
+        hashlib.sha256(
+            intent.payment_intent_id.encode("utf-8")
+        ).digest()
+    ).decode("ascii")[:16]
+
+    assert result.transfer_reference == (
+        f"TODOBA SOFTWARE {expected_reference_token}"
+    )
     assert (
-        result.transfer_reference
-        == intent.payment_intent_id
+        intent.payment_intent_id
+        not in result.transfer_reference
     )
 
     retry = service.build(
@@ -474,3 +486,151 @@ def test_vnd_payment_instruction_rejects_non_vnd_currency(
         service.build(
             payment_intent_id=intent.payment_intent_id
         )
+
+
+def test_vnd_payment_instruction_projects_global_todoba_software_reference(
+    tmp_path,
+):
+    import base64
+    import hashlib
+
+    from backend.commercial.customer_commercial_order_service import (
+        CustomerCommercialOrderService,
+        CustomerCommercialOrderStore,
+    )
+    from backend.commercial.customer_identity_registry import (
+        CustomerIdentity,
+    )
+    from backend.commercial.customer_payment_intent_service import (
+        CustomerPaymentIntentService,
+        CustomerPaymentIntentStore,
+        PaymentRail,
+    )
+    from backend.commercial.customer_vnd_bank_payment_instruction_service import (
+        CustomerVndBankPaymentDestination,
+        CustomerVndBankPaymentInstructionService,
+    )
+
+    identity_registry = _registered_identity_registry(
+        tmp_path / "identities.json"
+    )
+    identity_registry.initialize_empty()
+
+    customer = CustomerIdentity(
+        customer_id="customer-reference-001"
+    )
+    identity_registry.register(customer)
+
+    order_store = CustomerCommercialOrderStore(
+        tmp_path / "orders.json"
+    )
+    order_store.initialize_empty()
+
+    order_service = CustomerCommercialOrderService(
+        order_store=order_store,
+        customer_identity_registry=identity_registry,
+        registration_store=identity_registry.registration_store,
+    )
+
+    order = order_service.create(
+        order_request_id="reference-order-request-001",
+        authorized_customer=customer,
+        amount_minor=10000,
+        currency="VND",
+    )
+
+    intent_store = CustomerPaymentIntentStore(
+        tmp_path / "intents.json"
+    )
+    intent_store.initialize_empty()
+
+    intent = CustomerPaymentIntentService(
+        payment_intent_store=intent_store,
+        order_store=order_store,
+    ).create(
+        payment_intent_request_id="reference-intent-request-001",
+        authorized_order=order,
+        payment_rail=PaymentRail.VND_BANK_TRANSFER,
+    )
+
+    service = CustomerVndBankPaymentInstructionService(
+        payment_intent_store=intent_store,
+        order_store=order_store,
+        destination=CustomerVndBankPaymentDestination(
+            bank_code="TESTBANK",
+            account_number="0123456789",
+            account_name="TODOBA TEST",
+        ),
+    )
+
+    result = service.build(
+        payment_intent_id=intent.payment_intent_id
+    )
+
+    expected_reference = base64.b32encode(
+        hashlib.sha256(
+            intent.payment_intent_id.encode("utf-8")
+        ).digest()
+    ).decode("ascii")[:16]
+
+    assert result.transfer_reference == (
+        f"TODOBA SOFTWARE {expected_reference}"
+    )
+
+    assert result.transfer_reference != intent.payment_intent_id
+
+    assert len(expected_reference) == 16
+    assert expected_reference.isalnum()
+    assert expected_reference == expected_reference.upper()
+
+    retry = service.build(
+        payment_intent_id=intent.payment_intent_id
+    )
+
+    assert retry.transfer_reference == result.transfer_reference
+
+
+def test_vnd_payment_instruction_reference_changes_with_payment_intent(
+    tmp_path,
+):
+    import base64
+    import hashlib
+
+    first = "payment-intent-00000000000000000000000000000001"
+    second = "payment-intent-00000000000000000000000000000002"
+
+    def project(payment_intent_id: str) -> str:
+        token = base64.b32encode(
+            hashlib.sha256(
+                payment_intent_id.encode("utf-8")
+            ).digest()
+        ).decode("ascii")[:16]
+
+        return f"TODOBA SOFTWARE {token}"
+
+    assert project(first) != project(second)
+
+
+def test_vnd_payment_instruction_public_build_still_accepts_only_payment_intent_id():
+    import inspect
+
+    from backend.commercial.customer_vnd_bank_payment_instruction_service import (
+        CustomerVndBankPaymentInstructionService,
+    )
+
+    signature = inspect.signature(
+        CustomerVndBankPaymentInstructionService.build
+    )
+
+    public_parameters = [
+        parameter
+        for name, parameter in signature.parameters.items()
+        if name != "self"
+    ]
+
+    assert len(public_parameters) == 1
+    assert public_parameters[0].name == "payment_intent_id"
+    assert (
+        public_parameters[0].kind
+        is inspect.Parameter.KEYWORD_ONLY
+    )

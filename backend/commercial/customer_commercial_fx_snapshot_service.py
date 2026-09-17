@@ -440,6 +440,79 @@ class CustomerCommercialFXSnapshotStore:
 
             return record
 
+    def latest(
+        self,
+        *,
+        source_id: str,
+        base_currency: str,
+        quote_currency: str,
+    ) -> (
+        CustomerCommercialFXSnapshotRecord
+        | None
+    ):
+        """
+        Return the newest authoritative snapshot for one
+        source and USD/VND currency pair.
+
+        This is a read-only selection surface.
+
+        It does not define freshness, age, or usability.
+        """
+
+        normalized_source = (
+            CustomerCommercialFXSnapshotRecord
+            ._normalize_required_string(
+                source_id,
+                name="source_id",
+            )
+        )
+
+        normalized_base = (
+            CustomerCommercialFXSnapshotRecord
+            ._normalize_currency(
+                base_currency,
+                name="base_currency",
+            )
+        )
+
+        normalized_quote = (
+            CustomerCommercialFXSnapshotRecord
+            ._normalize_currency(
+                quote_currency,
+                name="quote_currency",
+            )
+        )
+
+        if (
+            normalized_base != "USD"
+            or normalized_quote != "VND"
+        ):
+            raise ValueError(
+                "FX snapshot currency pair must be USD/VND."
+            )
+
+        with self._lock:
+            self._require_ready()
+
+            candidates = (
+                record
+                for record in self._records.values()
+                if (
+                    record.source_id
+                    == normalized_source
+                    and record.base_currency
+                    == normalized_base
+                    and record.quote_currency
+                    == normalized_quote
+                )
+            )
+
+            return max(
+                candidates,
+                key=lambda record: record.snapshot_date,
+                default=None,
+            )
+
     def get(
         self,
         *,

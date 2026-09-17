@@ -60,6 +60,11 @@ def test_main_imports_verified_vnd_completion_owners():
         in source
     )
 
+    assert (
+        "create_customer_vnd_bank_payment_completion_admin_router"
+        in source
+    )
+
 
 def test_authenticated_vnd_ingress_composes_verification_adapter():
     source, node = _function(
@@ -136,6 +141,37 @@ def test_completion_orchestrator_uses_existing_settlement_orchestration():
 
     assert (
         "customer_payment_settlement_orchestration_service"
+        in ingress_source
+    )
+
+
+def test_authenticated_vnd_ingress_composes_completion_admin_router():
+    source, node = _function(
+        "_compose_authenticated_vnd_reconciliation_ingress"
+    )
+
+    ingress_source = ast.get_source_segment(
+        source,
+        node,
+    )
+
+    assert (
+        "create_customer_vnd_bank_payment_completion_admin_router("
+        in ingress_source
+    )
+
+    assert (
+        "payment_completion_service=("
+        in ingress_source
+    )
+
+    assert (
+        "vnd_bank_payment_completion_orchestration_service"
+        in ingress_source
+    )
+
+    assert (
+        "authenticated_vnd_payment_completion_router"
         in ingress_source
     )
 
@@ -376,6 +412,18 @@ def test_production_setup_payment_and_authenticated_vnd_ingress_compose_at_runti
         "post"
         in openapi_paths[
             "/internal/commercial/vnd-bank/reconciliations"
+        ]
+    )
+
+    assert (
+        "/internal/commercial/vnd-bank/completions"
+        in openapi_paths
+    )
+
+    assert (
+        "post"
+        in openapi_paths[
+            "/internal/commercial/vnd-bank/completions"
         ]
     )
 

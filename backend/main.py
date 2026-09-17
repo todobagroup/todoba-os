@@ -85,6 +85,12 @@ from backend.commercial.customer_commercial_order_service import (
     CustomerCommercialOrderStore,
     CustomerCommercialOrderService,
 )
+from backend.commercial.customer_commercial_order_terms_binding import (
+    CustomerCommercialOrderTermsBindingStore,
+)
+from backend.commercial.customer_commercial_entitlement_registry import (
+    CustomerCommercialEntitlementRegistry,
+)
 from backend.commercial.customer_payment_intent_service import (
     CustomerPaymentIntentStore,
     CustomerPaymentIntentService,
@@ -99,6 +105,9 @@ from backend.commercial.customer_payment_settlement_service import (
 )
 from backend.commercial.customer_payment_settlement_activation_bridge import (
     CustomerPaymentSettlementActivationBridge,
+)
+from backend.commercial.customer_payment_settlement_entitlement_convergence_service import (
+    CustomerPaymentSettlementEntitlementConvergenceService,
 )
 from backend.commercial.customer_payment_settlement_orchestration_service import (
     CustomerPaymentSettlementOrchestrationService,
@@ -588,6 +597,16 @@ CUSTOMER_COMMERCIAL_ORDER_STORAGE_PATH = (
     / "commercial"
     / "customer_commercial_orders.json"
 )
+CUSTOMER_COMMERCIAL_ORDER_TERMS_BINDING_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_commercial_order_terms_bindings.json"
+)
+CUSTOMER_COMMERCIAL_ENTITLEMENT_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_commercial_entitlements.json"
+)
 CUSTOMER_PAYMENT_INTENT_STORAGE_PATH = (
     TODOBA_CONTROL_PLANE_DATA_ROOT
     / "commercial"
@@ -787,6 +806,8 @@ customer_deployment_runtime_projection = (
 
 _customer_payment_runtime_composed = False
 customer_commercial_order_store = None
+customer_commercial_order_terms_binding_store = None
+customer_commercial_entitlement_registry = None
 customer_payment_intent_store = None
 customer_payment_evidence_store = None
 customer_payment_settlement_store = None
@@ -795,6 +816,7 @@ customer_vnd_bank_reconciliation_store = None
 
 customer_vnd_bank_payment_instruction_service = None
 customer_payment_settlement_service = None
+customer_payment_settlement_entitlement_convergence_service = None
 customer_payment_settlement_activation_bridge = None
 customer_payment_settlement_orchestration_service = None
 
@@ -829,6 +851,8 @@ def _compose_customer_payment_runtime(
 ) -> None:
     global _customer_payment_runtime_composed
     global customer_commercial_order_store
+    global customer_commercial_order_terms_binding_store
+    global customer_commercial_entitlement_registry
     global customer_payment_intent_store
     global customer_payment_evidence_store
     global customer_payment_settlement_store
@@ -836,6 +860,7 @@ def _compose_customer_payment_runtime(
     global customer_vnd_bank_reconciliation_store
     global customer_vnd_bank_payment_instruction_service
     global customer_payment_settlement_service
+    global customer_payment_settlement_entitlement_convergence_service
     global customer_payment_settlement_activation_bridge
     global customer_payment_settlement_orchestration_service
     global customer_registration_store
@@ -847,6 +872,14 @@ def _compose_customer_payment_runtime(
         (
             "Customer commercial order store",
             CUSTOMER_COMMERCIAL_ORDER_STORAGE_PATH,
+        ),
+        (
+            "Customer commercial order terms binding store",
+            CUSTOMER_COMMERCIAL_ORDER_TERMS_BINDING_STORAGE_PATH,
+        ),
+        (
+            "Customer commercial entitlement registry",
+            CUSTOMER_COMMERCIAL_ENTITLEMENT_STORAGE_PATH,
         ),
         (
             "Customer payment intent store",
@@ -880,6 +913,18 @@ def _compose_customer_payment_runtime(
         CUSTOMER_COMMERCIAL_ORDER_STORAGE_PATH
     )
     commercial_order_store.open_existing()
+
+    commercial_order_terms_binding_store = (
+        CustomerCommercialOrderTermsBindingStore(
+            CUSTOMER_COMMERCIAL_ORDER_TERMS_BINDING_STORAGE_PATH
+        )
+    )
+
+    commercial_entitlement_registry = (
+        CustomerCommercialEntitlementRegistry(
+            CUSTOMER_COMMERCIAL_ENTITLEMENT_STORAGE_PATH
+        )
+    )
 
     payment_intent_store = CustomerPaymentIntentStore(
         CUSTOMER_PAYMENT_INTENT_STORAGE_PATH
@@ -922,6 +967,14 @@ def _compose_customer_payment_runtime(
             commercial_order_store,
         ),
         (
+            "Customer commercial order terms binding store",
+            commercial_order_terms_binding_store,
+        ),
+        (
+            "Customer commercial entitlement registry",
+            commercial_entitlement_registry,
+        ),
+        (
             "Customer payment intent store",
             payment_intent_store,
         ),
@@ -958,10 +1011,24 @@ def _compose_customer_payment_runtime(
         )
     )
 
-    payment_settlement_activation_bridge = (
-        CustomerPaymentSettlementActivationBridge(
+    payment_settlement_entitlement_convergence_service = (
+        CustomerPaymentSettlementEntitlementConvergenceService(
             settlement_store=payment_settlement_store,
             order_store=commercial_order_store,
+            order_terms_store=(
+                commercial_order_terms_binding_store
+            ),
+            entitlement_registry=(
+                commercial_entitlement_registry
+            ),
+        )
+    )
+
+    payment_settlement_activation_bridge = (
+        CustomerPaymentSettlementActivationBridge(
+            entitlement_convergence_service=(
+                payment_settlement_entitlement_convergence_service
+            ),
             setup_activation_service=(
                 customer_setup_activation_service
             ),
@@ -978,6 +1045,12 @@ def _compose_customer_payment_runtime(
     )
 
     customer_commercial_order_store = commercial_order_store
+    customer_commercial_order_terms_binding_store = (
+        commercial_order_terms_binding_store
+    )
+    customer_commercial_entitlement_registry = (
+        commercial_entitlement_registry
+    )
     customer_payment_intent_store = payment_intent_store
     customer_payment_evidence_store = payment_evidence_store
     customer_payment_settlement_store = payment_settlement_store
@@ -994,6 +1067,9 @@ def _compose_customer_payment_runtime(
 
     customer_payment_settlement_service = (
         payment_settlement_service
+    )
+    customer_payment_settlement_entitlement_convergence_service = (
+        payment_settlement_entitlement_convergence_service
     )
     customer_payment_settlement_activation_bridge = (
         payment_settlement_activation_bridge

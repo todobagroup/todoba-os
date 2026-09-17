@@ -1,89 +1,80 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
-from backend.commercial.customer_commercial_order_service import (
-    CustomerCommercialOrderStatus,
-    CustomerCommercialOrderStore,
-)
-from backend.commercial.customer_payment_settlement_service import (
-    CustomerPaymentSettlementRecord,
-    CustomerPaymentSettlementStatus,
-    CustomerPaymentSettlementStore,
+from backend.commercial.customer_commercial_entitlement_registry import (
+    CustomerCommercialEntitlement,
+    CustomerCommercialEntitlementStatus,
 )
 from backend.commercial.customer_setup_activation_service import (
-    CustomerSetupActivationResult,
     CustomerSetupActivationService,
 )
 
 
 class CustomerPaymentSettlementActivationBridge:
     """
-    Narrow bridge from authoritative SETTLED payment truth to
-    the existing setup activation owner.
+    Narrow bridge from purchased commercial entitlement truth to
+    the existing Setup activation owner.
 
     Input authority:
         settlement_id only
 
+    Authority chain:
+        authoritative SETTLED payment
+        -> purchased commercial entitlement convergence
+        -> ACTIVE commercial entitlement
+        -> Setup activation
+
     This owner does not:
     - receive payment evidence
     - verify provider payment
-    - settle payment
-    - create duplicate activation persistence
-    - accept caller-supplied customer_id
+    - mutate settlement/order truth
+    - create commercial terms
+    - bind deployment / MT5 identity
     """
 
     def __init__(
         self,
         *,
-        settlement_store: CustomerPaymentSettlementStore,
-        order_store: CustomerCommercialOrderStore,
+        entitlement_convergence_service,
         setup_activation_service: CustomerSetupActivationService,
     ) -> None:
-        if not isinstance(
-            settlement_store,
-            CustomerPaymentSettlementStore,
+        converge = getattr(
+            entitlement_convergence_service,
+            "converge",
+            None,
+        )
+
+        if not callable(
+            converge
         ):
             raise TypeError(
-                "settlement_store must be "
-                "CustomerPaymentSettlementStore."
+                "entitlement_convergence_service must expose converge()."
             )
 
-        if not isinstance(
-            order_store,
-            CustomerCommercialOrderStore,
-        ):
-            raise TypeError(
-                "order_store must be CustomerCommercialOrderStore."
-            )
-
-        if not isinstance(
+        activate = getattr(
             setup_activation_service,
-            CustomerSetupActivationService,
+            "activate",
+            None,
+        )
+
+        if not callable(
+            activate
         ):
             raise TypeError(
-                "setup_activation_service must be "
-                "CustomerSetupActivationService."
+                "setup_activation_service must expose activate()."
             )
 
-        if not settlement_store.is_ready():
-            raise RuntimeError(
-                "Customer payment settlement store "
-                "is not initialized."
-            )
-
-        if not order_store.is_ready():
-            raise RuntimeError(
-                "Commercial order store is not initialized."
-            )
-
-        self._settlement_store = settlement_store
-        self._order_store = order_store
-        self._setup_activation_service = setup_activation_service
+        self._entitlement_convergence_service = (
+            entitlement_convergence_service
+        )
+        self._setup_activation_service = (
+            setup_activation_service
+        )
 
     def activate_from_settlement(
         self,
         *,
         settlement_id: str,
-    ) -> CustomerSetupActivationResult:
+    ):
         normalized_settlement_id = (
             self._normalize_required_string(
                 settlement_id,
@@ -91,56 +82,52 @@ class CustomerPaymentSettlementActivationBridge:
             )
         )
 
-        settlement = self._settlement_store.get(
-            settlement_id=normalized_settlement_id
+        entitlement = (
+            self._entitlement_convergence_service
+            .converge(
+                settlement_id=normalized_settlement_id
+            )
         )
 
-        if settlement is None:
-            raise ValueError(
-                "Payment settlement is not authoritative."
+        if not isinstance(
+            entitlement,
+            CustomerCommercialEntitlement,
+        ):
+            raise RuntimeError(
+                "Commercial entitlement convergence returned "
+                "invalid truth."
+            )
+
+        expected_entitlement_id = (
+            "commercial-entitlement-"
+            f"{normalized_settlement_id}"
+        )
+
+        if (
+            entitlement.entitlement_id
+            != expected_entitlement_id
+        ):
+            raise RuntimeError(
+                "Commercial entitlement identity did not converge."
             )
 
         if (
-            settlement.settlement_id
-            != normalized_settlement_id
-            or settlement.status
-            is not CustomerPaymentSettlementStatus.SETTLED
+            entitlement.status
+            is not CustomerCommercialEntitlementStatus.ACTIVE
         ):
             raise ValueError(
-                "Payment settlement is not settled "
-                "authoritative truth."
-            )
-
-        order = self._order_store.get(
-            order_id=settlement.order_id
-        )
-
-        if order is None:
-            raise ValueError(
-                "Commercial order is not authoritative."
-            )
-
-        if (
-            order.order_id != settlement.order_id
-            or order.customer_id != settlement.customer_id
-            or order.amount_minor != settlement.amount_minor
-            or order.currency != settlement.currency
-            or order.status
-            is not CustomerCommercialOrderStatus.PENDING
-        ):
-            raise ValueError(
-                "Payment settlement does not match "
-                "authoritative commercial order."
+                "Setup activation requires an ACTIVE "
+                "commercial entitlement."
             )
 
         activation_request_id = (
             "payment-settlement-activation-"
-            f"{settlement.settlement_id}"
+            f"{normalized_settlement_id}"
         )
 
         return self._setup_activation_service.activate(
             activation_request_id=activation_request_id,
-            customer_id=settlement.customer_id,
+            customer_id=entitlement.customer_id,
         )
 
     @staticmethod
@@ -149,7 +136,10 @@ class CustomerPaymentSettlementActivationBridge:
         *,
         name: str,
     ) -> str:
-        if not isinstance(value, str):
+        if not isinstance(
+            value,
+            str,
+        ):
             raise TypeError(
                 f"{name} must be str."
             )

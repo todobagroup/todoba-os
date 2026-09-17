@@ -58,6 +58,12 @@ from backend.commercial.customer_identity_registry import (
 from backend.commercial.customer_commercial_order_service import (
     CustomerCommercialOrderStore,
 )
+from backend.commercial.customer_commercial_order_terms_binding import (
+    CustomerCommercialOrderTermsBindingStore,
+)
+from backend.commercial.customer_commercial_entitlement_registry import (
+    CustomerCommercialEntitlementRegistry,
+)
 from backend.commercial.customer_payment_intent_service import (
     CustomerPaymentIntentStore,
 )
@@ -145,6 +151,12 @@ _CUSTOMER_PACKAGE_BUILD_REQUEST_DIRECTORY = (
 
 _CUSTOMER_COMMERCIAL_ORDER_FILENAME = (
     "customer_commercial_orders.json"
+)
+_CUSTOMER_COMMERCIAL_ORDER_TERMS_BINDING_FILENAME = (
+    "customer_commercial_order_terms_bindings.json"
+)
+_CUSTOMER_COMMERCIAL_ENTITLEMENT_FILENAME = (
+    "customer_commercial_entitlements.json"
 )
 
 _CUSTOMER_PAYMENT_INTENT_FILENAME = (
@@ -269,6 +281,16 @@ def provision_customer_setup_control_plane(
         / _CUSTOMER_COMMERCIAL_ORDER_FILENAME
     )
 
+    commercial_order_terms_binding_storage_path = (
+        commercial_root
+        / _CUSTOMER_COMMERCIAL_ORDER_TERMS_BINDING_FILENAME
+    )
+
+    commercial_entitlement_storage_path = (
+        commercial_root
+        / _CUSTOMER_COMMERCIAL_ENTITLEMENT_FILENAME
+    )
+
     payment_intent_storage_path = (
         commercial_root
         / _CUSTOMER_PAYMENT_INTENT_FILENAME
@@ -365,6 +387,18 @@ def provision_customer_setup_control_plane(
         commercial_order_storage_path
     )
 
+    commercial_order_terms_binding_store = (
+        CustomerCommercialOrderTermsBindingStore(
+            commercial_order_terms_binding_storage_path
+        )
+    )
+
+    commercial_entitlement_registry = (
+        CustomerCommercialEntitlementRegistry(
+            commercial_entitlement_storage_path
+        )
+    )
+
     payment_intent_store = CustomerPaymentIntentStore(
         payment_intent_storage_path
     )
@@ -446,6 +480,12 @@ def provision_customer_setup_control_plane(
 
     if not commercial_order_store.is_ready():
         commercial_order_store.initialize_empty()
+
+    if not commercial_order_terms_binding_store.is_ready():
+        commercial_order_terms_binding_store.initialize_empty()
+
+    if not commercial_entitlement_registry.is_ready():
+        commercial_entitlement_registry.initialize_empty()
 
     if not payment_intent_store.is_ready():
         payment_intent_store.initialize_empty()

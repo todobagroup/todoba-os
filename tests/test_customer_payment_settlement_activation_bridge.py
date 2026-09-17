@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 
 import pytest
 
@@ -25,6 +25,16 @@ from backend.commercial.customer_setup_activation_service import (
 )
 from backend.commercial.customer_payment_settlement_activation_bridge import (
     CustomerPaymentSettlementActivationBridge,
+)
+from backend.commercial.customer_commercial_order_terms_binding import (
+    CustomerCommercialOrderTermsBindingRecord,
+    CustomerCommercialOrderTermsBindingStore,
+)
+from backend.commercial.customer_commercial_entitlement_registry import (
+    CustomerCommercialEntitlementRegistry,
+)
+from backend.commercial.customer_payment_settlement_entitlement_convergence_service import (
+    CustomerPaymentSettlementEntitlementConvergenceService,
 )
 
 
@@ -148,6 +158,34 @@ def _build(tmp_path: Path):
         )
     )
 
+    terms_store = CustomerCommercialOrderTermsBindingStore(
+        tmp_path / "order_terms.json"
+    )
+    terms_store.initialize_empty()
+
+    terms_store.register(
+        CustomerCommercialOrderTermsBindingRecord(
+            order_id=order.order_id,
+            customer_id=order.customer_id,
+            licensed_account_cap_usd=1000,
+            standard_monthly_price_usd=50,
+        )
+    )
+
+    entitlement_registry = CustomerCommercialEntitlementRegistry(
+        tmp_path / "commercial_entitlements.json"
+    )
+    entitlement_registry.initialize_empty()
+
+    entitlement_convergence_service = (
+        CustomerPaymentSettlementEntitlementConvergenceService(
+            settlement_store=settlement_store,
+            order_store=order_store,
+            order_terms_store=terms_store,
+            entitlement_registry=entitlement_registry,
+        )
+    )
+
     deployment_registry = CustomerDeploymentRegistry(
         tmp_path / "deployments.json"
     )
@@ -165,8 +203,9 @@ def _build(tmp_path: Path):
     )
 
     bridge = CustomerPaymentSettlementActivationBridge(
-        settlement_store=settlement_store,
-        order_store=order_store,
+        entitlement_convergence_service=(
+            entitlement_convergence_service
+        ),
         setup_activation_service=activation_service,
     )
 
@@ -400,7 +439,7 @@ def test_order_status_must_remain_pending(
     ) = _build(tmp_path)
 
     authoritative_order = (
-        bridge._order_store.get(
+        bridge._entitlement_convergence_service._order_store.get(
             order_id=order.order_id
         )
     )

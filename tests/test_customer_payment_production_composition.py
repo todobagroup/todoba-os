@@ -118,7 +118,7 @@ def test_payment_runtime_has_dedicated_lifespan_owner(
     )
 
 
-def test_payment_runtime_owns_exact_six_durable_stores(
+def test_payment_runtime_owns_exact_eight_durable_stores(
 ) -> None:
     compose = _function(
         "_compose_customer_payment_runtime"
@@ -126,6 +126,8 @@ def test_payment_runtime_owns_exact_six_durable_stores(
 
     expected = {
         "CustomerCommercialOrderStore",
+        "CustomerCommercialOrderTermsBindingStore",
+        "CustomerCommercialEntitlementRegistry",
         "CustomerPaymentIntentStore",
         "CustomerPaymentEvidenceStore",
         "CustomerPaymentSettlementStore",
@@ -151,6 +153,8 @@ def test_payment_runtime_uses_p7b0_storage_files(
 ) -> None:
     required = (
         "customer_commercial_orders.json",
+        "customer_commercial_order_terms_bindings.json",
+        "customer_commercial_entitlements.json",
         "customer_payment_intents.json",
         "customer_payment_evidence.json",
         "customer_payment_settlements.json",
@@ -177,6 +181,8 @@ def test_payment_runtime_fails_closed_before_restore(
 
     required_paths = {
         "CUSTOMER_COMMERCIAL_ORDER_STORAGE_PATH",
+        "CUSTOMER_COMMERCIAL_ORDER_TERMS_BINDING_STORAGE_PATH",
+        "CUSTOMER_COMMERCIAL_ENTITLEMENT_STORAGE_PATH",
         "CUSTOMER_PAYMENT_INTENT_STORAGE_PATH",
         "CUSTOMER_PAYMENT_EVIDENCE_STORAGE_PATH",
         "CUSTOMER_PAYMENT_SETTLEMENT_STORAGE_PATH",
@@ -214,6 +220,8 @@ def test_payment_runtime_fails_closed_before_restore(
 
     store_names = {
         "CustomerCommercialOrderStore",
+        "CustomerCommercialOrderTermsBindingStore",
+        "CustomerCommercialEntitlementRegistry",
         "CustomerPaymentIntentStore",
         "CustomerPaymentEvidenceStore",
         "CustomerPaymentSettlementStore",
@@ -233,7 +241,7 @@ def test_payment_runtime_fails_closed_before_restore(
         )
     ]
 
-    assert len(store_constructors) == 6
+    assert len(store_constructors) == 8
 
     first_constructor_line = min(
         node.lineno
@@ -274,7 +282,7 @@ def test_payment_runtime_never_provisions_vnd_store(
     )
 
 
-def test_payment_runtime_requires_all_six_stores_ready(
+def test_payment_runtime_requires_all_eight_stores_ready(
 ) -> None:
     compose = _function(
         "_compose_customer_payment_runtime"
@@ -289,6 +297,8 @@ def test_payment_runtime_requires_all_six_stores_ready(
 
     required_labels = (
         "Customer commercial order store",
+        "Customer commercial order terms binding store",
+        "Customer commercial entitlement registry",
         "Customer payment intent store",
         "Customer payment evidence store",
         "Customer payment settlement store",
@@ -318,6 +328,8 @@ def test_payment_runtime_exports_authoritative_store_owners(
 
     expected = (
         "customer_commercial_order_store",
+        "customer_commercial_order_terms_binding_store",
+        "customer_commercial_entitlement_registry",
         "customer_payment_intent_store",
         "customer_payment_evidence_store",
         "customer_payment_settlement_store",
@@ -404,6 +416,9 @@ def _payment_compose_function_for_exec(
         "CustomerPaymentSettlementService": (
             _CompositionOwner
         ),
+        "CustomerPaymentSettlementEntitlementConvergenceService": (
+            _CompositionOwner
+        ),
         "CustomerPaymentSettlementActivationBridge": (
             _CompositionOwner
         ),
@@ -446,6 +461,8 @@ def test_payment_runtime_missing_any_durable_file_fails_before_store_constructio
 
     path_names = (
         "CUSTOMER_COMMERCIAL_ORDER_STORAGE_PATH",
+        "CUSTOMER_COMMERCIAL_ORDER_TERMS_BINDING_STORAGE_PATH",
+        "CUSTOMER_COMMERCIAL_ENTITLEMENT_STORAGE_PATH",
         "CUSTOMER_PAYMENT_INTENT_STORAGE_PATH",
         "CUSTOMER_PAYMENT_EVIDENCE_STORAGE_PATH",
         "CUSTOMER_PAYMENT_SETTLEMENT_STORAGE_PATH",
@@ -455,6 +472,8 @@ def test_payment_runtime_missing_any_durable_file_fails_before_store_constructio
 
     store_names = (
         "CustomerCommercialOrderStore",
+        "CustomerCommercialOrderTermsBindingStore",
+        "CustomerCommercialEntitlementRegistry",
         "CustomerPaymentIntentStore",
         "CustomerPaymentEvidenceStore",
         "CustomerPaymentSettlementStore",
@@ -527,6 +546,12 @@ def test_payment_runtime_restores_existing_state_without_mutation(
         CustomerCommercialOrderStatus,
         CustomerCommercialOrderStore,
     )
+    from backend.commercial.customer_commercial_order_terms_binding import (
+        CustomerCommercialOrderTermsBindingStore,
+    )
+    from backend.commercial.customer_commercial_entitlement_registry import (
+        CustomerCommercialEntitlementRegistry,
+    )
     from backend.commercial.customer_payment_evidence_service import (
         CustomerPaymentEvidenceStore,
     )
@@ -546,6 +571,14 @@ def test_payment_runtime_restores_existing_state_without_mutation(
     commercial_order_path = (
         tmp_path
         / "customer_commercial_orders.json"
+    )
+    commercial_order_terms_path = (
+        tmp_path
+        / "customer_commercial_order_terms_bindings.json"
+    )
+    commercial_entitlement_path = (
+        tmp_path
+        / "customer_commercial_entitlements.json"
     )
     payment_intent_path = (
         tmp_path
@@ -592,6 +625,20 @@ def test_payment_runtime_restores_existing_state_without_mutation(
         order
     )
 
+    commercial_order_terms_store = (
+        CustomerCommercialOrderTermsBindingStore(
+            commercial_order_terms_path
+        )
+    )
+    commercial_order_terms_store.initialize_empty()
+
+    commercial_entitlement_registry = (
+        CustomerCommercialEntitlementRegistry(
+            commercial_entitlement_path
+        )
+    )
+    commercial_entitlement_registry.initialize_empty()
+
     payment_intent_store = (
         CustomerPaymentIntentStore(
             payment_intent_path
@@ -631,6 +678,12 @@ def test_payment_runtime_restores_existing_state_without_mutation(
         "CUSTOMER_COMMERCIAL_ORDER_STORAGE_PATH": (
             commercial_order_path
         ),
+        "CUSTOMER_COMMERCIAL_ORDER_TERMS_BINDING_STORAGE_PATH": (
+            commercial_order_terms_path
+        ),
+        "CUSTOMER_COMMERCIAL_ENTITLEMENT_STORAGE_PATH": (
+            commercial_entitlement_path
+        ),
         "CUSTOMER_PAYMENT_INTENT_STORAGE_PATH": (
             payment_intent_path
         ),
@@ -665,6 +718,12 @@ def test_payment_runtime_restores_existing_state_without_mutation(
         {
             "CustomerCommercialOrderStore": (
                 CustomerCommercialOrderStore
+            ),
+            "CustomerCommercialOrderTermsBindingStore": (
+                CustomerCommercialOrderTermsBindingStore
+            ),
+            "CustomerCommercialEntitlementRegistry": (
+                CustomerCommercialEntitlementRegistry
             ),
             "CustomerPaymentIntentStore": (
                 CustomerPaymentIntentStore
@@ -715,6 +774,14 @@ def test_payment_runtime_restores_existing_state_without_mutation(
     )
 
     assert namespace[
+        "customer_commercial_order_terms_binding_store"
+    ].is_ready()
+
+    assert namespace[
+        "customer_commercial_entitlement_registry"
+    ].is_ready()
+
+    assert namespace[
         "customer_payment_intent_store"
     ].is_ready()
 
@@ -743,6 +810,7 @@ def test_payment_runtime_composes_settlement_orchestration_chain(
 
     expected = {
         "CustomerPaymentSettlementService": 1,
+        "CustomerPaymentSettlementEntitlementConvergenceService": 1,
         "CustomerPaymentSettlementActivationBridge": 1,
         "CustomerPaymentSettlementOrchestrationService": 1,
     }
@@ -771,6 +839,7 @@ def test_payment_runtime_exports_orchestration_owners(
 
     expected = (
         "customer_payment_settlement_service",
+        "customer_payment_settlement_entitlement_convergence_service",
         "customer_payment_settlement_activation_bridge",
         "customer_payment_settlement_orchestration_service",
     )
@@ -833,8 +902,9 @@ def test_payment_runtime_activation_bridge_uses_setup_authority(
     }
 
     expected = {
-        "settlement_store": "payment_settlement_store",
-        "order_store": "commercial_order_store",
+        "entitlement_convergence_service": (
+            "payment_settlement_entitlement_convergence_service"
+        ),
         "setup_activation_service": (
             "customer_setup_activation_service"
         ),

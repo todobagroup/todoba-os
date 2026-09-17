@@ -82,6 +82,12 @@ PACKAGE_BUILD_REQUEST_DIRECTORY = (
 COMMERCIAL_ORDER_FILENAME = (
     "customer_commercial_orders.json"
 )
+COMMERCIAL_ORDER_TERMS_BINDING_FILENAME = (
+    "customer_commercial_order_terms_bindings.json"
+)
+COMMERCIAL_ENTITLEMENT_FILENAME = (
+    "customer_commercial_entitlements.json"
+)
 
 PAYMENT_INTENT_FILENAME = (
     "customer_payment_intents.json"
@@ -274,6 +280,8 @@ def test_first_provisioning_creates_only_required_ready_state(
         BOOTSTRAP_AUTHORIZATION_FILENAME,
         BOOTSTRAP_FILENAME,
         COMMERCIAL_ORDER_FILENAME,
+        COMMERCIAL_ORDER_TERMS_BINDING_FILENAME,
+        COMMERCIAL_ENTITLEMENT_FILENAME,
         PAYMENT_INTENT_FILENAME,
         PAYMENT_EVIDENCE_FILENAME,
         PAYMENT_SETTLEMENT_FILENAME,
@@ -520,6 +528,8 @@ def test_retry_is_byte_for_byte_and_queue_idempotent(
         BOOTSTRAP_AUTHORIZATION_FILENAME,
         BOOTSTRAP_FILENAME,
         COMMERCIAL_ORDER_FILENAME,
+        COMMERCIAL_ORDER_TERMS_BINDING_FILENAME,
+        COMMERCIAL_ENTITLEMENT_FILENAME,
         PAYMENT_INTENT_FILENAME,
         PAYMENT_EVIDENCE_FILENAME,
         PAYMENT_SETTLEMENT_FILENAME,
@@ -615,6 +625,16 @@ def test_provisioner_has_store_only_commercial_surface() -> None:
         ),
         (
             "backend.commercial."
+            "customer_commercial_order_terms_binding",
+            "CustomerCommercialOrderTermsBindingStore",
+        ),
+        (
+            "backend.commercial."
+            "customer_commercial_entitlement_registry",
+            "CustomerCommercialEntitlementRegistry",
+        ),
+        (
+            "backend.commercial."
             "customer_payment_intent_service",
             "CustomerPaymentIntentStore",
         ),
@@ -684,7 +704,7 @@ def test_provisioner_has_store_only_commercial_surface() -> None:
         called_attributes.count(
             "initialize_empty"
         )
-        == 16
+        == 18
     )
 
     forbidden_business_actions = {
@@ -714,6 +734,12 @@ def test_provisions_required_payment_durable_state(
 ) -> None:
     from backend.commercial.customer_commercial_order_service import (
         CustomerCommercialOrderStore,
+    )
+    from backend.commercial.customer_commercial_order_terms_binding import (
+        CustomerCommercialOrderTermsBindingStore,
+    )
+    from backend.commercial.customer_commercial_entitlement_registry import (
+        CustomerCommercialEntitlementRegistry,
     )
     from backend.commercial.customer_payment_evidence_service import (
         CustomerPaymentEvidenceStore,
@@ -754,6 +780,14 @@ def test_provisions_required_payment_durable_state(
         commercial_root
         / "customer_commercial_orders.json"
     )
+    terms_path = (
+        commercial_root
+        / "customer_commercial_order_terms_bindings.json"
+    )
+    entitlement_path = (
+        commercial_root
+        / "customer_commercial_entitlements.json"
+    )
     intent_path = (
         commercial_root
         / "customer_payment_intents.json"
@@ -777,6 +811,8 @@ def test_provisions_required_payment_durable_state(
 
     required_paths = (
         order_path,
+        terms_path,
+        entitlement_path,
         intent_path,
         evidence_path,
         settlement_path,
@@ -789,6 +825,12 @@ def test_provisions_required_payment_durable_state(
 
     order_store = CustomerCommercialOrderStore(
         order_path
+    )
+    terms_store = CustomerCommercialOrderTermsBindingStore(
+        terms_path
+    )
+    entitlement_registry = CustomerCommercialEntitlementRegistry(
+        entitlement_path
     )
     intent_store = CustomerPaymentIntentStore(
         intent_path
@@ -811,6 +853,8 @@ def test_provisions_required_payment_durable_state(
     vnd_reconciliation_store.open_existing()
 
     assert order_store.is_ready()
+    assert terms_store.is_ready()
+    assert entitlement_registry.is_ready()
     assert intent_store.is_ready()
     assert evidence_store.is_ready()
     assert settlement_store.is_ready()

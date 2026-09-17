@@ -34,6 +34,15 @@ from backend.trading.lifecycle.mt5_account_cashflow_history_reader import (
 )
 
 
+Account = namedtuple(
+    "Account",
+    (
+        "login",
+        "server",
+    ),
+)
+
+
 Deal = namedtuple(
     "Deal",
     (
@@ -74,6 +83,12 @@ class FakeMT5:
         self.fail = fail
         self.requested_from = None
         self.requested_to = None
+
+    def account_info(self):
+        return Account(
+            login=123456,
+            server="Broker-Pro",
+        )
 
     def history_deals_get(
         self,

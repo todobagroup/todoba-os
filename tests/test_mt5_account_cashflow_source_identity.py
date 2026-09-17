@@ -1,10 +1,11 @@
 """
-P9A4A2 ? MT5 Account Cashflow Attribution Evidence Enrichment.
+P9A4A3 ? MT5 Account Cashflow Source Identity Binding.
 
-Preserve raw broker context needed by future broker-qualified
-external-funding classification.
+Cashflow evidence must carry the canonical MT5 account
+fingerprint observed from the same MT5 session that supplies
+deal history.
 
-This capability does NOT classify deposits or withdrawals.
+This capability does NOT classify external funding.
 """
 
 from collections import namedtuple
@@ -117,51 +118,68 @@ END = datetime(
 )
 
 
-def _evidence():
-    return MT5AccountCashflowHistoryReader(
+def test_cashflow_evidence_carries_canonical_account_fingerprint():
+    evidence = MT5AccountCashflowHistoryReader(
+        FakeMT5()
+    ).read(
+        observed_from=START,
+        observed_to=END,
+    )
+
+    assert len(evidence) == 1
+
+    assert (
+        evidence[0].account_fingerprint
+        == "RoboForex-Pro:68353796"
+    )
+
+
+def test_account_identity_failure_fails_closed():
+    class MissingAccountMT5(FakeMT5):
+        def account_info(self):
+            return None
+
+    reader = MT5AccountCashflowHistoryReader(
+        MissingAccountMT5()
+    )
+
+    try:
+        reader.read(
+            observed_from=START,
+            observed_to=END,
+        )
+    except RuntimeError as exc:
+        assert "account" in str(exc).lower()
+    else:
+        raise AssertionError(
+            "Missing authoritative MT5 account identity "
+            "must fail closed."
+        )
+
+
+def test_source_identity_binding_does_not_classify_funding():
+    evidence = MT5AccountCashflowHistoryReader(
         FakeMT5()
     ).read(
         observed_from=START,
         observed_to=END,
     )[0]
 
-
-def test_preserves_raw_broker_attribution_context():
-    item = _evidence()
-
-    assert item.order_ticket == 0
-    assert item.deal_entry == 0
-    assert item.magic == 0
-    assert item.position_id == 0
-    assert item.deal_reason == 0
-    assert item.volume == 0.0
-    assert item.price == 0.0
-    assert item.symbol == ""
-    assert item.external_id == ""
-
-
-def test_preserves_exact_broker_comment():
-    item = _evidence()
-
     assert (
-        item.comment
-        == "Deposit to 68353796"
+        evidence.account_fingerprint
+        == "RoboForex-Pro:68353796"
     )
-
-
-def test_enrichment_does_not_create_classification_authority():
-    item = _evidence()
 
     for forbidden in (
         "is_external_deposit",
         "is_external_withdrawal",
         "funding_direction",
         "customer_funding_kind",
-        "upgrade_required",
-        "cycle_id",
         "customer_id",
+        "cycle_id",
+        "upgrade_required",
     ):
         assert not hasattr(
-            item,
+            evidence,
             forbidden,
         )

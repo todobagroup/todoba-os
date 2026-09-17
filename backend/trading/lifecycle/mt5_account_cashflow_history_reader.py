@@ -63,6 +63,10 @@ class MT5AccountCashflowEvidence:
 
     amount: Decimal
 
+    # Canonical identity of the MT5 account that supplied
+    # this broker evidence.
+    account_fingerprint: str
+
     # Raw broker attribution context.
     #
     # These fields preserve MT5 evidence only.
@@ -82,6 +86,19 @@ class MT5AccountCashflowEvidence:
     def __post_init__(
         self,
     ) -> None:
+        if not isinstance(
+            self.account_fingerprint,
+            str,
+        ):
+            raise TypeError(
+                "account_fingerprint must be str."
+            )
+
+        if not self.account_fingerprint.strip():
+            raise ValueError(
+                "account_fingerprint must not be empty."
+            )
+
         if (
             isinstance(
                 self.deal_ticket,
@@ -226,6 +243,59 @@ class MT5AccountCashflowHistoryReader:
                 "observed_to must be later than observed_from."
             )
 
+        account = self.mt5.account_info()
+
+        if account is None:
+            raise RuntimeError(
+                "MT5 account_info failed."
+            )
+
+        server = getattr(
+            account,
+            "server",
+            None,
+        )
+
+        if not isinstance(
+            server,
+            str,
+        ):
+            raise RuntimeError(
+                "MT5 account server is unavailable."
+            )
+
+        normalized_server = server.strip()
+
+        if not normalized_server:
+            raise RuntimeError(
+                "MT5 account server is unavailable."
+            )
+
+        login = getattr(
+            account,
+            "login",
+            None,
+        )
+
+        if (
+            isinstance(
+                login,
+                bool,
+            )
+            or not isinstance(
+                login,
+                int,
+            )
+            or login <= 0
+        ):
+            raise RuntimeError(
+                "MT5 account login is unavailable."
+            )
+
+        account_fingerprint = (
+            f"{normalized_server}:{login}"
+        )
+
         deals = self.mt5.history_deals_get(
             normalized_from,
             normalized_to,
@@ -257,6 +327,7 @@ class MT5AccountCashflowHistoryReader:
 
             evidence.append(
                 MT5AccountCashflowEvidence(
+                    account_fingerprint=account_fingerprint,
                     deal_ticket=self._required_positive_int(
                         getattr(
                             deal,

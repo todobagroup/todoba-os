@@ -63,6 +63,20 @@ class MT5AccountCashflowEvidence:
 
     amount: Decimal
 
+    # Raw broker attribution context.
+    #
+    # These fields preserve MT5 evidence only.
+    # They do not classify customer funding.
+    order_ticket: int = 0
+    deal_entry: int = 0
+    magic: int = 0
+    position_id: int = 0
+    deal_reason: int = 0
+    volume: float = 0.0
+    price: float = 0.0
+    symbol: str = ""
+    external_id: str = ""
+
     comment: str = ""
 
     def __post_init__(
@@ -278,6 +292,76 @@ class MT5AccountCashflowHistoryReader:
                             None,
                         )
                     ),
+                    order_ticket=self._non_negative_int(
+                        getattr(
+                            deal,
+                            "order",
+                            0,
+                        ),
+                        name="deal order",
+                    ),
+                    deal_entry=self._non_negative_int(
+                        getattr(
+                            deal,
+                            "entry",
+                            0,
+                        ),
+                        name="deal entry",
+                    ),
+                    magic=self._non_negative_int(
+                        getattr(
+                            deal,
+                            "magic",
+                            0,
+                        ),
+                        name="deal magic",
+                    ),
+                    position_id=self._non_negative_int(
+                        getattr(
+                            deal,
+                            "position_id",
+                            0,
+                        ),
+                        name="deal position_id",
+                    ),
+                    deal_reason=self._non_negative_int(
+                        getattr(
+                            deal,
+                            "reason",
+                            0,
+                        ),
+                        name="deal reason",
+                    ),
+                    volume=self._finite_float(
+                        getattr(
+                            deal,
+                            "volume",
+                            0.0,
+                        ),
+                        name="deal volume",
+                    ),
+                    price=self._finite_float(
+                        getattr(
+                            deal,
+                            "price",
+                            0.0,
+                        ),
+                        name="deal price",
+                    ),
+                    symbol=str(
+                        getattr(
+                            deal,
+                            "symbol",
+                            "",
+                        )
+                    ),
+                    external_id=str(
+                        getattr(
+                            deal,
+                            "external_id",
+                            "",
+                        )
+                    ),
                     comment=str(
                         getattr(
                             deal,
@@ -429,6 +513,47 @@ class MT5AccountCashflowHistoryReader:
             )
 
         return value
+
+    @staticmethod
+    def _finite_float(
+        value,
+        *,
+        name: str,
+    ) -> float:
+        if isinstance(
+            value,
+            bool,
+        ):
+            raise TypeError(
+                f"{name} must be numeric."
+            )
+
+        if not isinstance(
+            value,
+            (
+                int,
+                float,
+                Decimal,
+            ),
+        ):
+            raise TypeError(
+                f"{name} must be numeric."
+            )
+
+        normalized = float(
+            value
+        )
+
+        if not Decimal(
+            str(
+                normalized
+            )
+        ).is_finite():
+            raise ValueError(
+                f"{name} must be finite."
+            )
+
+        return normalized
 
     @staticmethod
     def _timestamp_to_utc(

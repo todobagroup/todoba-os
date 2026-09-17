@@ -1,4 +1,4 @@
-﻿"""
+"""
 TODOBA Broker State
 
 Represents broker/account facts observed remotely
@@ -38,6 +38,12 @@ class BrokerState:
     # Runtime origin is optional for backward compatibility.
     # Missing origin must never prove MetaTrader VPS.
     runtime_environment: str | None = None
+
+    # Optional only for backward compatibility with
+    # broker states published by older Trusted Agents.
+    # Commercial pricing must never substitute equity
+    # when authoritative balance is absent.
+    balance: float | None = None
 
     def __post_init__(self) -> None:
         if not self.account_fingerprint:

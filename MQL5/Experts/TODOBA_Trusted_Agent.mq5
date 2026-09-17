@@ -1,4 +1,4 @@
-﻿// TODOBA Trusted Agent
+// TODOBA Trusted Agent
 // Production Cloud Endpoint Upgrade
 
 #property strict
@@ -660,6 +660,12 @@ void SendBrokerState()
          : "local"
       )
       + "\","
+      "\"balance\":"
+      + DoubleToString(
+         state.balance,
+         2
+      )
+      + ","
       "\"equity\":"
       + DoubleToString(
          state.equity,
@@ -712,6 +718,8 @@ void SendBrokerState()
    Print(
       "TODOBA Broker State published: ",
       state.account_fingerprint,
+      " balance=",
+      state.balance,
       " equity=",
       state.equity,
             " positions=",

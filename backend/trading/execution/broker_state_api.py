@@ -1,4 +1,4 @@
-﻿"""
+"""
 TODOBA Broker State API
 
 Provides authenticated HTTP boundaries used by:
@@ -63,6 +63,9 @@ class BrokerStateRequest(BaseModel):
         "local",
         "metaquotes_vps",
     ] | None = None
+
+    # Optional for backward transport compatibility.
+    balance: float | None = None
 
 
 def create_broker_state_router(
@@ -165,6 +168,7 @@ def create_broker_state_router(
             runtime_environment=(
                 request.runtime_environment
             ),
+            balance=request.balance,
         )
 
         store.save(
@@ -219,6 +223,13 @@ def create_broker_state_router(
             "agent_id": agent_id,
             "account_fingerprint": (
                 state.account_fingerprint
+            ),
+            **(
+                {
+                    "balance": state.balance,
+                }
+                if state.balance is not None
+                else {}
             ),
             "equity": state.equity,
             "open_position_count": (

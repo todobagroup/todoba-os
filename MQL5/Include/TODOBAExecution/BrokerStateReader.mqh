@@ -10,6 +10,7 @@ struct TODOBABrokerState
    string account_fingerprint;
 
    double equity;
+   double balance;
    int open_position_count;
    int pending_order_count;
 
@@ -38,6 +39,10 @@ public:
 
       double equity = AccountInfoDouble(
          ACCOUNT_EQUITY
+      );
+
+      double balance = AccountInfoDouble(
+         ACCOUNT_BALANCE
       );
 
       if(equity <= 0.0)
@@ -137,6 +142,8 @@ public:
          account_fingerprint;
 
       state.equity = equity;
+
+      state.balance = balance;
 
       state.open_position_count =
          open_position_count;

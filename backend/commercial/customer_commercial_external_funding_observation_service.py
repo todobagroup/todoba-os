@@ -420,6 +420,52 @@ class CustomerCommercialExternalFundingObservationStore:
                 )
             )
 
+    def list_by_cycle_and_account(
+        self,
+        *,
+        cycle_id: str,
+        account_fingerprint: str,
+    ) -> tuple[
+        CustomerCommercialExternalFundingObservationRecord,
+        ...,
+    ]:
+        normalized_cycle_id = (
+            CustomerCommercialExternalFundingObservationRecord
+            ._normalize_required_string(
+                cycle_id,
+                name="cycle_id",
+            )
+        )
+
+        normalized_account = (
+            CustomerCommercialExternalFundingObservationRecord
+            ._normalize_required_string(
+                account_fingerprint,
+                name="account_fingerprint",
+            )
+        )
+
+        with self._lock:
+            self._require_ready()
+
+            matching = (
+                record
+                for record in self._records.values()
+                if (
+                    record.cycle_id
+                    == normalized_cycle_id
+                    and record.account_fingerprint
+                    == normalized_account
+                )
+            )
+
+            return tuple(
+                sorted(
+                    matching,
+                    key=lambda record: record.deal_ticket,
+                )
+            )
+
     @staticmethod
     def _replay_key(
         *,

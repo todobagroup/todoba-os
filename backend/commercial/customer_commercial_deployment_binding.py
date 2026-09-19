@@ -410,6 +410,53 @@ class CustomerCommercialDeploymentBindingStore:
                 entitlement_id
             ]
 
+    def get_by_agent_account(
+        self,
+        *,
+        agent_id: str,
+        account_fingerprint: str,
+    ) -> CustomerCommercialDeploymentBinding | None:
+        normalized_agent_id = (
+            CustomerCommercialDeploymentBinding
+            ._normalize_required_string(
+                agent_id,
+                name="agent_id",
+            )
+        )
+
+        normalized_account_fingerprint = (
+            CustomerCommercialDeploymentBinding
+            ._normalize_required_string(
+                account_fingerprint,
+                name="account_fingerprint",
+            )
+        )
+
+        with self._lock:
+            self._require_ready()
+
+            matches = tuple(
+                binding
+                for binding in self._by_entitlement_id.values()
+                if (
+                    binding.agent_id
+                    == normalized_agent_id
+                    and binding.account_fingerprint
+                    == normalized_account_fingerprint
+                )
+            )
+
+            if not matches:
+                return None
+
+            if len(matches) != 1:
+                raise RuntimeError(
+                    "Commercial deployment binding "
+                    "agent/account authority is ambiguous."
+                )
+
+            return matches[0]
+
     def all(
         self,
     ) -> tuple[

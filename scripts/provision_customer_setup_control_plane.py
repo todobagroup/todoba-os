@@ -104,6 +104,19 @@ from backend.commercial.customer_setup_launch_credential_service import (
     CustomerSetupLaunchCredentialStore,
 )
 
+from backend.commercial.customer_commercial_billing_cycle_baseline_service import (
+    CustomerCommercialBillingCycleBaselineStore,
+)
+from backend.commercial.customer_commercial_current_billing_cycle_service import (
+    CustomerCommercialCurrentBillingCycleStore,
+)
+from backend.commercial.customer_commercial_deployment_binding import (
+    CustomerCommercialDeploymentBindingStore,
+)
+from backend.commercial.customer_commercial_external_funding_observation_service import (
+    CustomerCommercialExternalFundingObservationStore,
+)
+
 
 _CUSTOMER_IDENTITY_FILENAME = (
     "customer_identities.json"
@@ -157,6 +170,19 @@ _CUSTOMER_COMMERCIAL_ORDER_TERMS_BINDING_FILENAME = (
 )
 _CUSTOMER_COMMERCIAL_ENTITLEMENT_FILENAME = (
     "customer_commercial_entitlements.json"
+)
+
+_CUSTOMER_COMMERCIAL_DEPLOYMENT_BINDING_FILENAME = (
+    "customer_commercial_deployment_bindings.json"
+)
+_CUSTOMER_COMMERCIAL_BILLING_CYCLE_BASELINE_FILENAME = (
+    "customer_commercial_billing_cycle_baselines.json"
+)
+_CUSTOMER_COMMERCIAL_CURRENT_BILLING_CYCLE_FILENAME = (
+    "customer_commercial_current_billing_cycles.json"
+)
+_CUSTOMER_COMMERCIAL_EXTERNAL_FUNDING_OBSERVATION_FILENAME = (
+    "customer_commercial_external_funding_observations.json"
 )
 
 _CUSTOMER_PAYMENT_INTENT_FILENAME = (
@@ -291,6 +317,26 @@ def provision_customer_setup_control_plane(
         / _CUSTOMER_COMMERCIAL_ENTITLEMENT_FILENAME
     )
 
+    commercial_deployment_binding_storage_path = (
+        commercial_root
+        / _CUSTOMER_COMMERCIAL_DEPLOYMENT_BINDING_FILENAME
+    )
+
+    commercial_billing_cycle_baseline_storage_path = (
+        commercial_root
+        / _CUSTOMER_COMMERCIAL_BILLING_CYCLE_BASELINE_FILENAME
+    )
+
+    commercial_current_billing_cycle_storage_path = (
+        commercial_root
+        / _CUSTOMER_COMMERCIAL_CURRENT_BILLING_CYCLE_FILENAME
+    )
+
+    commercial_external_funding_observation_storage_path = (
+        commercial_root
+        / _CUSTOMER_COMMERCIAL_EXTERNAL_FUNDING_OBSERVATION_FILENAME
+    )
+
     payment_intent_storage_path = (
         commercial_root
         / _CUSTOMER_PAYMENT_INTENT_FILENAME
@@ -399,6 +445,30 @@ def provision_customer_setup_control_plane(
         )
     )
 
+    commercial_deployment_binding_store = (
+        CustomerCommercialDeploymentBindingStore(
+            commercial_deployment_binding_storage_path
+        )
+    )
+
+    commercial_billing_cycle_baseline_store = (
+        CustomerCommercialBillingCycleBaselineStore(
+            commercial_billing_cycle_baseline_storage_path
+        )
+    )
+
+    commercial_current_billing_cycle_store = (
+        CustomerCommercialCurrentBillingCycleStore(
+            commercial_current_billing_cycle_storage_path
+        )
+    )
+
+    commercial_external_funding_observation_store = (
+        CustomerCommercialExternalFundingObservationStore(
+            commercial_external_funding_observation_storage_path
+        )
+    )
+
     payment_intent_store = CustomerPaymentIntentStore(
         payment_intent_storage_path
     )
@@ -487,6 +557,26 @@ def provision_customer_setup_control_plane(
     if not commercial_entitlement_registry.is_ready():
         commercial_entitlement_registry.initialize_empty()
 
+    if commercial_deployment_binding_storage_path.exists():
+        commercial_deployment_binding_store.open_existing()
+    else:
+        commercial_deployment_binding_store.initialize_empty()
+
+    if commercial_billing_cycle_baseline_storage_path.exists():
+        commercial_billing_cycle_baseline_store.load()
+    else:
+        commercial_billing_cycle_baseline_store.initialize_empty()
+
+    if commercial_current_billing_cycle_storage_path.exists():
+        commercial_current_billing_cycle_store.load()
+    else:
+        commercial_current_billing_cycle_store.initialize_empty()
+
+    if commercial_external_funding_observation_storage_path.exists():
+        commercial_external_funding_observation_store.load()
+    else:
+        commercial_external_funding_observation_store.initialize_empty()
+
     if not payment_intent_store.is_ready():
         payment_intent_store.initialize_empty()
 
@@ -556,6 +646,30 @@ def provision_customer_setup_control_plane(
         raise RuntimeError(
             "Customer deployment package build request "
             "store did not become ready."
+        )
+
+    if not commercial_deployment_binding_store.is_ready():
+        raise RuntimeError(
+            "Commercial deployment binding store "
+            "did not become ready."
+        )
+
+    if not commercial_billing_cycle_baseline_store.is_ready():
+        raise RuntimeError(
+            "Commercial billing cycle baseline store "
+            "did not become ready."
+        )
+
+    if not commercial_current_billing_cycle_store.is_ready():
+        raise RuntimeError(
+            "Commercial current billing cycle store "
+            "did not become ready."
+        )
+
+    if not commercial_external_funding_observation_store.is_ready():
+        raise RuntimeError(
+            "Commercial external funding observation store "
+            "did not become ready."
         )
 
     if not commercial_order_store.is_ready():

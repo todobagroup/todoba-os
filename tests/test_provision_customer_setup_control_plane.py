@@ -89,6 +89,22 @@ COMMERCIAL_ENTITLEMENT_FILENAME = (
     "customer_commercial_entitlements.json"
 )
 
+COMMERCIAL_DEPLOYMENT_BINDING_FILENAME = (
+    "customer_commercial_deployment_bindings.json"
+)
+
+COMMERCIAL_BILLING_CYCLE_BASELINE_FILENAME = (
+    "customer_commercial_billing_cycle_baselines.json"
+)
+
+COMMERCIAL_CURRENT_BILLING_CYCLE_FILENAME = (
+    "customer_commercial_current_billing_cycles.json"
+)
+
+COMMERCIAL_EXTERNAL_FUNDING_OBSERVATION_FILENAME = (
+    "customer_commercial_external_funding_observations.json"
+)
+
 PAYMENT_INTENT_FILENAME = (
     "customer_payment_intents.json"
 )
@@ -282,6 +298,10 @@ def test_first_provisioning_creates_only_required_ready_state(
         COMMERCIAL_ORDER_FILENAME,
         COMMERCIAL_ORDER_TERMS_BINDING_FILENAME,
         COMMERCIAL_ENTITLEMENT_FILENAME,
+        COMMERCIAL_DEPLOYMENT_BINDING_FILENAME,
+        COMMERCIAL_BILLING_CYCLE_BASELINE_FILENAME,
+        COMMERCIAL_CURRENT_BILLING_CYCLE_FILENAME,
+        COMMERCIAL_EXTERNAL_FUNDING_OBSERVATION_FILENAME,
         PAYMENT_INTENT_FILENAME,
         PAYMENT_EVIDENCE_FILENAME,
         PAYMENT_SETTLEMENT_FILENAME,
@@ -530,6 +550,10 @@ def test_retry_is_byte_for_byte_and_queue_idempotent(
         COMMERCIAL_ORDER_FILENAME,
         COMMERCIAL_ORDER_TERMS_BINDING_FILENAME,
         COMMERCIAL_ENTITLEMENT_FILENAME,
+        COMMERCIAL_DEPLOYMENT_BINDING_FILENAME,
+        COMMERCIAL_BILLING_CYCLE_BASELINE_FILENAME,
+        COMMERCIAL_CURRENT_BILLING_CYCLE_FILENAME,
+        COMMERCIAL_EXTERNAL_FUNDING_OBSERVATION_FILENAME,
         PAYMENT_INTENT_FILENAME,
         PAYMENT_EVIDENCE_FILENAME,
         PAYMENT_SETTLEMENT_FILENAME,
@@ -635,6 +659,26 @@ def test_provisioner_has_store_only_commercial_surface() -> None:
         ),
         (
             "backend.commercial."
+            "customer_commercial_deployment_binding",
+            "CustomerCommercialDeploymentBindingStore",
+        ),
+        (
+            "backend.commercial."
+            "customer_commercial_billing_cycle_baseline_service",
+            "CustomerCommercialBillingCycleBaselineStore",
+        ),
+        (
+            "backend.commercial."
+            "customer_commercial_current_billing_cycle_service",
+            "CustomerCommercialCurrentBillingCycleStore",
+        ),
+        (
+            "backend.commercial."
+            "customer_commercial_external_funding_observation_service",
+            "CustomerCommercialExternalFundingObservationStore",
+        ),
+        (
+            "backend.commercial."
             "customer_payment_intent_service",
             "CustomerPaymentIntentStore",
         ),
@@ -704,7 +748,7 @@ def test_provisioner_has_store_only_commercial_surface() -> None:
         called_attributes.count(
             "initialize_empty"
         )
-        == 18
+        == 22
     )
 
     forbidden_business_actions = {

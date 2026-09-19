@@ -91,6 +91,28 @@ from backend.commercial.customer_commercial_order_terms_binding import (
 from backend.commercial.customer_commercial_entitlement_registry import (
     CustomerCommercialEntitlementRegistry,
 )
+from backend.commercial.customer_commercial_deployment_binding import (
+    CustomerCommercialDeploymentBindingStore,
+)
+from backend.commercial.customer_commercial_billing_cycle_baseline_service import (
+    CustomerCommercialBillingCycleBaselineStore,
+)
+from backend.commercial.customer_commercial_current_billing_cycle_service import (
+    CustomerCommercialCurrentBillingCycleService,
+    CustomerCommercialCurrentBillingCycleStore,
+)
+from backend.commercial.customer_commercial_external_funding_observation_service import (
+    CustomerCommercialExternalFundingObservationStore,
+)
+from backend.commercial.customer_commercial_capacity_decision_service import (
+    CustomerCommercialCapacityDecisionService,
+)
+from backend.commercial.customer_commercial_capacity_decision_provider import (
+    CustomerCommercialCapacityDecisionProvider,
+)
+from backend.commercial.customer_commercial_new_exposure_authorization_service import (
+    CustomerCommercialNewExposureAuthorizationService,
+)
 from backend.commercial.customer_payment_intent_service import (
     CustomerPaymentIntentStore,
     CustomerPaymentIntentService,
@@ -607,6 +629,30 @@ CUSTOMER_COMMERCIAL_ENTITLEMENT_STORAGE_PATH = (
     / "commercial"
     / "customer_commercial_entitlements.json"
 )
+
+CUSTOMER_COMMERCIAL_DEPLOYMENT_BINDING_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_commercial_deployment_bindings.json"
+)
+
+CUSTOMER_COMMERCIAL_BILLING_CYCLE_BASELINE_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_commercial_billing_cycle_baselines.json"
+)
+
+CUSTOMER_COMMERCIAL_CURRENT_BILLING_CYCLE_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_commercial_current_billing_cycles.json"
+)
+
+CUSTOMER_COMMERCIAL_EXTERNAL_FUNDING_OBSERVATION_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_commercial_external_funding_observations.json"
+)
 CUSTOMER_PAYMENT_INTENT_STORAGE_PATH = (
     TODOBA_CONTROL_PLANE_DATA_ROOT
     / "commercial"
@@ -805,6 +851,7 @@ customer_deployment_runtime_projection = (
 
 
 _customer_payment_runtime_composed = False
+_customer_commercial_capacity_runtime_composed = False
 customer_commercial_order_store = None
 customer_commercial_order_terms_binding_store = None
 customer_commercial_entitlement_registry = None
@@ -844,6 +891,131 @@ customer_setup_handoff_authorizer = None
 customer_setup_build_continuation_service = None
 customer_deployment_enrollment_service = None
 customer_deployment_bootstrap_service = None
+
+
+def _compose_customer_commercial_capacity_runtime(
+    app: FastAPI,
+) -> None:
+    global _customer_commercial_capacity_runtime_composed
+
+    if _customer_commercial_capacity_runtime_composed:
+        return
+
+    if not isinstance(
+        customer_commercial_entitlement_registry,
+        CustomerCommercialEntitlementRegistry,
+    ):
+        raise RuntimeError(
+            "Commercial capacity runtime requires "
+            "authoritative payment entitlement registry."
+        )
+
+    required_paths = (
+        (
+            "Customer commercial deployment binding store",
+            CUSTOMER_COMMERCIAL_DEPLOYMENT_BINDING_STORAGE_PATH,
+        ),
+        (
+            "Customer commercial billing cycle baseline store",
+            CUSTOMER_COMMERCIAL_BILLING_CYCLE_BASELINE_STORAGE_PATH,
+        ),
+        (
+            "Customer commercial current billing cycle store",
+            CUSTOMER_COMMERCIAL_CURRENT_BILLING_CYCLE_STORAGE_PATH,
+        ),
+        (
+            "Customer commercial external funding observation store",
+            CUSTOMER_COMMERCIAL_EXTERNAL_FUNDING_OBSERVATION_STORAGE_PATH,
+        ),
+    )
+
+    for owner_name, storage_path in required_paths:
+        if not storage_path.is_file():
+            raise RuntimeError(
+                f"{owner_name} is not provisioned: "
+                f"{storage_path}"
+            )
+
+    commercial_deployment_binding_store = (
+        CustomerCommercialDeploymentBindingStore(
+            CUSTOMER_COMMERCIAL_DEPLOYMENT_BINDING_STORAGE_PATH
+        )
+    )
+
+    if not commercial_deployment_binding_store.is_ready():
+        commercial_deployment_binding_store.open_existing()
+
+    commercial_billing_cycle_baseline_store = (
+        CustomerCommercialBillingCycleBaselineStore(
+            CUSTOMER_COMMERCIAL_BILLING_CYCLE_BASELINE_STORAGE_PATH
+        )
+    )
+    commercial_billing_cycle_baseline_store.load()
+
+    commercial_current_billing_cycle_store = (
+        CustomerCommercialCurrentBillingCycleStore(
+            CUSTOMER_COMMERCIAL_CURRENT_BILLING_CYCLE_STORAGE_PATH
+        )
+    )
+    commercial_current_billing_cycle_store.load()
+
+    commercial_external_funding_observation_store = (
+        CustomerCommercialExternalFundingObservationStore(
+            CUSTOMER_COMMERCIAL_EXTERNAL_FUNDING_OBSERVATION_STORAGE_PATH
+        )
+    )
+    commercial_external_funding_observation_store.load()
+
+    commercial_current_billing_cycle_service = (
+        CustomerCommercialCurrentBillingCycleService(
+            store=commercial_current_billing_cycle_store,
+            billing_cycle_store=(
+                commercial_billing_cycle_baseline_store
+            ),
+        )
+    )
+
+    commercial_capacity_decision_service = (
+        CustomerCommercialCapacityDecisionService()
+    )
+
+    commercial_capacity_decision_provider = (
+        CustomerCommercialCapacityDecisionProvider(
+            entitlement_registry=(
+                customer_commercial_entitlement_registry
+            ),
+            deployment_binding_store=(
+                commercial_deployment_binding_store
+            ),
+            current_billing_cycle_service=(
+                commercial_current_billing_cycle_service
+            ),
+            external_funding_store=(
+                commercial_external_funding_observation_store
+            ),
+            capacity_decision_service=(
+                commercial_capacity_decision_service
+            ),
+        )
+    )
+
+    commercial_new_exposure_authorizer = (
+        CustomerCommercialNewExposureAuthorizationService()
+    )
+
+    execution_mission_service.configure_commercial_new_exposure_gate(
+        commercial_deployment_binding_store=(
+            commercial_deployment_binding_store
+        ),
+        commercial_capacity_decision_provider=(
+            commercial_capacity_decision_provider
+        ),
+        commercial_new_exposure_authorizer=(
+            commercial_new_exposure_authorizer
+        ),
+    )
+
+    _customer_commercial_capacity_runtime_composed = True
 
 
 def _compose_customer_payment_runtime(
@@ -1940,11 +2112,15 @@ async def lifespan(
         _compose_authenticated_vnd_reconciliation_ingress(
             app
         )
+        _compose_customer_commercial_capacity_runtime(
+            app
+        )
     except RuntimeError as payment_startup_error:
         print(
             "TODOBA_PAYMENT_STARTUP_ISOLATED: "
             f"{payment_startup_error}"
         )
+
 
     execution_mission_record_recovery.restore()
 
@@ -2320,6 +2496,7 @@ execution_mission_service = (
         security_sequence_assignment_service=(
             execution_security_sequence_assignment_service
         ),
+        commercial_gate_required=True,
     )
 )
 

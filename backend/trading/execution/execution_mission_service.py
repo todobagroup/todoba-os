@@ -95,6 +95,7 @@ class ExecutionMissionService:
         commercial_new_exposure_authorizer: Optional[
             CustomerCommercialNewExposureAuthorizationService
         ] = None,
+        commercial_gate_required: bool = False,
     ) -> None:
         if not isinstance(
             repository,
@@ -155,6 +156,14 @@ class ExecutionMissionService:
             raise TypeError(
                 "security_sequence_assignment_service "
                 "must be SecuritySequenceAssignmentService."
+            )
+
+        if not isinstance(
+            commercial_gate_required,
+            bool,
+        ):
+            raise TypeError(
+                "commercial_gate_required must be bool."
             )
 
         self.repository = repository
@@ -231,6 +240,9 @@ class ExecutionMissionService:
         self.commercial_new_exposure_authorizer = (
             commercial_new_exposure_authorizer
         )
+        self.commercial_gate_required = (
+            commercial_gate_required
+        )
 
     def _assign_security_sequence(
         self,
@@ -265,6 +277,69 @@ class ExecutionMissionService:
         return replace(
             mission,
             security_sequence=security_sequence,
+        )
+
+    def configure_commercial_new_exposure_gate(
+        self,
+        *,
+        commercial_deployment_binding_store: (
+            CustomerCommercialDeploymentBindingStore
+        ),
+        commercial_capacity_decision_provider: (
+            CustomerCommercialCapacityDecisionProvider
+        ),
+        commercial_new_exposure_authorizer: (
+            CustomerCommercialNewExposureAuthorizationService
+        ),
+    ) -> None:
+        if (
+            self.commercial_deployment_binding_store
+            is not None
+            or self.commercial_capacity_decision_provider
+            is not None
+            or self.commercial_new_exposure_authorizer
+            is not None
+        ):
+            raise RuntimeError(
+                "Commercial new-exposure gate "
+                "is already configured."
+            )
+
+        if not isinstance(
+            commercial_deployment_binding_store,
+            CustomerCommercialDeploymentBindingStore,
+        ):
+            raise TypeError(
+                "commercial_deployment_binding_store must be "
+                "CustomerCommercialDeploymentBindingStore."
+            )
+
+        if not isinstance(
+            commercial_capacity_decision_provider,
+            CustomerCommercialCapacityDecisionProvider,
+        ):
+            raise TypeError(
+                "commercial_capacity_decision_provider must be "
+                "CustomerCommercialCapacityDecisionProvider."
+            )
+
+        if not isinstance(
+            commercial_new_exposure_authorizer,
+            CustomerCommercialNewExposureAuthorizationService,
+        ):
+            raise TypeError(
+                "commercial_new_exposure_authorizer must be "
+                "CustomerCommercialNewExposureAuthorizationService."
+            )
+
+        self.commercial_deployment_binding_store = (
+            commercial_deployment_binding_store
+        )
+        self.commercial_capacity_decision_provider = (
+            commercial_capacity_decision_provider
+        )
+        self.commercial_new_exposure_authorizer = (
+            commercial_new_exposure_authorizer
         )
 
     def create_mission(
@@ -321,6 +396,16 @@ class ExecutionMissionService:
             )
 
             return stored_mission
+
+        if (
+            self.commercial_gate_required
+            and self.commercial_deployment_binding_store
+            is None
+        ):
+            raise RuntimeError(
+                "Commercial new-exposure gate "
+                "is required but not configured."
+            )
 
         if (
             self.commercial_deployment_binding_store

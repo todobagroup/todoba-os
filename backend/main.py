@@ -102,6 +102,7 @@ from backend.commercial.customer_commercial_current_billing_cycle_service import
     CustomerCommercialCurrentBillingCycleStore,
 )
 from backend.commercial.customer_commercial_external_funding_observation_service import (
+    CustomerCommercialExternalFundingObservationService,
     CustomerCommercialExternalFundingObservationStore,
 )
 from backend.commercial.customer_commercial_capacity_decision_service import (
@@ -109,6 +110,12 @@ from backend.commercial.customer_commercial_capacity_decision_service import (
 )
 from backend.commercial.customer_commercial_capacity_decision_provider import (
     CustomerCommercialCapacityDecisionProvider,
+)
+from backend.commercial.customer_commercial_external_funding_api import (
+    create_customer_commercial_external_funding_router,
+)
+from backend.commercial.customer_commercial_external_funding_convergence_service import (
+    CustomerCommercialExternalFundingConvergenceService,
 )
 from backend.commercial.customer_commercial_new_exposure_authorization_service import (
     CustomerCommercialNewExposureAuthorizationService,
@@ -293,6 +300,9 @@ from backend.trading.control.control_mission_signer_v2 import (
 )
 from backend.trading.control.control_mission_store import (
     ControlMissionStore,
+)
+from backend.trading.lifecycle.mt5_external_funding_classifier import (
+    MT5ExternalFundingClassifier,
 )
 from backend.trading.execution.broker_execution_evidence_api import (
     create_broker_execution_evidence_router,
@@ -1013,6 +1023,48 @@ def _compose_customer_commercial_capacity_runtime(
         commercial_new_exposure_authorizer=(
             commercial_new_exposure_authorizer
         ),
+    )
+
+    commercial_external_funding_observation_service = (
+        CustomerCommercialExternalFundingObservationService(
+            store=(
+                commercial_external_funding_observation_store
+            ),
+            billing_cycle_store=(
+                commercial_billing_cycle_baseline_store
+            ),
+        )
+    )
+
+    commercial_external_funding_convergence_service = (
+        CustomerCommercialExternalFundingConvergenceService(
+            deployment_binding_store=(
+                commercial_deployment_binding_store
+            ),
+            capacity_decision_provider=(
+                commercial_capacity_decision_provider
+            ),
+            external_funding_classifier=(
+                MT5ExternalFundingClassifier()
+            ),
+            observation_service=(
+                commercial_external_funding_observation_service
+            ),
+        )
+    )
+
+    app.include_router(
+        create_customer_commercial_external_funding_router(
+            convergence_service=(
+                commercial_external_funding_convergence_service
+            ),
+            authenticator=(
+                trusted_agent_authenticator
+            ),
+            account_binding_guard=(
+                trusted_agent_account_binding_guard
+            ),
+        )
     )
 
     _customer_commercial_capacity_runtime_composed = True

@@ -30,6 +30,9 @@ from backend.commercial.customer_commercial_external_funding_observation_service
     CustomerCommercialExternalFundingObservationService,
     CustomerCommercialExternalFundingObservationStore,
 )
+from backend.commercial.customer_commercial_pending_exposure_containment_service import (
+    CustomerCommercialPendingExposureContainmentService,
+)
 from backend.trading.execution.trusted_agent_account_binding_guard import (
     TrustedAgentAccountBindingGuard,
 )
@@ -112,6 +115,21 @@ class StubCapacityDecisionProvider(
                 .ALLOW_NEW_EXPOSURE
             ),
         )
+
+
+class NoOpPendingExposureContainmentService(
+    CustomerCommercialPendingExposureContainmentService
+):
+    def __init__(self) -> None:
+        pass
+
+    def issue(
+        self,
+        *,
+        trigger_id: str,
+        deployment_id: str,
+    ):
+        return ()
 
 
 class StubBillingCycleStore(
@@ -208,6 +226,9 @@ def _build(
                 MT5ExternalFundingClassifier()
             ),
             observation_service=observation_service,
+            pending_exposure_containment_service=(
+                NoOpPendingExposureContainmentService()
+            ),
         )
     )
 

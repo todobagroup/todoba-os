@@ -1087,6 +1087,9 @@ def _compose_customer_commercial_capacity_runtime(
             observation_service=(
                 commercial_external_funding_observation_service
             ),
+            pending_exposure_containment_service=(
+                commercial_pending_exposure_containment_service
+            ),
         )
     )
 

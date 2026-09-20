@@ -15,12 +15,18 @@ and durable commercial funding truth remain server-owned.
 from backend.commercial.customer_commercial_capacity_decision_provider import (
     CustomerCommercialCapacityDecisionProvider,
 )
+from backend.commercial.customer_commercial_capacity_decision_service import (
+    CustomerCommercialCapacityDecisionStatus,
+)
 from backend.commercial.customer_commercial_deployment_binding import (
     CustomerCommercialDeploymentBindingStore,
 )
 from backend.commercial.customer_commercial_external_funding_observation_service import (
     CustomerCommercialExternalFundingObservationRecord,
     CustomerCommercialExternalFundingObservationService,
+)
+from backend.commercial.customer_commercial_pending_exposure_containment_service import (
+    CustomerCommercialPendingExposureContainmentService,
 )
 from backend.trading.lifecycle.mt5_account_cashflow_history_reader import (
     MT5AccountCashflowEvidence,
@@ -43,6 +49,7 @@ class CustomerCommercialExternalFundingConvergenceService:
         capacity_decision_provider: CustomerCommercialCapacityDecisionProvider,
         external_funding_classifier: MT5ExternalFundingClassifier,
         observation_service: CustomerCommercialExternalFundingObservationService,
+        pending_exposure_containment_service: CustomerCommercialPendingExposureContainmentService,
     ) -> None:
         if not isinstance(
             deployment_binding_store,
@@ -80,6 +87,15 @@ class CustomerCommercialExternalFundingConvergenceService:
                 "CustomerCommercialExternalFundingObservationService."
             )
 
+        if not isinstance(
+            pending_exposure_containment_service,
+            CustomerCommercialPendingExposureContainmentService,
+        ):
+            raise TypeError(
+                "pending_exposure_containment_service must be "
+                "CustomerCommercialPendingExposureContainmentService."
+            )
+
         self._deployment_binding_store = (
             deployment_binding_store
         )
@@ -91,6 +107,9 @@ class CustomerCommercialExternalFundingConvergenceService:
         )
         self._observation_service = (
             observation_service
+        )
+        self._pending_exposure_containment_service = (
+            pending_exposure_containment_service
         )
 
     def converge(
@@ -172,7 +191,60 @@ class CustomerCommercialExternalFundingConvergenceService:
             )
         )
 
-        return self._observation_service.observe(
+        observation = self._observation_service.observe(
             cycle_id=capacity_decision.cycle_id,
             classification=classification,
         )
+
+        if observation.funding_kind != "external_deposit":
+            return observation
+
+        post_observation_capacity_decision = (
+            self._capacity_decision_provider.provide(
+                deployment_id=binding.deployment_id,
+            )
+        )
+
+        if (
+            post_observation_capacity_decision.deployment_id
+            != binding.deployment_id
+        ):
+            raise RuntimeError(
+                "Post-observation commercial capacity deployment "
+                "identity is inconsistent."
+            )
+
+        if (
+            post_observation_capacity_decision.commercial_entitlement_id
+            != binding.commercial_entitlement_id
+        ):
+            raise RuntimeError(
+                "Post-observation commercial capacity entitlement "
+                "identity is inconsistent."
+            )
+
+        if (
+            post_observation_capacity_decision.cycle_id
+            != observation.cycle_id
+        ):
+            raise RuntimeError(
+                "Post-observation commercial capacity cycle "
+                "identity is inconsistent."
+            )
+
+        if (
+            post_observation_capacity_decision.status
+            == CustomerCommercialCapacityDecisionStatus.UPGRADE_REQUIRED
+        ):
+            trigger_id = (
+                "external-funding:"
+                f"{observation.account_fingerprint}:"
+                f"{observation.deal_ticket}"
+            )
+
+            self._pending_exposure_containment_service.issue(
+                trigger_id=trigger_id,
+                deployment_id=binding.deployment_id,
+            )
+
+        return observation

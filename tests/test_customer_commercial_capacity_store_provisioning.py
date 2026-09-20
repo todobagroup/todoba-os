@@ -11,6 +11,7 @@ EXPECTED_FILENAMES = (
     "customer_commercial_billing_cycle_baselines.json",
     "customer_commercial_current_billing_cycles.json",
     "customer_commercial_external_funding_observations.json",
+    "customer_commercial_pending_exposure_containment_issuances.json",
 )
 
 EXPECTED_STORE_CLASSES = (
@@ -18,6 +19,7 @@ EXPECTED_STORE_CLASSES = (
     "CustomerCommercialBillingCycleBaselineStore",
     "CustomerCommercialCurrentBillingCycleStore",
     "CustomerCommercialExternalFundingObservationStore",
+    "CustomerCommercialPendingExposureContainmentIssuanceStore",
 )
 
 
@@ -74,13 +76,14 @@ def test_provisioner_initializes_or_opens_all_capacity_stores():
 
     assert source.count(
         "initialize_empty()"
-    ) >= 4
+    ) >= 5
 
     required_store_variables = (
         "commercial_deployment_binding_store",
         "commercial_billing_cycle_baseline_store",
         "commercial_current_billing_cycle_store",
         "commercial_external_funding_observation_store",
+        "commercial_pending_exposure_containment_issuance_store",
     )
 
     for required in required_store_variables:
@@ -110,6 +113,10 @@ def test_provisioner_initializes_or_opens_all_capacity_stores():
         "commercial_external_funding_observation_store.load()"
         in source
     )
+    assert (
+        "commercial_pending_exposure_containment_issuance_store.load()"
+        in source
+    )
 
 
 def test_provisioner_verifies_capacity_store_readiness():
@@ -120,6 +127,7 @@ def test_provisioner_verifies_capacity_store_readiness():
         "commercial_billing_cycle_baseline_store.is_ready()",
         "commercial_current_billing_cycle_store.is_ready()",
         "commercial_external_funding_observation_store.is_ready()",
+        "commercial_pending_exposure_containment_issuance_store.is_ready()",
     )
 
     for required in required_ready_checks:

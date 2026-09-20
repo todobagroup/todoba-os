@@ -105,6 +105,10 @@ COMMERCIAL_EXTERNAL_FUNDING_OBSERVATION_FILENAME = (
     "customer_commercial_external_funding_observations.json"
 )
 
+COMMERCIAL_PENDING_EXPOSURE_CONTAINMENT_ISSUANCE_FILENAME = (
+    "customer_commercial_pending_exposure_containment_issuances.json"
+)
+
 PAYMENT_INTENT_FILENAME = (
     "customer_payment_intents.json"
 )
@@ -302,6 +306,7 @@ def test_first_provisioning_creates_only_required_ready_state(
         COMMERCIAL_BILLING_CYCLE_BASELINE_FILENAME,
         COMMERCIAL_CURRENT_BILLING_CYCLE_FILENAME,
         COMMERCIAL_EXTERNAL_FUNDING_OBSERVATION_FILENAME,
+        COMMERCIAL_PENDING_EXPOSURE_CONTAINMENT_ISSUANCE_FILENAME,
         PAYMENT_INTENT_FILENAME,
         PAYMENT_EVIDENCE_FILENAME,
         PAYMENT_SETTLEMENT_FILENAME,
@@ -554,6 +559,7 @@ def test_retry_is_byte_for_byte_and_queue_idempotent(
         COMMERCIAL_BILLING_CYCLE_BASELINE_FILENAME,
         COMMERCIAL_CURRENT_BILLING_CYCLE_FILENAME,
         COMMERCIAL_EXTERNAL_FUNDING_OBSERVATION_FILENAME,
+        COMMERCIAL_PENDING_EXPOSURE_CONTAINMENT_ISSUANCE_FILENAME,
         PAYMENT_INTENT_FILENAME,
         PAYMENT_EVIDENCE_FILENAME,
         PAYMENT_SETTLEMENT_FILENAME,
@@ -679,6 +685,11 @@ def test_provisioner_has_store_only_commercial_surface() -> None:
         ),
         (
             "backend.commercial."
+            "customer_commercial_pending_exposure_containment_issuance",
+            "CustomerCommercialPendingExposureContainmentIssuanceStore",
+        ),
+        (
+            "backend.commercial."
             "customer_payment_intent_service",
             "CustomerPaymentIntentStore",
         ),
@@ -748,7 +759,7 @@ def test_provisioner_has_store_only_commercial_surface() -> None:
         called_attributes.count(
             "initialize_empty"
         )
-        == 22
+        == 23
     )
 
     forbidden_business_actions = {

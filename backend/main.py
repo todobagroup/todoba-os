@@ -105,6 +105,12 @@ from backend.commercial.customer_commercial_external_funding_observation_service
     CustomerCommercialExternalFundingObservationService,
     CustomerCommercialExternalFundingObservationStore,
 )
+from backend.commercial.customer_commercial_pending_exposure_containment_issuance import (
+    CustomerCommercialPendingExposureContainmentIssuanceStore,
+)
+from backend.commercial.customer_commercial_pending_exposure_containment_service import (
+    CustomerCommercialPendingExposureContainmentService,
+)
 from backend.commercial.customer_commercial_capacity_decision_service import (
     CustomerCommercialCapacityDecisionService,
 )
@@ -663,6 +669,11 @@ CUSTOMER_COMMERCIAL_EXTERNAL_FUNDING_OBSERVATION_STORAGE_PATH = (
     / "commercial"
     / "customer_commercial_external_funding_observations.json"
 )
+CUSTOMER_COMMERCIAL_PENDING_EXPOSURE_CONTAINMENT_ISSUANCE_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_commercial_pending_exposure_containment_issuances.json"
+)
 CUSTOMER_PAYMENT_INTENT_STORAGE_PATH = (
     TODOBA_CONTROL_PLANE_DATA_ROOT
     / "commercial"
@@ -937,6 +948,10 @@ def _compose_customer_commercial_capacity_runtime(
             "Customer commercial external funding observation store",
             CUSTOMER_COMMERCIAL_EXTERNAL_FUNDING_OBSERVATION_STORAGE_PATH,
         ),
+        (
+            "Customer commercial pending exposure containment issuance store",
+            CUSTOMER_COMMERCIAL_PENDING_EXPOSURE_CONTAINMENT_ISSUANCE_STORAGE_PATH,
+        ),
     )
 
     for owner_name, storage_path in required_paths:
@@ -976,6 +991,13 @@ def _compose_customer_commercial_capacity_runtime(
     )
     commercial_external_funding_observation_store.load()
 
+    commercial_pending_exposure_containment_issuance_store = (
+        CustomerCommercialPendingExposureContainmentIssuanceStore(
+            CUSTOMER_COMMERCIAL_PENDING_EXPOSURE_CONTAINMENT_ISSUANCE_STORAGE_PATH
+        )
+    )
+    commercial_pending_exposure_containment_issuance_store.load()
+
     commercial_current_billing_cycle_service = (
         CustomerCommercialCurrentBillingCycleService(
             store=commercial_current_billing_cycle_store,
@@ -1006,6 +1028,21 @@ def _compose_customer_commercial_capacity_runtime(
             capacity_decision_service=(
                 commercial_capacity_decision_service
             ),
+        )
+    )
+
+    commercial_pending_exposure_containment_service = (
+        CustomerCommercialPendingExposureContainmentService(
+            deployment_binding_store=(
+                commercial_deployment_binding_store
+            ),
+            capacity_decision_provider=(
+                commercial_capacity_decision_provider
+            ),
+            issuance_store=(
+                commercial_pending_exposure_containment_issuance_store
+            ),
+            control_mission_service=control_mission_service,
         )
     )
 

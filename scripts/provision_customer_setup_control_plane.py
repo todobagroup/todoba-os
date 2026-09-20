@@ -116,6 +116,9 @@ from backend.commercial.customer_commercial_deployment_binding import (
 from backend.commercial.customer_commercial_external_funding_observation_service import (
     CustomerCommercialExternalFundingObservationStore,
 )
+from backend.commercial.customer_commercial_pending_exposure_containment_issuance import (
+    CustomerCommercialPendingExposureContainmentIssuanceStore,
+)
 
 
 _CUSTOMER_IDENTITY_FILENAME = (
@@ -183,6 +186,9 @@ _CUSTOMER_COMMERCIAL_CURRENT_BILLING_CYCLE_FILENAME = (
 )
 _CUSTOMER_COMMERCIAL_EXTERNAL_FUNDING_OBSERVATION_FILENAME = (
     "customer_commercial_external_funding_observations.json"
+)
+_CUSTOMER_COMMERCIAL_PENDING_EXPOSURE_CONTAINMENT_ISSUANCE_FILENAME = (
+    "customer_commercial_pending_exposure_containment_issuances.json"
 )
 
 _CUSTOMER_PAYMENT_INTENT_FILENAME = (
@@ -336,6 +342,10 @@ def provision_customer_setup_control_plane(
         commercial_root
         / _CUSTOMER_COMMERCIAL_EXTERNAL_FUNDING_OBSERVATION_FILENAME
     )
+    commercial_pending_exposure_containment_issuance_storage_path = (
+        commercial_root
+        / _CUSTOMER_COMMERCIAL_PENDING_EXPOSURE_CONTAINMENT_ISSUANCE_FILENAME
+    )
 
     payment_intent_storage_path = (
         commercial_root
@@ -469,6 +479,12 @@ def provision_customer_setup_control_plane(
         )
     )
 
+    commercial_pending_exposure_containment_issuance_store = (
+        CustomerCommercialPendingExposureContainmentIssuanceStore(
+            commercial_pending_exposure_containment_issuance_storage_path
+        )
+    )
+
     payment_intent_store = CustomerPaymentIntentStore(
         payment_intent_storage_path
     )
@@ -577,6 +593,11 @@ def provision_customer_setup_control_plane(
     else:
         commercial_external_funding_observation_store.initialize_empty()
 
+    if commercial_pending_exposure_containment_issuance_storage_path.exists():
+        commercial_pending_exposure_containment_issuance_store.load()
+    else:
+        commercial_pending_exposure_containment_issuance_store.initialize_empty()
+
     if not payment_intent_store.is_ready():
         payment_intent_store.initialize_empty()
 
@@ -669,6 +690,12 @@ def provision_customer_setup_control_plane(
     if not commercial_external_funding_observation_store.is_ready():
         raise RuntimeError(
             "Commercial external funding observation store "
+            "did not become ready."
+        )
+
+    if not commercial_pending_exposure_containment_issuance_store.is_ready():
+        raise RuntimeError(
+            "Commercial pending exposure containment issuance store "
             "did not become ready."
         )
 

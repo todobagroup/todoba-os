@@ -44,6 +44,9 @@ from backend.trading.department.trading_department import (
 from backend.trading.execution.live_execution_pipeline import (
     LiveExecutionPipeline,
 )
+from backend.trading.control.control_mission_issuance_scope import (
+    PRODUCTION_CONTROL_ALLOWED_SYMBOLS,
+)
 from backend.trading.profile.trading_profile import (
     TradingProfile,
 )
@@ -71,7 +74,7 @@ class RuntimeBootstrap:
             profile_name="telegram_demo_gold",
             risk_percent=1.0,
             max_open_trades=10,
-            allowed_symbols=("XAUUSD",),
+            allowed_symbols=PRODUCTION_CONTROL_ALLOWED_SYMBOLS,
             lot_policy_name="FIXED_001",
         )
 

@@ -626,6 +626,420 @@ bool SendBrokerEvidence(
 }
 
 
+string ExternalFundingCashflowKind(
+   const ENUM_DEAL_TYPE deal_type
+)
+{
+   switch(deal_type)
+   {
+      case DEAL_TYPE_BALANCE:
+         return "balance";
+
+      case DEAL_TYPE_CREDIT:
+         return "credit";
+
+      case DEAL_TYPE_CHARGE:
+         return "charge";
+
+      case DEAL_TYPE_CORRECTION:
+         return "correction";
+
+      case DEAL_TYPE_BONUS:
+         return "bonus";
+
+      case DEAL_TYPE_COMMISSION:
+         return "commission";
+
+      case DEAL_TYPE_COMMISSION_DAILY:
+         return "commission_daily";
+
+      case DEAL_TYPE_COMMISSION_MONTHLY:
+         return "commission_monthly";
+
+      case DEAL_TYPE_COMMISSION_AGENT_DAILY:
+         return "commission_agent_daily";
+
+      case DEAL_TYPE_COMMISSION_AGENT_MONTHLY:
+         return "commission_agent_monthly";
+
+      case DEAL_TYPE_INTEREST:
+         return "interest";
+   }
+
+   return "";
+}
+
+
+string ExternalFundingObservedAtIso8601(
+   const datetime observed_at
+)
+{
+   MqlDateTime parts;
+
+   if(
+      !TimeToStruct(
+         observed_at,
+         parts
+      )
+   )
+   {
+      return "";
+   }
+
+   return StringFormat(
+      "%04d-%02d-%02dT%02d:%02d:%02dZ",
+      parts.year,
+      parts.mon,
+      parts.day,
+      parts.hour,
+      parts.min,
+      parts.sec
+   );
+}
+
+
+void SendExternalFundingEvidence()
+{
+   // Poll raw account-level broker cashflow at a bounded cadence.
+   //
+   // The rolling lookback intentionally overlaps heavily.
+   // Server-side durable replay identity
+   // (account_fingerprint, deal_ticket)
+   // owns idempotency.
+   //
+   // The Agent does not classify commercial funding.
+
+   static datetime next_scan_at = 0;
+
+   datetime scan_to = TimeCurrent();
+
+   if(scan_to <= 0)
+      return;
+
+   if(
+      next_scan_at > 0
+      &&
+      scan_to < next_scan_at
+   )
+   {
+      return;
+   }
+
+   // One-minute evidence cadence.
+   next_scan_at = scan_to + 60;
+
+   // Rolling 24-hour evidence window.
+   // This avoids a durable client cursor and naturally
+   // replays after restart or temporary HTTP failure.
+   datetime scan_from =
+      scan_to - 86400;
+
+   if(
+      !HistorySelect(
+         scan_from,
+         scan_to
+      )
+   )
+   {
+      Print(
+         "TODOBA External Funding Evidence: "
+         "HistorySelect failed."
+      );
+
+      return;
+   }
+
+   long account_login =
+      AccountInfoInteger(
+         ACCOUNT_LOGIN
+      );
+
+   string account_server =
+      AccountInfoString(
+         ACCOUNT_SERVER
+      );
+
+   if(
+      account_login <= 0
+      ||
+      StringLen(
+         account_server
+      ) == 0
+   )
+   {
+      Print(
+         "TODOBA External Funding Evidence: "
+         "account identity unavailable."
+      );
+
+      return;
+   }
+
+   string account_fingerprint =
+      account_server
+      + ":"
+      + IntegerToString(
+         account_login
+      );
+
+   int deal_count =
+      HistoryDealsTotal();
+
+   for(
+      int index = 0;
+      index < deal_count;
+      index++
+   )
+   {
+      ulong deal_ticket =
+         HistoryDealGetTicket(
+            index
+         );
+
+      if(deal_ticket == 0)
+         continue;
+
+      ENUM_DEAL_TYPE deal_type =
+         (
+            ENUM_DEAL_TYPE
+         )
+         HistoryDealGetInteger(
+            deal_ticket,
+            DEAL_TYPE
+         );
+
+      string cashflow_kind =
+         ExternalFundingCashflowKind(
+            deal_type
+         );
+
+      // Trading BUY/SELL and other non-account cashflow
+      // deals never cross this evidence boundary.
+      if(
+         StringLen(
+            cashflow_kind
+         ) == 0
+      )
+      {
+         continue;
+      }
+
+      long deal_time_msc =
+         HistoryDealGetInteger(
+            deal_ticket,
+            DEAL_TIME_MSC
+         );
+
+      datetime deal_time =
+         (
+            datetime
+         )
+         HistoryDealGetInteger(
+            deal_ticket,
+            DEAL_TIME
+         );
+
+      string observed_at =
+         ExternalFundingObservedAtIso8601(
+            deal_time
+         );
+
+      if(
+         deal_time_msc < 0
+         ||
+         deal_time <= 0
+         ||
+         StringLen(
+            observed_at
+         ) == 0
+      )
+      {
+         continue;
+      }
+
+      double amount =
+         HistoryDealGetDouble(
+            deal_ticket,
+            DEAL_PROFIT
+         );
+
+      long order_ticket =
+         HistoryDealGetInteger(
+            deal_ticket,
+            DEAL_ORDER
+         );
+
+      long deal_entry =
+         HistoryDealGetInteger(
+            deal_ticket,
+            DEAL_ENTRY
+         );
+
+      long magic =
+         HistoryDealGetInteger(
+            deal_ticket,
+            DEAL_MAGIC
+         );
+
+      long position_id =
+         HistoryDealGetInteger(
+            deal_ticket,
+            DEAL_POSITION_ID
+         );
+
+      long deal_reason =
+         HistoryDealGetInteger(
+            deal_ticket,
+            DEAL_REASON
+         );
+
+      double volume =
+         HistoryDealGetDouble(
+            deal_ticket,
+            DEAL_VOLUME
+         );
+
+      double price =
+         HistoryDealGetDouble(
+            deal_ticket,
+            DEAL_PRICE
+         );
+
+      string symbol =
+         HistoryDealGetString(
+            deal_ticket,
+            DEAL_SYMBOL
+         );
+
+      string external_id =
+         HistoryDealGetString(
+            deal_ticket,
+            DEAL_EXTERNAL_ID
+         );
+
+      string comment =
+         HistoryDealGetString(
+            deal_ticket,
+            DEAL_COMMENT
+         );
+
+      string payload =
+         "{"
+         "\"account_fingerprint\":\""
+         + EscapeJsonString(
+            account_fingerprint
+         )
+         + "\","
+         "\"deal_ticket\":"
+         + IntegerToString(
+            (
+               long
+            )
+            deal_ticket
+         )
+         + ","
+         "\"deal_time_msc\":"
+         + IntegerToString(
+            deal_time_msc
+         )
+         + ","
+         "\"observed_at\":\""
+         + EscapeJsonString(
+            observed_at
+         )
+         + "\","
+         "\"cashflow_kind\":\""
+         + EscapeJsonString(
+            cashflow_kind
+         )
+         + "\","
+         "\"raw_deal_type\":"
+         + IntegerToString(
+            (
+               long
+            )
+            deal_type
+         )
+         + ","
+         "\"amount\":"
+         + DoubleToString(
+            amount,
+            8
+         )
+         + ","
+         "\"order_ticket\":"
+         + IntegerToString(
+            order_ticket
+         )
+         + ","
+         "\"deal_entry\":"
+         + IntegerToString(
+            deal_entry
+         )
+         + ","
+         "\"magic\":"
+         + IntegerToString(
+            magic
+         )
+         + ","
+         "\"position_id\":"
+         + IntegerToString(
+            position_id
+         )
+         + ","
+         "\"deal_reason\":"
+         + IntegerToString(
+            deal_reason
+         )
+         + ","
+         "\"volume\":"
+         + DoubleToString(
+            volume,
+            8
+         )
+         + ","
+         "\"price\":"
+         + DoubleToString(
+            price,
+            8
+         )
+         + ","
+         "\"symbol\":\""
+         + EscapeJsonString(
+            symbol
+         )
+         + "\","
+         "\"external_id\":\""
+         + EscapeJsonString(
+            external_id
+         )
+         + "\","
+         "\"comment\":\""
+         + EscapeJsonString(
+            comment
+         )
+         + "\""
+         "}";
+
+      bool published =
+         PostJson(
+            "/commercial/external-funding/evidence",
+            payload
+         );
+
+      if(!published)
+      {
+         Print(
+            "TODOBA External Funding Evidence: "
+            "publish not accepted for deal ",
+            deal_ticket,
+            "."
+         );
+      }
+   }
+}
+
+
 void SendBrokerState()
 {
    TODOBABrokerState state;
@@ -1278,6 +1692,8 @@ void OnDeinit(
 void OnTimer()
 {
    SendBrokerState();
+
+   SendExternalFundingEvidence();
 
    if(
       !TerminalInfoInteger(

@@ -137,6 +137,56 @@ class CustomerCommercialAccountPriceBook:
             standard_monthly_price_usd=price_usd,
         )
 
+    @classmethod
+    def quote_for_cap(
+        cls,
+        *,
+        licensed_account_cap_usd: int,
+    ) -> CustomerCommercialAccountPriceQuote:
+        if isinstance(
+            licensed_account_cap_usd,
+            bool,
+        ) or not isinstance(
+            licensed_account_cap_usd,
+            int,
+        ):
+            raise TypeError(
+                "licensed_account_cap_usd must be int."
+            )
+
+        if licensed_account_cap_usd <= 0:
+            raise ValueError(
+                "licensed_account_cap_usd must be positive."
+            )
+
+        if (
+            licensed_account_cap_usd
+            % int(_CAP_STEP_USD)
+            != 0
+        ):
+            raise CustomerCommercialAccountPricingUnavailable(
+                "automatic pricing tier is unavailable."
+            )
+
+        if (
+            licensed_account_cap_usd
+            > int(_MAXIMUM_AUTOMATIC_BALANCE_USD)
+        ):
+            raise CustomerCommercialAccountPricingUnavailable(
+                "automatic pricing tier is unavailable."
+            )
+
+        price_usd = cls._resolve_monthly_price_usd(
+            licensed_account_cap_usd
+        )
+
+        return CustomerCommercialAccountPriceQuote(
+            licensed_account_cap_usd=(
+                licensed_account_cap_usd
+            ),
+            standard_monthly_price_usd=price_usd,
+        )
+
     @staticmethod
     def _validate_cycle_balance(
         value: Decimal,

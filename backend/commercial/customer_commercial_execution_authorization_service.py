@@ -1,4 +1,4 @@
-﻿"""
+"""
 TODOBA Commercial Execution Authorization Service
 
 Owns commercial authorization orchestration for creation
@@ -8,8 +8,10 @@ Authority chain:
 
     agent_id + account_fingerprint
         -> commercial deployment binding
-        -> commercial capacity decision
-        -> new-exposure authorization
+            -> commercial capacity decision
+            -> new-exposure authorization
+        OR, only when commercial binding is absent:
+            -> explicit legacy execution compatibility
 
 This owner preserves the existing commercial-capacity
 authorization contract.
@@ -19,7 +21,7 @@ This component does not:
 - create or mutate commercial entitlements
 - create billing-cycle truth
 - process payment or settlement truth
-- provide legacy compatibility
+- create or mutate legacy compatibility eligibility
 - create or persist execution missions
 - execute broker orders
 """
@@ -32,6 +34,9 @@ from backend.commercial.customer_commercial_deployment_binding import (
 )
 from backend.commercial.customer_commercial_new_exposure_authorization_service import (
     CustomerCommercialNewExposureAuthorizationService,
+)
+from backend.commercial.customer_legacy_deployment_execution_authorizer import (
+    CustomerLegacyDeploymentExecutionAuthorizer,
 )
 
 
@@ -47,6 +52,9 @@ class CustomerCommercialExecutionAuthorizationService:
         deployment_binding_store: CustomerCommercialDeploymentBindingStore,
         capacity_decision_provider: CustomerCommercialCapacityDecisionProvider,
         new_exposure_authorizer: CustomerCommercialNewExposureAuthorizationService,
+        legacy_execution_authorizer: (
+            CustomerLegacyDeploymentExecutionAuthorizer | None
+        ) = None,
     ) -> None:
         if not isinstance(
             deployment_binding_store,
@@ -75,6 +83,18 @@ class CustomerCommercialExecutionAuthorizationService:
                 "CustomerCommercialNewExposureAuthorizationService."
             )
 
+        if (
+            legacy_execution_authorizer is not None
+            and not isinstance(
+                legacy_execution_authorizer,
+                CustomerLegacyDeploymentExecutionAuthorizer,
+            )
+        ):
+            raise TypeError(
+                "legacy_execution_authorizer must be "
+                "CustomerLegacyDeploymentExecutionAuthorizer or None."
+            )
+
         self._deployment_binding_store = (
             deployment_binding_store
         )
@@ -83,6 +103,9 @@ class CustomerCommercialExecutionAuthorizationService:
         )
         self._new_exposure_authorizer = (
             new_exposure_authorizer
+        )
+        self._legacy_execution_authorizer = (
+            legacy_execution_authorizer
         )
 
     def authorize(
@@ -100,10 +123,17 @@ class CustomerCommercialExecutionAuthorizationService:
         )
 
         if binding is None:
-            raise RuntimeError(
-                "Execution mission commercial deployment "
-                "binding could not be resolved."
+            if self._legacy_execution_authorizer is None:
+                raise RuntimeError(
+                    "Execution mission commercial deployment "
+                    "binding could not be resolved."
+                )
+
+            self._legacy_execution_authorizer.authorize(
+                agent_id=agent_id,
+                account_fingerprint=account_fingerprint,
             )
+            return None
 
         capacity_decision = (
             self._capacity_decision_provider.provide(

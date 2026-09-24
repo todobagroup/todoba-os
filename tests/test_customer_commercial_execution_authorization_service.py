@@ -37,8 +37,36 @@ from backend.commercial.customer_commercial_new_exposure_authorization_service i
     CustomerCommercialNewExposureAuthorizationService,
 )
 
+from backend.commercial.customer_deployment_entitlement_authorizer import (
+    CustomerDeploymentEntitlementAuthorizer,
+)
+from backend.commercial.customer_deployment_entitlement_registry import (
+    CustomerDeploymentEntitlementRegistry,
+)
+from backend.commercial.customer_deployment_registry import (
+    CustomerDeployment,
+    CustomerDeploymentRegistry,
+)
+from backend.commercial.customer_legacy_deployment_execution_authorizer import (
+    CustomerLegacyDeploymentExecutionAuthorizer,
+)
+from backend.commercial.customer_legacy_execution_compatibility_registry import (
+    CustomerLegacyExecutionCompatibilityRecord,
+    CustomerLegacyExecutionCompatibilityRegistry,
+)
+from backend.trading.execution.trusted_agent_account_binding_guard import (
+    TrustedAgentAccountBindingGuard,
+)
+from backend.trading.execution.trusted_agent_account_binding_store import (
+    TrustedAgentAccountBindingStore,
+)
 
-def _ready_stack(tmp_path):
+
+def _ready_stack(
+    tmp_path,
+    *,
+    legacy_execution_authorizer=None,
+):
     entitlement_registry = CustomerCommercialEntitlementRegistry(
         tmp_path / "entitlements.json"
     )
@@ -81,10 +109,19 @@ def _ready_stack(tmp_path):
         CustomerCommercialNewExposureAuthorizationService()
     )
 
+    service_kwargs = {
+        "deployment_binding_store": binding_store,
+        "capacity_decision_provider": provider,
+        "new_exposure_authorizer": new_exposure_authorizer,
+    }
+
+    if legacy_execution_authorizer is not None:
+        service_kwargs["legacy_execution_authorizer"] = (
+            legacy_execution_authorizer
+        )
+
     service = CustomerCommercialExecutionAuthorizationService(
-        deployment_binding_store=binding_store,
-        capacity_decision_provider=provider,
-        new_exposure_authorizer=new_exposure_authorizer,
+        **service_kwargs
     )
 
     return (
@@ -98,7 +135,11 @@ def _ready_stack(tmp_path):
     )
 
 
-def _seed_authorized_stack(tmp_path):
+def _seed_authorized_stack(
+    tmp_path,
+    *,
+    legacy_execution_authorizer=None,
+):
     (
         entitlement_registry,
         binding_store,
@@ -107,7 +148,10 @@ def _seed_authorized_stack(tmp_path):
         funding_store,
         provider,
         service,
-    ) = _ready_stack(tmp_path)
+    ) = _ready_stack(
+        tmp_path,
+        legacy_execution_authorizer=legacy_execution_authorizer,
+    )
 
     entitlement_registry.register(
         CustomerCommercialEntitlement(
@@ -153,6 +197,80 @@ def _seed_authorized_stack(tmp_path):
 
     return service, funding_store
 
+
+
+
+def _ready_legacy_authorizer(
+    tmp_path,
+    *,
+    agent_id: str,
+    account_fingerprint: str,
+    eligible: bool = True,
+):
+    deployment_registry = CustomerDeploymentRegistry(
+        tmp_path / "legacy-deployments.json"
+    )
+    deployment_registry.initialize_empty()
+
+    deployment = CustomerDeployment(
+        customer_id="legacy-customer-001",
+        deployment_id="legacy-deployment-001",
+        agent_id=agent_id,
+    )
+    deployment_registry.register(deployment)
+
+    compatibility_registry = (
+        CustomerLegacyExecutionCompatibilityRegistry(
+            tmp_path / "legacy-compatibility.json",
+            deployment_registry=deployment_registry,
+        )
+    )
+    compatibility_registry.initialize_empty()
+
+    if eligible:
+        compatibility_registry.register(
+            CustomerLegacyExecutionCompatibilityRecord(
+                deployment_id=deployment.deployment_id,
+                setup_activation_id="setup-activation-legacy-001",
+                recovery_request_id=(
+                    "setup-continuity-recovery:"
+                    "legacy-deployment-001"
+                ),
+            )
+        )
+
+    entitlement_registry = CustomerDeploymentEntitlementRegistry(
+        tmp_path / "legacy-entitlements.json",
+        deployment_registry=deployment_registry,
+    )
+    entitlement_registry.initialize_empty()
+    entitlement_registry.activate(
+        deployment_id=deployment.deployment_id,
+    )
+
+    binding_store = TrustedAgentAccountBindingStore(
+        tmp_path / "legacy-bindings.json"
+    )
+    binding_store.initialize_empty()
+    binding_store.bind(
+        agent_id=agent_id,
+        account_fingerprint=account_fingerprint,
+    )
+
+    return CustomerLegacyDeploymentExecutionAuthorizer(
+        deployment_registry=deployment_registry,
+        compatibility_registry=compatibility_registry,
+        entitlement_authorizer=(
+            CustomerDeploymentEntitlementAuthorizer(
+                entitlement_registry=entitlement_registry,
+            )
+        ),
+        account_binding_guard=(
+            TrustedAgentAccountBindingGuard(
+                binding_store
+            )
+        ),
+    )
 
 def test_existing_normal_commercial_authority_is_preserved(
     tmp_path,
@@ -305,3 +423,180 @@ def test_upgrade_required_remains_fail_closed(
             agent_id="agent-001",
             account_fingerprint="Broker-Pro:1001",
         )
+
+
+
+def test_missing_commercial_binding_uses_eligible_legacy_authority(
+    tmp_path,
+) -> None:
+    legacy_authorizer = _ready_legacy_authorizer(
+        tmp_path,
+        agent_id="legacy-agent-001",
+        account_fingerprint="Broker-Legacy:1001",
+    )
+
+    (
+        _,
+        _,
+        _,
+        _,
+        _,
+        _,
+        service,
+    ) = _ready_stack(
+        tmp_path,
+        legacy_execution_authorizer=legacy_authorizer,
+    )
+
+    assert (
+        service.authorize(
+            agent_id="legacy-agent-001",
+            account_fingerprint="Broker-Legacy:1001",
+        )
+        is None
+    )
+
+
+def test_missing_commercial_binding_without_legacy_eligibility_fails_closed(
+    tmp_path,
+) -> None:
+    legacy_authorizer = _ready_legacy_authorizer(
+        tmp_path,
+        agent_id="legacy-agent-001",
+        account_fingerprint="Broker-Legacy:1001",
+        eligible=False,
+    )
+
+    (
+        _,
+        _,
+        _,
+        _,
+        _,
+        _,
+        service,
+    ) = _ready_stack(
+        tmp_path,
+        legacy_execution_authorizer=legacy_authorizer,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="not eligible for legacy execution compatibility",
+    ):
+        service.authorize(
+            agent_id="legacy-agent-001",
+            account_fingerprint="Broker-Legacy:1001",
+        )
+
+
+def test_commercial_failure_does_not_fallback_to_eligible_legacy_authority(
+    tmp_path,
+) -> None:
+    legacy_authorizer = _ready_legacy_authorizer(
+        tmp_path,
+        agent_id="agent-001",
+        account_fingerprint="Broker-Pro:1001",
+    )
+
+    service, funding_store = _seed_authorized_stack(
+        tmp_path,
+        legacy_execution_authorizer=legacy_authorizer,
+    )
+
+    funding_store.save(
+        CustomerCommercialExternalFundingObservationRecord(
+            cycle_id="cycle-001",
+            account_fingerprint="Broker-Pro:1001",
+            deal_ticket=9001,
+            funding_kind="external_deposit",
+            amount=Decimal("100"),
+        )
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Commercial upgrade required",
+    ):
+        service.authorize(
+            agent_id="agent-001",
+            account_fingerprint="Broker-Pro:1001",
+        )
+
+
+
+def test_constructor_rejects_invalid_legacy_execution_authorizer(
+    tmp_path,
+) -> None:
+    (
+        _,
+        binding_store,
+        _,
+        _,
+        _,
+        provider,
+        _,
+    ) = _ready_stack(tmp_path)
+
+    with pytest.raises(
+        TypeError,
+        match="legacy_execution_authorizer",
+    ):
+        CustomerCommercialExecutionAuthorizationService(
+            deployment_binding_store=binding_store,
+            capacity_decision_provider=provider,
+            new_exposure_authorizer=(
+                CustomerCommercialNewExposureAuthorizationService()
+            ),
+            legacy_execution_authorizer=object(),
+        )
+
+
+def test_legacy_fallback_does_not_create_commercial_binding(
+    tmp_path,
+) -> None:
+    agent_id = "legacy-agent-002"
+    account_fingerprint = "Broker-Legacy:2002"
+
+    legacy_authorizer = _ready_legacy_authorizer(
+        tmp_path,
+        agent_id=agent_id,
+        account_fingerprint=account_fingerprint,
+    )
+
+    (
+        _,
+        binding_store,
+        _,
+        _,
+        _,
+        _,
+        service,
+    ) = _ready_stack(
+        tmp_path,
+        legacy_execution_authorizer=legacy_authorizer,
+    )
+
+    assert (
+        binding_store.get_by_agent_account(
+            agent_id=agent_id,
+            account_fingerprint=account_fingerprint,
+        )
+        is None
+    )
+
+    assert (
+        service.authorize(
+            agent_id=agent_id,
+            account_fingerprint=account_fingerprint,
+        )
+        is None
+    )
+
+    assert (
+        binding_store.get_by_agent_account(
+            agent_id=agent_id,
+            account_fingerprint=account_fingerprint,
+        )
+        is None
+    )

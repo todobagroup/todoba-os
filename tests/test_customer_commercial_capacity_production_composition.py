@@ -64,7 +64,7 @@ def _function_source(
     return function_source
 
 
-def test_execution_mission_service_has_one_time_commercial_gate_configuration():
+def test_execution_mission_service_has_one_time_commercial_authorization_configuration():
     source = _normalized_source(
         MISSION_SERVICE_PATH
     )
@@ -87,7 +87,7 @@ def test_execution_mission_service_has_one_time_commercial_gate_configuration():
             for node in cls.body
             if isinstance(node, ast.FunctionDef)
             and node.name
-            == "configure_commercial_new_exposure_gate"
+            == "configure_commercial_execution_authorization"
         ),
         None,
     )
@@ -102,11 +102,20 @@ def test_execution_mission_service_has_one_time_commercial_gate_configuration():
         )
     }
 
-    assert {
-        "commercial_deployment_binding_store",
-        "commercial_capacity_decision_provider",
-        "commercial_new_exposure_authorizer",
-    }.issubset(argument_names)
+    assert "commercial_execution_authorizer" in argument_names
+
+    assert (
+        "commercial_deployment_binding_store"
+        not in argument_names
+    )
+    assert (
+        "commercial_capacity_decision_provider"
+        not in argument_names
+    )
+    assert (
+        "commercial_new_exposure_authorizer"
+        not in argument_names
+    )
 
     method_source = ast.get_source_segment(
         source,
@@ -114,19 +123,7 @@ def test_execution_mission_service_has_one_time_commercial_gate_configuration():
     )
 
     assert method_source is not None
-
-    assert (
-        "commercial_deployment_binding_store"
-        in method_source
-    )
-    assert (
-        "commercial_capacity_decision_provider"
-        in method_source
-    )
-    assert (
-        "commercial_new_exposure_authorizer"
-        in method_source
-    )
+    assert "commercial_execution_authorizer" in method_source
 
     # Configuration must be one-time, not silently replaceable.
     assert (
@@ -166,6 +163,7 @@ def test_capacity_runtime_composition_opens_existing_authority_only():
         "CustomerCommercialCapacityDecisionService",
         "CustomerCommercialCapacityDecisionProvider",
         "CustomerCommercialNewExposureAuthorizationService",
+        "CustomerCommercialExecutionAuthorizationService",
     ):
         assert owner in source
 
@@ -227,17 +225,28 @@ def test_capacity_runtime_configures_existing_execution_mission_service():
     )
 
     assert (
-        "execution_mission_service"
-        ".configure_commercial_new_exposure_gate("
+        "CustomerCommercialExecutionAuthorizationService("
         in source
     )
 
-    for keyword in (
-        "commercial_deployment_binding_store=",
-        "commercial_capacity_decision_provider=",
-        "commercial_new_exposure_authorizer=",
+    assert (
+        "execution_mission_service"
+        ".configure_commercial_execution_authorization("
+        in source
+    )
+
+    assert "commercial_execution_authorizer=" in source
+
+    for forbidden in (
+        ".configure_commercial_new_exposure_gate(",
+        "commercial_deployment_binding_store="
+        "commercial_deployment_binding_store,",
+        "commercial_capacity_decision_provider="
+        "commercial_capacity_decision_provider,",
+        "commercial_new_exposure_authorizer="
+        "commercial_new_exposure_authorizer,",
     ):
-        assert keyword in source
+        assert forbidden not in source
 
 
 def test_lifespan_composes_capacity_after_payment_and_before_mission_recovery():

@@ -126,6 +126,9 @@ from backend.commercial.customer_commercial_external_funding_convergence_service
 from backend.commercial.customer_commercial_new_exposure_authorization_service import (
     CustomerCommercialNewExposureAuthorizationService,
 )
+from backend.commercial.customer_commercial_execution_authorization_service import (
+    CustomerCommercialExecutionAuthorizationService,
+)
 from backend.commercial.customer_payment_intent_service import (
     CustomerPaymentIntentStore,
     CustomerPaymentIntentService,
@@ -1050,15 +1053,23 @@ def _compose_customer_commercial_capacity_runtime(
         CustomerCommercialNewExposureAuthorizationService()
     )
 
-    execution_mission_service.configure_commercial_new_exposure_gate(
-        commercial_deployment_binding_store=(
-            commercial_deployment_binding_store
-        ),
-        commercial_capacity_decision_provider=(
-            commercial_capacity_decision_provider
-        ),
-        commercial_new_exposure_authorizer=(
-            commercial_new_exposure_authorizer
+    commercial_execution_authorizer = (
+        CustomerCommercialExecutionAuthorizationService(
+            deployment_binding_store=(
+                commercial_deployment_binding_store
+            ),
+            capacity_decision_provider=(
+                commercial_capacity_decision_provider
+            ),
+            new_exposure_authorizer=(
+                commercial_new_exposure_authorizer
+            ),
+        )
+    )
+
+    execution_mission_service.configure_commercial_execution_authorization(
+        commercial_execution_authorizer=(
+            commercial_execution_authorizer
         ),
     )
 

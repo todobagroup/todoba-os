@@ -52,14 +52,8 @@ from backend.trading.execution.security_sequence_assignment_service import (
     SecuritySequenceAssignmentService,
 )
 
-from backend.commercial.customer_commercial_capacity_decision_provider import (
-    CustomerCommercialCapacityDecisionProvider,
-)
-from backend.commercial.customer_commercial_deployment_binding import (
-    CustomerCommercialDeploymentBindingStore,
-)
-from backend.commercial.customer_commercial_new_exposure_authorization_service import (
-    CustomerCommercialNewExposureAuthorizationService,
+from backend.commercial.customer_commercial_execution_authorization_service import (
+    CustomerCommercialExecutionAuthorizationService,
 )
 
 
@@ -86,14 +80,8 @@ class ExecutionMissionService:
         security_sequence_assignment_service: Optional[
             SecuritySequenceAssignmentService
         ] = None,
-        commercial_deployment_binding_store: Optional[
-            CustomerCommercialDeploymentBindingStore
-        ] = None,
-        commercial_capacity_decision_provider: Optional[
-            CustomerCommercialCapacityDecisionProvider
-        ] = None,
-        commercial_new_exposure_authorizer: Optional[
-            CustomerCommercialNewExposureAuthorizationService
+        commercial_execution_authorizer: Optional[
+            CustomerCommercialExecutionAuthorizationService
         ] = None,
         commercial_gate_required: bool = False,
     ) -> None:
@@ -175,71 +163,22 @@ class ExecutionMissionService:
             security_sequence_assignment_service
         )
 
-        commercial_gate_dependencies = (
-            commercial_deployment_binding_store,
-            commercial_capacity_decision_provider,
-            commercial_new_exposure_authorizer,
-        )
-
-        provided_commercial_gate_dependencies = sum(
-            dependency is not None
-            for dependency in commercial_gate_dependencies
-        )
-
-        if provided_commercial_gate_dependencies not in (
-            0,
-            len(commercial_gate_dependencies),
-        ):
-            raise ValueError(
-                "commercial new-exposure gate dependencies "
-                "must be provided together."
-            )
-
         if (
-            commercial_deployment_binding_store is not None
+            commercial_execution_authorizer is not None
             and not isinstance(
-                commercial_deployment_binding_store,
-                CustomerCommercialDeploymentBindingStore,
+                commercial_execution_authorizer,
+                CustomerCommercialExecutionAuthorizationService,
             )
         ):
             raise TypeError(
-                "commercial_deployment_binding_store must be "
-                "CustomerCommercialDeploymentBindingStore."
+                "commercial_execution_authorizer must be "
+                "CustomerCommercialExecutionAuthorizationService."
             )
 
-        if (
-            commercial_capacity_decision_provider is not None
-            and not isinstance(
-                commercial_capacity_decision_provider,
-                CustomerCommercialCapacityDecisionProvider,
-            )
-        ):
-            raise TypeError(
-                "commercial_capacity_decision_provider must be "
-                "CustomerCommercialCapacityDecisionProvider."
-            )
+        self.commercial_execution_authorizer = (
+            commercial_execution_authorizer
+        )
 
-        if (
-            commercial_new_exposure_authorizer is not None
-            and not isinstance(
-                commercial_new_exposure_authorizer,
-                CustomerCommercialNewExposureAuthorizationService,
-            )
-        ):
-            raise TypeError(
-                "commercial_new_exposure_authorizer must be "
-                "CustomerCommercialNewExposureAuthorizationService."
-            )
-
-        self.commercial_deployment_binding_store = (
-            commercial_deployment_binding_store
-        )
-        self.commercial_capacity_decision_provider = (
-            commercial_capacity_decision_provider
-        )
-        self.commercial_new_exposure_authorizer = (
-            commercial_new_exposure_authorizer
-        )
         self.commercial_gate_required = (
             commercial_gate_required
         )
@@ -279,67 +218,30 @@ class ExecutionMissionService:
             security_sequence=security_sequence,
         )
 
-    def configure_commercial_new_exposure_gate(
+    def configure_commercial_execution_authorization(
         self,
         *,
-        commercial_deployment_binding_store: (
-            CustomerCommercialDeploymentBindingStore
-        ),
-        commercial_capacity_decision_provider: (
-            CustomerCommercialCapacityDecisionProvider
-        ),
-        commercial_new_exposure_authorizer: (
-            CustomerCommercialNewExposureAuthorizationService
+        commercial_execution_authorizer: (
+            CustomerCommercialExecutionAuthorizationService
         ),
     ) -> None:
-        if (
-            self.commercial_deployment_binding_store
-            is not None
-            or self.commercial_capacity_decision_provider
-            is not None
-            or self.commercial_new_exposure_authorizer
-            is not None
-        ):
+        if self.commercial_execution_authorizer is not None:
             raise RuntimeError(
-                "Commercial new-exposure gate "
+                "Commercial execution authorization "
                 "is already configured."
             )
 
         if not isinstance(
-            commercial_deployment_binding_store,
-            CustomerCommercialDeploymentBindingStore,
+            commercial_execution_authorizer,
+            CustomerCommercialExecutionAuthorizationService,
         ):
             raise TypeError(
-                "commercial_deployment_binding_store must be "
-                "CustomerCommercialDeploymentBindingStore."
+                "commercial_execution_authorizer must be "
+                "CustomerCommercialExecutionAuthorizationService."
             )
 
-        if not isinstance(
-            commercial_capacity_decision_provider,
-            CustomerCommercialCapacityDecisionProvider,
-        ):
-            raise TypeError(
-                "commercial_capacity_decision_provider must be "
-                "CustomerCommercialCapacityDecisionProvider."
-            )
-
-        if not isinstance(
-            commercial_new_exposure_authorizer,
-            CustomerCommercialNewExposureAuthorizationService,
-        ):
-            raise TypeError(
-                "commercial_new_exposure_authorizer must be "
-                "CustomerCommercialNewExposureAuthorizationService."
-            )
-
-        self.commercial_deployment_binding_store = (
-            commercial_deployment_binding_store
-        )
-        self.commercial_capacity_decision_provider = (
-            commercial_capacity_decision_provider
-        )
-        self.commercial_new_exposure_authorizer = (
-            commercial_new_exposure_authorizer
+        self.commercial_execution_authorizer = (
+            commercial_execution_authorizer
         )
 
     def create_mission(
@@ -399,43 +301,20 @@ class ExecutionMissionService:
 
         if (
             self.commercial_gate_required
-            and self.commercial_deployment_binding_store
+            and self.commercial_execution_authorizer
             is None
         ):
             raise RuntimeError(
-                "Commercial new-exposure gate "
+                "Commercial execution authorization "
                 "is required but not configured."
             )
 
-        if (
-            self.commercial_deployment_binding_store
-            is not None
-        ):
-            binding = (
-                self.commercial_deployment_binding_store
-                .get_by_agent_account(
-                    agent_id=final_mission.agent_id,
-                    account_fingerprint=(
-                        final_mission.account_fingerprint
-                    ),
-                )
-            )
-
-            if binding is None:
-                raise RuntimeError(
-                    "Execution mission commercial deployment "
-                    "binding could not be resolved."
-                )
-
-            capacity_decision = (
-                self.commercial_capacity_decision_provider
-                .provide(
-                    deployment_id=binding.deployment_id,
-                )
-            )
-
-            self.commercial_new_exposure_authorizer.authorize(
-                capacity_decision=capacity_decision,
+        if self.commercial_execution_authorizer is not None:
+            self.commercial_execution_authorizer.authorize(
+                agent_id=final_mission.agent_id,
+                account_fingerprint=(
+                    final_mission.account_fingerprint
+                ),
             )
 
         stored_mission = self.repository.save(

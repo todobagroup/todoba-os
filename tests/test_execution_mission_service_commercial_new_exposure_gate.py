@@ -1,4 +1,4 @@
-import ast
+﻿import ast
 import inspect
 from pathlib import Path
 
@@ -35,26 +35,19 @@ def _service_source():
     return text, owner
 
 
-def test_constructor_exposes_exact_optional_commercial_gate_dependencies():
+def test_constructor_exposes_one_optional_commercial_authorization_boundary():
     parameters = inspect.signature(
         ExecutionMissionService.__init__
     ).parameters
 
-    assert (
-        "commercial_deployment_binding_store"
-        in parameters
-    )
-    assert (
-        "commercial_capacity_decision_provider"
-        in parameters
-    )
-    assert (
-        "commercial_new_exposure_authorizer"
-        in parameters
-    )
+    assert "commercial_execution_authorizer" in parameters
+
+    assert "commercial_deployment_binding_store" not in parameters
+    assert "commercial_capacity_decision_provider" not in parameters
+    assert "commercial_new_exposure_authorizer" not in parameters
 
 
-def test_create_mission_resolves_commercial_authority_from_mission_identity():
+def test_create_mission_delegates_commercial_authority_from_mission_identity():
     text, owner = _service_source()
 
     method = next(
@@ -71,14 +64,14 @@ def test_create_mission_resolves_commercial_authority_from_mission_identity():
 
     assert source is not None
 
+    assert "commercial_execution_authorizer" in source
+    assert ".authorize(" in source
     assert "final_mission.agent_id" in source
     assert "final_mission.account_fingerprint" in source
-    assert "get_by_agent_account" in source
-    assert "commercial_capacity_decision_provider" in source
-    assert ".provide(" in source
-    assert "binding.deployment_id" in source
-    assert "commercial_new_exposure_authorizer" in source
-    assert ".authorize(" in source
+
+    assert "get_by_agent_account" not in source
+    assert "commercial_capacity_decision_provider" not in source
+    assert "commercial_new_exposure_authorizer" not in source
 
 
 def test_first_issuance_authorization_precedes_first_repository_mutation():
@@ -99,7 +92,7 @@ def test_first_issuance_authorization_precedes_first_repository_mutation():
     assert source is not None
 
     authorize_index = source.rfind(
-        "commercial_new_exposure_authorizer"
+        "commercial_execution_authorizer"
     )
 
     first_issuance_save_index = source.rfind(
@@ -133,12 +126,11 @@ def test_existing_record_branch_remains_before_commercial_authorization():
     )
 
     authorization_index = source.rfind(
-        "commercial_new_exposure_authorizer"
+        "commercial_execution_authorizer"
     )
 
     assert existing_branch_index != -1
     assert authorization_index != -1
-
     assert existing_branch_index < authorization_index
 
 

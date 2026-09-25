@@ -367,3 +367,146 @@ def test_production_execution_mission_service_requires_commercial_gate():
         < required_index
         < save_index
     )
+
+
+
+def test_main_declares_legacy_execution_compatibility_storage_path():
+    source = _normalized_source(
+        MAIN_PATH
+    )
+
+    assert (
+        "customer_legacy_execution_compatibility.json"
+        in source
+    )
+
+    assert (
+        "CUSTOMER_LEGACY_EXECUTION_COMPATIBILITY_STORAGE_PATH"
+        in source
+    )
+
+
+def test_capacity_runtime_composes_legacy_execution_compatibility_authority():
+    source = _function_source(
+        path=MAIN_PATH,
+        function_name=(
+            "_compose_customer_commercial_capacity_runtime"
+        ),
+    )
+
+    for owner in (
+        "CustomerLegacyExecutionCompatibilityRegistry",
+        "CustomerLegacyDeploymentExecutionAuthorizer",
+    ):
+        assert owner in source
+
+    assert (
+        "CUSTOMER_LEGACY_EXECUTION_COMPATIBILITY_STORAGE_PATH"
+        in source
+    )
+
+    assert (
+        "legacy_execution_compatibility_registry"
+        in source
+    )
+
+    assert (
+        "customer_deployment_registry"
+        in source
+    )
+
+    assert (
+        "customer_deployment_entitlement_authorizer"
+        in source
+    )
+
+    assert (
+        "trusted_agent_account_binding_guard"
+        in source
+    )
+
+    for dependency in (
+        "deployment_registry=(",
+        "compatibility_registry=(",
+        "entitlement_authorizer=(",
+        "account_binding_guard=(",
+    ):
+        assert dependency in source
+
+    assert (
+        "legacy_execution_authorizer=("
+        in source
+    )
+
+
+def test_capacity_runtime_requires_existing_legacy_compatibility_authority():
+    source = _function_source(
+        path=MAIN_PATH,
+        function_name=(
+            "_compose_customer_commercial_capacity_runtime"
+        ),
+    )
+
+    assert (
+        "CUSTOMER_LEGACY_EXECUTION_COMPATIBILITY_STORAGE_PATH"
+        in source
+    )
+
+    assert (
+        "Customer legacy execution compatibility registry"
+        in source
+    )
+
+    assert (
+        ".is_file()"
+        in source
+    )
+
+    assert (
+        "legacy_execution_compatibility_registry.is_ready()"
+        in source
+    )
+
+
+def test_capacity_runtime_never_provisions_or_enrolls_legacy_compatibility():
+    source = _function_source(
+        path=MAIN_PATH,
+        function_name=(
+            "_compose_customer_commercial_capacity_runtime"
+        ),
+    )
+
+    # Runtime consumes existing authorities only.
+    assert "initialize_empty" not in source
+
+    assert (
+        "legacy_execution_compatibility_registry.register("
+        not in source
+    )
+
+    assert (
+        "CustomerLegacyExecutionCompatibilityRecord("
+        not in source
+    )
+
+    assert (
+        "CustomerLegacyExecutionCompatibilityRecoveryService"
+        not in source
+    )
+
+    # Existing production authorities must be reused,
+    # never duplicated inside capacity composition.
+    assert (
+        "CustomerDeploymentRegistry("
+        not in source
+    )
+
+    assert (
+        "CustomerDeploymentEntitlementAuthorizer("
+        not in source
+    )
+
+    assert (
+        "TrustedAgentAccountBindingGuard("
+        not in source
+    )

@@ -129,6 +129,12 @@ from backend.commercial.customer_commercial_new_exposure_authorization_service i
 from backend.commercial.customer_commercial_execution_authorization_service import (
     CustomerCommercialExecutionAuthorizationService,
 )
+from backend.commercial.customer_legacy_execution_compatibility_registry import (
+    CustomerLegacyExecutionCompatibilityRegistry,
+)
+from backend.commercial.customer_legacy_deployment_execution_authorizer import (
+    CustomerLegacyDeploymentExecutionAuthorizer,
+)
 from backend.commercial.customer_payment_intent_service import (
     CustomerPaymentIntentStore,
     CustomerPaymentIntentService,
@@ -649,6 +655,12 @@ CUSTOMER_COMMERCIAL_ENTITLEMENT_STORAGE_PATH = (
     / "customer_commercial_entitlements.json"
 )
 
+CUSTOMER_LEGACY_EXECUTION_COMPATIBILITY_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_legacy_execution_compatibility.json"
+)
+
 CUSTOMER_COMMERCIAL_DEPLOYMENT_BINDING_STORAGE_PATH = (
     TODOBA_CONTROL_PLANE_DATA_ROOT
     / "commercial"
@@ -936,6 +948,10 @@ def _compose_customer_commercial_capacity_runtime(
 
     required_paths = (
         (
+            "Customer legacy execution compatibility registry",
+            CUSTOMER_LEGACY_EXECUTION_COMPATIBILITY_STORAGE_PATH,
+        ),
+        (
             "Customer commercial deployment binding store",
             CUSTOMER_COMMERCIAL_DEPLOYMENT_BINDING_STORAGE_PATH,
         ),
@@ -963,6 +979,21 @@ def _compose_customer_commercial_capacity_runtime(
                 f"{owner_name} is not provisioned: "
                 f"{storage_path}"
             )
+
+    legacy_execution_compatibility_registry = (
+        CustomerLegacyExecutionCompatibilityRegistry(
+            CUSTOMER_LEGACY_EXECUTION_COMPATIBILITY_STORAGE_PATH,
+            deployment_registry=(
+                customer_deployment_registry
+            ),
+        )
+    )
+
+    if not legacy_execution_compatibility_registry.is_ready():
+        raise RuntimeError(
+            "Customer legacy execution compatibility registry "
+            "did not become ready."
+        )
 
     commercial_deployment_binding_store = (
         CustomerCommercialDeploymentBindingStore(
@@ -1053,6 +1084,23 @@ def _compose_customer_commercial_capacity_runtime(
         CustomerCommercialNewExposureAuthorizationService()
     )
 
+    legacy_execution_authorizer = (
+        CustomerLegacyDeploymentExecutionAuthorizer(
+            deployment_registry=(
+                customer_deployment_registry
+            ),
+            compatibility_registry=(
+                legacy_execution_compatibility_registry
+            ),
+            entitlement_authorizer=(
+                customer_deployment_entitlement_authorizer
+            ),
+            account_binding_guard=(
+                trusted_agent_account_binding_guard
+            ),
+        )
+    )
+
     commercial_execution_authorizer = (
         CustomerCommercialExecutionAuthorizationService(
             deployment_binding_store=(
@@ -1063,6 +1111,9 @@ def _compose_customer_commercial_capacity_runtime(
             ),
             new_exposure_authorizer=(
                 commercial_new_exposure_authorizer
+            ),
+            legacy_execution_authorizer=(
+                legacy_execution_authorizer
             ),
         )
     )

@@ -165,6 +165,7 @@ class FakeRoot(
             None
         )
         self.window_title = None
+        self.window_icon = None
         self.window_geometry = None
         self.resizable_value = None
         self.mainloop_called = False
@@ -176,6 +177,12 @@ class FakeRoot(
         value,
     ):
         self.window_title = value
+
+    def iconbitmap(
+        self,
+        value,
+    ):
+        self.window_icon = value
 
     def geometry(
         self,
@@ -364,6 +371,22 @@ def test_locked_customer_welcome_copy() -> None:
         == (
             'Set up TODOBA Trading AI for your MetaTrader 5 account.'
         )
+    )
+
+
+def test_build_window_applies_todoba_icon(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    _, root = _build(
+        tmp_path,
+        monkeypatch,
+    )
+
+    assert root.window_icon is not None
+    assert (
+        Path(root.window_icon).name
+        == "TODOBA_Trading.ico"
     )
 
 
@@ -1029,7 +1052,7 @@ def test_owner_is_presentation_only() -> None:
         assert token not in source
 
 
-def test_recoverable_setup_error_uses_retry(
+def test_recoverable_setup_error_restores_install_action(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -1076,7 +1099,7 @@ def test_recoverable_setup_error_uses_retry(
         shell._install_button.cget(
             "text"
         )
-        == "Retry"
+        == "Install"
     )
 
     assert (

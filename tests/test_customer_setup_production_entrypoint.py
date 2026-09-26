@@ -1235,7 +1235,12 @@ def test_gui_source_contains_locked_single_code_customer_copy(
     )
 
     assert (
-        'text="Activation Code"'
+        'activation_label_text = ('
+        in source
+    )
+
+    assert (
+        '"Activation Code"'
         in source
     )
 
@@ -1351,6 +1356,7 @@ def test_production_entrypoint_has_expected_top_level_functions(
     }
 
     assert top_level_functions == {
+        "_runtime_resource_path",
         "_resolve_roaming_appdata_path",
         "run_production_customer_setup",
         "main",
@@ -1373,3 +1379,95 @@ def test_bootstrap_window_public_surface_is_minimal(
         "build_window",
         "run",
     }
+
+
+def test_packaged_resource_resolution_is_explicit() -> None:
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "customer_setup.py"
+    )
+
+    source = path.read_text(
+        encoding="utf-8-sig"
+    )
+
+    assert "import sys" in source
+    assert "_runtime_resource_path" in source
+    assert '"frozen"' in source
+    assert '"_MEIPASS"' in source
+    assert "getattr(" in source
+
+    assert (
+        '_runtime_resource_path('
+        in source
+    )
+
+    assert (
+        '"customer_setup_runtime_final.png"'
+        in source
+    )
+
+    assert (
+        '"TODOBA_Trading.ico"'
+        in source
+    )
+
+
+def test_final_customer_setup_artwork_is_locked() -> None:
+    import hashlib
+    import struct
+
+    repository_root = Path(__file__).resolve().parents[1]
+
+    artwork = (
+        repository_root
+        / "assets"
+        / "customer_setup_runtime_final.png"
+    )
+
+    assert artwork.is_file()
+
+    payload = artwork.read_bytes()
+
+    assert (
+        hashlib.sha256(payload).hexdigest().upper()
+        == "F884C5F8A1C9524D67644A23EFD9199B4701BC15E5761E54CAF2D46E3C223011"
+    )
+
+    assert payload[:8] == b"\x89PNG\r\n\x1a\n"
+
+    assert payload[12:16] == b"IHDR"
+
+    width, height = struct.unpack(
+        ">II",
+        payload[16:24],
+    )
+
+    assert (width, height) == (922, 542)
+
+
+def test_production_entrypoint_uses_locked_final_artwork() -> None:
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "customer_setup.py"
+    )
+
+    source = path.read_text(
+        encoding="utf-8-sig"
+    )
+
+    assert "customer_setup_runtime_final.png" in source
+
+    assert "_WINDOW_WIDTH = 922" in source
+
+    assert "_WINDOW_HEIGHT = 542" in source
+
+    # The temporary V2 wireframe/city renderer must be gone.
+    assert "visual.create_oval" not in source
+    assert "buildings = (" not in source
+    assert ".zoom(" not in source
+    assert ".subsample(" not in source
+    assert "_ARTWORK_CROP_TOP" not in source
+    assert "TODOBA_Trading.ico" in source

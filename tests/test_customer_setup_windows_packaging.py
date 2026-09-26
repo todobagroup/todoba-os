@@ -37,6 +37,109 @@ def test_product_identity_is_locked(
     )
 
 
+
+def test_runtime_artwork_identity_is_locked(
+) -> None:
+    assert (
+        build_module._ARTWORK_RELATIVE_PATH
+        == (
+            Path("assets")
+            / "customer_setup_runtime_final.png"
+        )
+    )
+
+    assert (
+        build_module._artwork_path().resolve()
+        == (
+            Path(__file__)
+            .resolve()
+            .parents[1]
+            / "assets"
+            / "customer_setup_runtime_final.png"
+        ).resolve()
+    )
+
+
+def test_build_command_packages_runtime_artwork(
+) -> None:
+    command = (
+        build_module._build_command()
+    )
+
+    add_data_index = (
+        command.index(
+            "--add-data"
+        )
+    )
+
+    configured = (
+        command[
+            add_data_index + 1
+        ]
+    )
+
+    expected = (
+        f"{build_module._artwork_path()};assets"
+    )
+
+    assert configured == expected
+
+    assert (
+        command.count(
+            "--add-data"
+        )
+        == 2
+    )
+
+
+
+def test_build_command_packages_runtime_icon(
+) -> None:
+    command = (
+        build_module._build_command()
+    )
+
+    configured_data = {
+        command[index + 1]
+        for index, value
+        in enumerate(command)
+        if value == "--add-data"
+    }
+
+    assert (
+        f"{build_module._icon_path()};assets"
+        in configured_data
+    )
+
+
+def test_build_environment_requires_runtime_artwork(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    missing = (
+        tmp_path
+        / "customer_setup_runtime_final.png"
+    )
+
+    monkeypatch.setattr(
+        build_module,
+        "_read_pyinstaller_version",
+        lambda: "6.22.2",
+    )
+
+    monkeypatch.setattr(
+        build_module,
+        "_artwork_path",
+        lambda: missing,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="runtime artwork",
+    ):
+        build_module._validate_build_environment()
+
+
 def test_build_environment_accepts_validated_pyinstaller(
     monkeypatch,
 ) -> None:

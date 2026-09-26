@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+import sys
 import tkinter as tk
 from tkinter import messagebox
 
@@ -46,13 +47,62 @@ from backend.commercial.customer_setup_access_code_http_client import (
 WINDOW_TITLE = "TODOBA Trading AI Setup"
 WELCOME_HEADLINE = "Welcome to TODOBA Trading"
 
-_WINDOW_WIDTH = 640
-_WINDOW_HEIGHT = 440
+_WINDOW_WIDTH = 922
+_WINDOW_HEIGHT = 542
+
 
 _GENERIC_STARTUP_ERROR = (
     "TODOBA Setup could not start. "
     "Please contact TODOBA support."
 )
+
+
+def _runtime_resource_path(
+    *parts: str,
+) -> Path:
+    """
+    Resolve a packaged runtime resource.
+
+    Source execution resolves from the repository root.
+    PyInstaller execution resolves from the frozen bundle root.
+    """
+
+    if getattr(
+        sys,
+        "frozen",
+        False,
+    ):
+        bundle_root = getattr(
+            sys,
+            "_MEIPASS",
+            None,
+        )
+
+        if not isinstance(
+            bundle_root,
+            str,
+        ) or not bundle_root.strip():
+            raise RuntimeError(
+                "TODOBA Setup packaged resource root "
+                "is unavailable."
+            )
+
+        return (
+            Path(bundle_root)
+            .resolve()
+            .joinpath(
+                *parts
+            )
+        )
+
+    return (
+        Path(__file__)
+        .resolve()
+        .parents[1]
+        .joinpath(
+            *parts
+        )
+    )
 
 
 class CustomerSetupBootstrapWindow:
@@ -95,201 +145,257 @@ class CustomerSetupBootstrapWindow:
         self._start_button = None
 
     def build_window(
-            self,
-        ) -> None:
-            root = tk.Tk()
+        self,
+    ):
+        root = tk.Tk()
 
-            self._root = root
+        self._root = root
 
-            root.title(
-                WINDOW_TITLE
+        root.title(
+            WINDOW_TITLE
+        )
+
+        root.geometry(
+            f"{_WINDOW_WIDTH}x{_WINDOW_HEIGHT}"
+        )
+
+        root.resizable(
+            False,
+            False,
+        )
+
+        root.configure(
+            bg="#FFFFFF"
+        )
+
+        canvas = tk.Canvas(
+            root,
+            width=_WINDOW_WIDTH,
+            height=_WINDOW_HEIGHT,
+            highlightthickness=0,
+            bd=0,
+            bg="#FFFFFF",
+        )
+        canvas.pack(
+            fill="both",
+            expand=False,
+        )
+
+        artwork_path = (
+            _runtime_resource_path(
+                "assets",
+                "customer_setup_runtime_final.png",
+            )
+        )
+
+        icon_path = (
+            _runtime_resource_path(
+                "assets",
+                "TODOBA_Trading.ico",
+            )
+        )
+
+        if not artwork_path.is_file():
+            raise RuntimeError(
+                "TODOBA Setup runtime artwork is unavailable."
             )
 
-            root.geometry(
-                f"{_WINDOW_WIDTH}x{_WINDOW_HEIGHT}"
+        if not icon_path.is_file():
+            raise RuntimeError(
+                "TODOBA Setup icon is unavailable."
             )
 
-            root.resizable(
-                False,
-                False,
+        root.iconbitmap(
+            str(
+                icon_path
+            )
+        )
+
+        artwork_image = tk.PhotoImage(
+            file=str(
+                artwork_path
+            )
+        )
+
+        if (
+            artwork_image.width()
+            != _WINDOW_WIDTH
+            or artwork_image.height()
+            != _WINDOW_HEIGHT
+        ):
+            raise RuntimeError(
+                "TODOBA Setup runtime artwork dimensions "
+                "do not match the locked window."
             )
 
-            root.columnconfigure(
-                0,
-                weight=1,
-            )
+        # Pixel-perfect runtime:
+        # no zoom, no subsample, no runtime crop.
+        root._todoba_setup_artwork = (
+            artwork_image
+        )
 
-            content = tk.Frame(
-                root,
-                padx=42,
-                pady=36,
-            )
+        canvas.create_image(
+            0,
+            0,
+            anchor="nw",
+            image=artwork_image,
+        )
 
-            content.grid(
-                row=0,
-                column=0,
-                sticky="nsew",
-            )
+        # The approved artwork owns all non-interactive typography.
+        # Only the input field and Start Setup button are replaced
+        # by real widgets.
 
-            content.columnconfigure(
-                0,
-                weight=1,
-            )
+        canvas.create_rectangle(
+            36,
+            244,
+            410,
+            280,
+            fill="#FFFFFF",
+            outline="#FFFFFF",
+        )
 
-            headline = tk.Label(
-                content,
-                text=WELCOME_HEADLINE,
-                font=(
-                    "Segoe UI",
-                    20,
-                    "bold",
-                ),
-            )
+        canvas.create_rectangle(
+            36,
+            285,
+            240,
+            327,
+            fill="#FFFFFF",
+            outline="#FFFFFF",
+        )
 
-            headline.grid(
-                row=0,
-                column=0,
-                sticky="w",
-                pady=(
-                    0,
-                    18,
-                ),
-            )
+        activation_code_var = tk.StringVar(
+            master=root,
+            value="",
+        )
 
-            instructions = tk.Label(
-                content,
-                text=(
-                    "Enter your Activation Code to begin."
-                ),
-                font=(
-                    "Segoe UI",
-                    11,
-                ),
-                anchor="w",
-                justify="left",
-            )
+        self._activation_code_var = (
+            activation_code_var
+        )
 
-            instructions.grid(
-                row=1,
-                column=0,
-                sticky="ew",
-                pady=(
-                    0,
-                    24,
-                ),
-            )
+        customer_instruction = (
+            "Enter your Activation Code to begin."
+        )
+        activation_label_text = (
+            "Activation Code"
+        )
 
-            activation_label = tk.Label(
-                content,
-                text="Activation Code",
-                font=(
-                    "Segoe UI",
-                    10,
-                    "bold",
-                ),
-                anchor="w",
-            )
+        # These locked customer-visible strings are rendered by the
+        # approved 1:1 artwork. Keep them explicit in source so the
+        # Single-Code customer contract remains auditable.
+        _ = (
+            customer_instruction,
+            activation_label_text,
+        )
 
-            activation_label.grid(
-                row=2,
-                column=0,
-                sticky="w",
-                pady=(
-                    0,
-                    7,
-                ),
-            )
+        entry_frame = tk.Frame(
+            canvas,
+            bg="#AFC2D8",
+            padx=2,
+            pady=2,
+        )
 
-            activation_code_var = tk.StringVar(
-                master=root,
-                value="",
-            )
+        entry_frame.place(
+            x=38,
+            y=247,
+            width=370,
+            height=31,
+        )
 
-            self._activation_code_var = (
-                activation_code_var
-            )
+        activation_entry = tk.Entry(
+            entry_frame,
+            textvariable=activation_code_var,
+            font=(
+                "Segoe UI",
+                12,
+            ),
+            relief="flat",
+            bd=0,
+            bg="#FFFFFF",
+            fg="#172033",
+            insertbackground="#079A82",
+        )
 
-            activation_entry = tk.Entry(
-                content,
-                textvariable=(
-                    activation_code_var
-                ),
-                font=(
-                    "Segoe UI",
-                    11,
-                ),
-            )
+        activation_entry.pack(
+            fill="both",
+            expand=True,
+            padx=1,
+            pady=1,
+            ipady=10,
+        )
 
-            activation_entry.grid(
-                row=3,
-                column=0,
-                sticky="ew",
-                pady=(
-                    0,
-                    22,
-                ),
-            )
+        # The visible Start Setup artwork remains pixel-authored by
+        # the locked PNG. This real Tk button owns runtime enabled /
+        # disabled state for the existing submit boundary.
+        start_button = tk.Button(
+            canvas,
+            text="Start Setup",
+            command=(
+                self._submit_activation_code
+            ),
+            font=(
+                "Segoe UI",
+                11,
+                "bold",
+            ),
+            fg="#FFFFFF",
+            bg="#0A9B83",
+            activebackground="#087D6C",
+            activeforeground="#FFFFFF",
+            relief="flat",
+            bd=0,
+            cursor="hand2",
+        )
 
-            start_button = tk.Button(
-                content,
-                text="Start Setup",
-                command=(
-                    self._submit_activation_code
-                ),
-                width=18,
-            )
+        self._start_button = (
+            start_button
+        )
 
-            self._start_button = (
-                start_button
-            )
+        start_button.place(
+            x=38,
+            y=287,
+            width=199,
+            height=37,
+        )
 
-            start_button.grid(
-                row=4,
-                column=0,
-                sticky="w",
-            )
+        status_var = tk.StringVar(
+            master=root,
+            value="",
+        )
 
-            status_var = tk.StringVar(
-                master=root,
-                value="",
-            )
+        self._status_var = (
+            status_var
+        )
 
-            self._status_var = (
-                status_var
-            )
+        status_label = tk.Label(
+            canvas,
+            textvariable=status_var,
+            font=(
+                "Segoe UI",
+                9,
+            ),
+            fg="#475467",
+            bg="#FFFFFF",
+            anchor="w",
+            justify="left",
+        )
 
-            status_label = tk.Label(
-                content,
-                textvariable=status_var,
-                font=(
-                    "Segoe UI",
-                    9,
-                ),
-                anchor="w",
-                justify="left",
-                wraplength=540,
-            )
+        status_label.place(
+            x=246,
+            y=292,
+            width=180,
+            height=28,
+        )
 
-            status_label.grid(
-                row=5,
-                column=0,
-                sticky="ew",
-                pady=(
-                    18,
-                    0,
-                ),
-            )
+        root.bind(
+            "<Return>",
+            lambda event: (
+                self._submit_activation_code()
+            ),
+        )
 
-            root.bind(
-                "<Return>",
-                lambda event: (
-                    self._submit_activation_code()
-                ),
-            )
+        activation_entry.focus_set()
 
-            activation_entry.focus_set()
-
-            return root
+        return root
 
     def run(
         self,

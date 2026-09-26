@@ -32,6 +32,10 @@ _ICON_RELATIVE_PATH = Path(
     "assets"
 ) / "TODOBA_Trading.ico"
 
+_ARTWORK_RELATIVE_PATH = Path(
+    "assets"
+) / "customer_setup_runtime_final.png"
+
 _ARTIFACT_DIRECTORY_NAME = (
     "TODOBA Build Artifacts"
 )
@@ -72,6 +76,13 @@ def _icon_path() -> Path:
     return (
         _repository_root()
         / _ICON_RELATIVE_PATH
+    )
+
+
+def _artwork_path() -> Path:
+    return (
+        _repository_root()
+        / _ARTWORK_RELATIVE_PATH
     )
 
 
@@ -174,6 +185,17 @@ def _validate_build_environment() -> None:
         )
 
 
+    artwork_path = (
+        _artwork_path()
+    )
+
+    if not artwork_path.is_file():
+        raise RuntimeError(
+            "TODOBA Setup runtime artwork "
+            "is missing."
+        )
+
+
 def _prepare_artifact_root() -> None:
     artifact_root = (
         _artifact_root()
@@ -217,6 +239,14 @@ def _build_command() -> tuple[
         "--icon",
         str(
             _icon_path()
+        ),
+        "--add-data",
+        (
+            f"{_artwork_path()};assets"
+        ),
+        "--add-data",
+        (
+            f"{_icon_path()};assets"
         ),
         "--paths",
         str(

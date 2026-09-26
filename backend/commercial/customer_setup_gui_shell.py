@@ -17,6 +17,7 @@ composition is intentionally outside this module.
 from __future__ import annotations
 
 from pathlib import Path
+import sys
 import tkinter as tk
 from tkinter import ttk
 
@@ -30,6 +31,45 @@ from backend.commercial.customer_setup_application_controller import (
 WINDOW_TITLE = (
     'TODOBA Trading AI Setup'
 )
+
+
+def _runtime_resource_path(
+    *parts: str,
+) -> Path:
+    if getattr(
+        sys,
+        "frozen",
+        False,
+    ):
+        bundle_root = getattr(
+            sys,
+            "_MEIPASS",
+            None,
+        )
+
+        if (
+            not isinstance(
+                bundle_root,
+                str,
+            )
+            or not bundle_root.strip()
+        ):
+            raise RuntimeError(
+                "Frozen TODOBA resource root is unavailable."
+            )
+
+        return (
+            Path(bundle_root)
+            .resolve()
+            .joinpath(*parts)
+        )
+
+    return (
+        Path(__file__)
+        .resolve()
+        .parents[2]
+        .joinpath(*parts)
+    )
 WELCOME_HEADLINE = (
     'Welcome to TODOBA Trading'
 )
@@ -130,6 +170,23 @@ class CustomerSetupGuiShell:
         root.title(
             WINDOW_TITLE
         )
+
+        icon_path = (
+            _runtime_resource_path(
+                "assets",
+                "TODOBA_Trading.ico",
+            )
+        )
+
+        if not icon_path.is_file():
+            raise RuntimeError(
+                "TODOBA Setup window icon is missing."
+            )
+
+        root.iconbitmap(
+            str(icon_path)
+        )
+
         root.geometry(
             "700x500"
         )
@@ -448,7 +505,7 @@ class CustomerSetupGuiShell:
             )
             self._install_button.configure(
                 state="normal",
-                text="Retry",
+                text="Install",
             )
             return
 
@@ -464,7 +521,7 @@ class CustomerSetupGuiShell:
             )
             self._install_button.configure(
                 state="normal",
-                text="Retry",
+                text="Install",
             )
             return
 
@@ -494,7 +551,7 @@ class CustomerSetupGuiShell:
             )
             self._install_button.configure(
                 state="normal",
-                text="Retry",
+                text="Install",
             )
             return
 

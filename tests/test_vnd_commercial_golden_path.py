@@ -2710,3 +2710,187 @@ def test_paid_continuation_reaches_ready_and_binds_activation(
     assert rebound is not None
     assert rebound.status.value == "BOUND"
     assert rebound.deployment_id == deployment_id
+
+def test_payment_setup_security_boundaries_converge_fail_closed(
+    tmp_path,
+):
+    """
+    P8F9 closes the payment-to-Setup security convergence:
+    payment mismatch/replay cannot manufacture downstream authority,
+    client-supplied Setup identity is rejected at the HTTP boundary,
+    and forged continuation authority cannot reach bootstrap recovery.
+    """
+
+    from datetime import datetime, timezone
+    from unittest.mock import Mock
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    chain = _build_dynamic_vnd_commercial_chain(
+        tmp_path
+    )
+
+    # Payment amount mismatch must die before trusted evidence,
+    # settlement, or activation authority exists.
+    with pytest.raises(ValueError):
+        _confirm_authoritative_vnd_payment(
+            chain,
+            reconciliation_request_id=(
+                "p8f9-wrong-amount"
+            ),
+            bank_reference="VCB-P8F9-WRONG-AMOUNT",
+            amount_minor=1,
+        )
+
+    assert _store_size(
+        chain["evidence_store"]
+    ) == 0
+
+    assert _store_size(
+        chain["settlement_store"]
+    ) == 0
+
+    assert chain["activation_bridge"].calls == []
+
+    # One authoritative reconciliation may succeed.
+    first = _confirm_authoritative_vnd_payment(
+        chain,
+        reconciliation_request_id=(
+            "p8f9-authoritative-payment"
+        ),
+        bank_reference="VCB-P8F9-REPLAY",
+    )
+
+    assert first is not None
+
+    assert _store_size(
+        chain["evidence_store"]
+    ) == 1
+
+    # The same external bank reference cannot create a second
+    # reconciliation/evidence path under another request id.
+    with pytest.raises(ValueError):
+        _confirm_authoritative_vnd_payment(
+            chain,
+            reconciliation_request_id=(
+                "p8f9-replayed-payment"
+            ),
+            bank_reference="VCB-P8F9-REPLAY",
+        )
+
+    assert _store_size(
+        chain["evidence_store"]
+    ) == 1
+
+    # Setup provisioning HTTP must reject customer-controlled
+    # authority before any server authorizer is reached.
+    authorizer = Mock()
+    bootstrap_service = Mock()
+    build_request_store = Mock()
+    package_publication = Mock()
+    entitlement_registry = Mock()
+    setup_activation_service = Mock()
+
+    router = create_customer_setup_provisioning_router(
+        authorize_setup_handoff=authorizer,
+        bootstrap_service=bootstrap_service,
+        build_request_store=build_request_store,
+        package_publication=package_publication,
+        entitlement_registry=entitlement_registry,
+        setup_activation_service=(
+            setup_activation_service
+        ),
+        continuation_service=None,
+        clock=lambda: datetime(
+            2026,
+            9,
+            27,
+            10,
+            30,
+            tzinfo=timezone.utc,
+        ),
+    )
+
+    app = FastAPI()
+    app.include_router(router)
+
+    client = TestClient(
+        app,
+        raise_server_exceptions=False,
+    )
+
+    forged = client.post(
+        "/customer/setup/provision",
+        headers={
+            "Authorization": "Bearer forged-handoff"
+        },
+        json={
+            "account_fingerprint": "P8F9-Test:100003",
+            "customer_id": "forged-customer",
+            "setup_activation_id": "forged-activation",
+            "deployment_id": "forged-deployment",
+            "agent_id": "forged-agent",
+        },
+    )
+
+    assert forged.status_code == 422
+    authorizer.assert_not_called()
+    bootstrap_service.prepare_bootstrap.assert_not_called()
+    build_request_store.register.assert_not_called()
+
+    # A continuation owner exists, but forged continuation material
+    # must fail before any bootstrap state can be recovered.
+    continuation_service = Mock()
+    continuation_service.authorize.side_effect = (
+        ValueError("invalid continuation")
+    )
+
+    guarded_router = (
+        create_customer_setup_provisioning_router(
+            authorize_setup_handoff=Mock(),
+            bootstrap_service=bootstrap_service,
+            build_request_store=build_request_store,
+            package_publication=package_publication,
+            entitlement_registry=entitlement_registry,
+            setup_activation_service=(
+                setup_activation_service
+            ),
+            continuation_service=continuation_service,
+            clock=lambda: datetime(
+                2026,
+                9,
+                27,
+                10,
+                31,
+                tzinfo=timezone.utc,
+            ),
+        )
+    )
+
+    guarded_app = FastAPI()
+    guarded_app.include_router(
+        guarded_router
+    )
+
+    guarded_client = TestClient(
+        guarded_app,
+        raise_server_exceptions=False,
+    )
+
+    invalid_continue = guarded_client.post(
+        "/customer/setup/continue",
+        headers={
+            "Authorization": (
+                "Bearer forged-continuation"
+            )
+        },
+    )
+
+    assert invalid_continue.status_code == 401
+
+    bootstrap_service.recover_prepared_bootstrap.assert_not_called()
+    bootstrap_service.activate_bootstrap.assert_not_called()
+    build_request_store.register.assert_not_called()
+    entitlement_registry.activate.assert_not_called()
+    setup_activation_service.bind.assert_not_called()

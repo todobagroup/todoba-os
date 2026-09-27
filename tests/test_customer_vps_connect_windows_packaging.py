@@ -328,3 +328,54 @@ def test_build_owner_has_packaging_authority_only():
         "kill(",
     ):
         assert forbidden not in source
+
+
+def test_vps_setup_packages_runtime_artwork():
+    path = build_owner._artwork_path()
+
+    assert (
+        path.name
+        == "customer_vps_setup_runtime_final.png"
+    )
+
+    assert path.parent.name == "assets"
+    assert path.is_absolute()
+
+
+def test_vps_setup_build_command_adds_runtime_assets():
+    command = build_owner._build_command()
+
+    add_data_indexes = [
+        index
+        for index, value in enumerate(command)
+        if value == "--add-data"
+    ]
+
+    values = {
+        command[index + 1]
+        for index in add_data_indexes
+    }
+
+    expected_artwork = (
+        f"{build_owner._artwork_path()};assets"
+    )
+
+    expected_icon = (
+        f"{build_owner._icon_path()};assets"
+    )
+
+    assert expected_artwork in values
+    assert expected_icon in values
+
+
+def test_vps_setup_validates_runtime_artwork():
+    source = Path(
+        "scripts/"
+        "build_customer_vps_connect_windows.py"
+    ).read_text(
+        encoding="utf-8-sig",
+    )
+
+    assert "_ARTWORK_RELATIVE_PATH" in source
+    assert "def _artwork_path(" in source
+    assert "runtime artwork is missing" in source.lower()

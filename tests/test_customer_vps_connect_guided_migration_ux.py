@@ -22,7 +22,7 @@ def test_customer_product_is_named_vps_setup():
     )
 
     assert (
-        'text="TODOBA VPS Setup"'
+        '"customer_vps_setup_runtime_final.png"'
         in source
     )
 

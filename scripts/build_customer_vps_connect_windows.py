@@ -31,6 +31,11 @@ _ICON_RELATIVE_PATH = (
     / "TODOBA_Trading.ico"
 )
 
+_ARTWORK_RELATIVE_PATH = (
+    Path("assets")
+    / "customer_vps_setup_runtime_final.png"
+)
+
 _ARTIFACT_DIRECTORY_NAME = (
     "TODOBA Build Artifacts"
 )
@@ -60,6 +65,14 @@ def _icon_path(
     return (
         _repository_root()
         / _ICON_RELATIVE_PATH
+    ).resolve()
+
+
+def _artwork_path(
+) -> Path:
+    return (
+        _repository_root()
+        / _ARTWORK_RELATIVE_PATH
     ).resolve()
 
 
@@ -164,6 +177,13 @@ def _validate_build_environment(
             "TODOBA Trading icon is missing."
         )
 
+    artwork = _artwork_path()
+
+    if not artwork.is_file():
+        raise RuntimeError(
+            "VPS runtime artwork is missing."
+        )
+
 
 def _build_command(
 ) -> tuple[str, ...]:
@@ -180,6 +200,14 @@ def _build_command(
         "--icon",
         str(
             _icon_path()
+        ),
+        "--add-data",
+        (
+            f"{_artwork_path()};assets"
+        ),
+        "--add-data",
+        (
+            f"{_icon_path()};assets"
         ),
         "--paths",
         str(

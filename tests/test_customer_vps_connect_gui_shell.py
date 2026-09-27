@@ -183,6 +183,12 @@ class FakeRoot:
     def destroy(self):
         self.destroy_calls += 1
 
+    def iconbitmap(
+        self,
+        value,
+    ):
+        self.iconbitmap_value = value
+
 
 class FakeWidget:
     instances = []
@@ -232,6 +238,63 @@ class FakeWidget:
         self,
     ):
         self.visible = False
+        return None
+
+    def place(
+        self,
+        *args,
+        **kwargs,
+    ):
+        self.visible = True
+        self.place_args = args
+        self.place_kwargs = kwargs
+        return None
+
+    def create_image(
+        self,
+        *args,
+        **kwargs,
+    ):
+        self.create_image_args = args
+        self.create_image_kwargs = kwargs
+        return 1
+
+    def create_text(
+        self,
+        *args,
+        **kwargs,
+    ):
+        self.create_text_args = args
+        self.create_text_kwargs = kwargs
+        return 2
+
+    def itemconfigure(
+        self,
+        item_id,
+        **kwargs,
+    ):
+        self.itemconfigure_item_id = item_id
+        self.itemconfigure_kwargs = kwargs
+        return None
+
+    def create_rectangle(
+        self,
+        *args,
+        **kwargs,
+    ):
+        self.create_rectangle_args = args
+        self.create_rectangle_kwargs = kwargs
+        return 3
+
+    def tag_bind(
+        self,
+        item_id,
+        sequence,
+        callback,
+    ):
+        self.tag_bind_item_id = item_id
+        self.tag_bind_sequence = sequence
+        self.tag_bind_callback = callback
         return None
 
     def grid(
@@ -320,6 +383,30 @@ def _patch_gui(
     )
 
     monkeypatch.setattr(
+        gui_module.tk,
+        "PhotoImage",
+        FakePhotoImage,
+    )
+
+    monkeypatch.setattr(
+        gui_module.tk,
+        "Canvas",
+        FakeWidget,
+    )
+
+    monkeypatch.setattr(
+        gui_module.tk,
+        "Frame",
+        FakeWidget,
+    )
+
+    monkeypatch.setattr(
+        gui_module.tk,
+        "Label",
+        FakeWidget,
+    )
+
+    monkeypatch.setattr(
         gui_module.ttk,
         "Frame",
         FakeWidget,
@@ -350,6 +437,22 @@ def _patch_gui(
     )
 
     return root
+
+
+class FakePhotoImage:
+    def __init__(
+        self,
+        *args,
+        **kwargs,
+    ):
+        self.args = args
+        self.kwargs = kwargs
+
+    def width(self):
+        return gui_module._WINDOW_WIDTH
+
+    def height(self):
+        return gui_module._WINDOW_HEIGHT
 
 
 def _built_shell(
@@ -417,10 +520,10 @@ def test_single_primary_action_progresses_detect_connect_verify_finish(
         ),
     )
 
-    detect = _button_with_text("Detect")
-    connect = _button_with_text("Connect")
-    verify = _button_with_text("Verify")
-    finish = _button_with_text("Finish")
+    detect = shell._detect_button
+    connect = shell._connect_button
+    verify = shell._verify_button
+    finish = shell._finish_button
 
     assert detect.visible is True
     assert connect.visible is False
@@ -1165,3 +1268,54 @@ def test_gui_uses_owner_retry_without_owning_polling_policy():
         "uiautomation",
     ):
         assert forbidden not in source
+
+
+
+def test_vps_setup_visual_runtime_contract_is_locked():
+    source = Path(
+        "backend/commercial/"
+        "customer_vps_connect_gui_shell.py"
+    ).read_text(
+        encoding="utf-8-sig",
+    )
+
+    assert '_WINDOW_WIDTH = 922' in source
+    assert '_WINDOW_HEIGHT = 542' in source
+
+    assert (
+        '"customer_vps_setup_runtime_final.png"'
+        in source
+    )
+
+    assert '"TODOBA_Trading.ico"' in source
+
+    assert "root.iconbitmap(" in source
+    assert "tk.PhotoImage(" in source
+
+    assert "artwork_image.width()" in source
+    assert "artwork_image.height()" in source
+
+    assert "_runtime_resource_path(" in source
+
+
+def test_vps_setup_preserves_single_primary_action_owner():
+    source = Path(
+        "backend/commercial/"
+        "customer_vps_connect_gui_shell.py"
+    ).read_text(
+        encoding="utf-8-sig",
+    )
+
+    assert 'def _show_primary_action(' in source
+
+    for action in (
+        '"detect"',
+        '"connect"',
+        '"verify"',
+        '"finish"',
+    ):
+        assert action in source
+
+    assert "button.pack_forget()" in source
+    assert 'state="disabled"' in source
+    assert 'state="normal"' in source

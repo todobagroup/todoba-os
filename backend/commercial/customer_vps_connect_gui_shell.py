@@ -3,6 +3,7 @@ Thin standalone presentation shell for TODOBA VPS Connect.
 """
 
 from pathlib import Path
+import sys
 from typing import Any
 
 import tkinter as tk
@@ -14,6 +15,54 @@ from backend.commercial.customer_vps_connect_application_shell import (
 
 
 WINDOW_TITLE = "TODOBA VPS Setup"
+
+_WINDOW_WIDTH = 922
+_WINDOW_HEIGHT = 542
+
+_ARTWORK_FILENAME = (
+    "customer_vps_setup_runtime_final.png"
+)
+
+_ICON_FILENAME = "TODOBA_Trading.ico"
+
+
+def _runtime_resource_path(
+    *parts: str,
+) -> Path:
+    if getattr(
+        sys,
+        "frozen",
+        False,
+    ):
+        bundle_root = getattr(
+            sys,
+            "_MEIPASS",
+            None,
+        )
+
+        if (
+            not isinstance(
+                bundle_root,
+                str,
+            )
+            or not bundle_root
+        ):
+            raise RuntimeError(
+                "Frozen VPS Setup resource root "
+                "is unavailable."
+            )
+
+        root = Path(bundle_root)
+    else:
+        root = (
+            Path(__file__)
+            .resolve()
+            .parents[2]
+        )
+
+    return root.joinpath(
+        *parts
+    )
 
 
 class CustomerVPSConnectGuiShell:
@@ -90,7 +139,7 @@ class CustomerVPSConnectGuiShell:
         )
 
         root.geometry(
-            "720x520"
+            f"{_WINDOW_WIDTH}x{_WINDOW_HEIGHT}"
         )
 
         root.resizable(
@@ -98,115 +147,317 @@ class CustomerVPSConnectGuiShell:
             False,
         )
 
+        artwork_path = (
+            _runtime_resource_path(
+                "assets",
+                _ARTWORK_FILENAME,
+            )
+        )
+
+        icon_path = (
+            _runtime_resource_path(
+                "assets",
+                _ICON_FILENAME,
+            )
+        )
+
+        if not artwork_path.is_file():
+            raise RuntimeError(
+                "TODOBA VPS Setup runtime artwork "
+                "is unavailable."
+            )
+
+        if not icon_path.is_file():
+            raise RuntimeError(
+                "TODOBA VPS Setup icon "
+                "is unavailable."
+            )
+
+        root.iconbitmap(
+            str(
+                icon_path
+            )
+        )
+
+        artwork_image = tk.PhotoImage(
+            file=str(
+                artwork_path
+            )
+        )
+
+        if (
+            artwork_image.width()
+            != _WINDOW_WIDTH
+            or artwork_image.height()
+            != _WINDOW_HEIGHT
+        ):
+            raise RuntimeError(
+                "TODOBA VPS Setup runtime artwork "
+                "dimensions do not match "
+                "the locked window."
+            )
+
+        root._todoba_vps_artwork = (
+            artwork_image
+        )
+
+        canvas = tk.Canvas(
+            root,
+            width=_WINDOW_WIDTH,
+            height=_WINDOW_HEIGHT,
+            highlightthickness=0,
+            bd=0,
+        )
+
+        canvas.pack(
+            fill="both",
+            expand=False,
+        )
+
+        canvas.create_image(
+            0,
+            0,
+            anchor="nw",
+            image=artwork_image,
+        )
+
         self._root = root
 
-        outer = ttk.Frame(
-            root,
-            padding=28,
+        # Activation Code:
+        # preserve the approved artwork border/icon,
+        # overlay only the real secret input.
+        activation_host = tk.Frame(
+            canvas,
+            bg="#FFFFFF",
+            bd=0,
         )
-        outer.pack(
+
+        activation_host.place(
+            x=192,
+            y=309,
+            width=565,
+            height=27,
+        )
+
+        self._activation_entry = ttk.Entry(
+            activation_host,
+            show="*",
+        )
+
+        self._activation_entry.pack(
             fill="both",
             expand=True,
         )
 
-        heading = ttk.Label(
-            outer,
-            text="TODOBA VPS Setup",
-        )
-        heading.pack(
-            pady=(0, 8),
-        )
+        # Runtime-owned presentation regions.
+        #
+        # The approved artwork remains the visual authority.
+        # Canvas adapters provide interaction without placing
+        # native opaque widgets over the designed surfaces.
 
-        subtitle = ttk.Label(
-            outer,
-            text=(
-                "Connect your MetaTrader 5 environment "
-                "to TODOBA."
+        status_text_id = canvas.create_text(
+            461,
+            399,
+            text="",
+            font=(
+                "Segoe UI",
+                9,
+                "bold",
             ),
-        )
-        subtitle.pack(
-            pady=(0, 24),
-        )
-
-        activation_label = ttk.Label(
-            outer,
-            text="Activation Code",
-        )
-        activation_label.pack(
-            anchor="w",
+            fill="#102A72",
+            anchor="center",
+            width=400,
         )
 
-        self._activation_entry = ttk.Entry(
-            outer,
-            show="*",
-        )
-        self._activation_entry.pack(
-            fill="x",
-            pady=(4, 18),
+        class _CanvasStatusLabel:
+            def __init__(
+                self,
+                owner_canvas,
+                item_id,
+            ):
+                self._canvas = owner_canvas
+                self._item_id = item_id
+
+            def config(
+                self,
+                **kwargs,
+            ):
+                if "text" in kwargs:
+                    self._canvas.itemconfigure(
+                        self._item_id,
+                        text=kwargs["text"],
+                    )
+
+            configure = config
+
+        self._status_label = _CanvasStatusLabel(
+            canvas,
+            status_text_id,
         )
 
-        mt5_label = ttk.Label(
-            outer,
-            text="MetaTrader 5",
-        )
-        mt5_label.pack(
-            anchor="w",
-        )
-
+        # Preserve the approved MT5 card/title from the artwork.
+        # Overlay only the live customer installation selector.
         self._mt5_selector = ttk.Combobox(
-            outer,
+            canvas,
             values=(),
             state="readonly",
         )
-        self._mt5_selector.pack(
-            fill="x",
-            pady=(4, 18),
+
+        self._mt5_selector.place(
+            x=266,
+            y=446,
+            width=456,
+            height=23,
         )
 
-        button_row = ttk.Frame(
-            outer,
-        )
-        button_row.pack(
-            fill="x",
-            pady=(4, 18),
+        action_text_id = canvas.create_text(
+            461,
+            359,
+            text="",
+            font=(
+                "Arial",
+                15,
+                "bold",
+            ),
+            fill="#FFFFFF",
+            anchor="center",
         )
 
-        self._detect_button = ttk.Button(
-            button_row,
-            text="Detect",
+        class _CanvasActionButton:
+            def __init__(
+                self,
+                *,
+                owner_canvas,
+                item_id,
+                label,
+                command,
+            ):
+                self._canvas = owner_canvas
+                self._item_id = item_id
+                self._label = label
+                self._command = command
+                self.state = "disabled"
+                self.visible = False
+
+            def configure(
+                self,
+                **kwargs,
+            ):
+                if "state" in kwargs:
+                    self.state = kwargs["state"]
+
+            config = configure
+
+            def cget(
+                self,
+                key,
+            ):
+                if key == "state":
+                    return self.state
+
+                if key == "text":
+                    return self._label
+
+                raise KeyError(
+                    key
+                )
+
+            def pack_forget(
+                self,
+            ):
+                self.visible = False
+
+            def pack(
+                self,
+                *args,
+                **kwargs,
+            ):
+                self.visible = True
+                self._canvas.itemconfigure(
+                    self._item_id,
+                    text=self._label,
+                )
+
+            def invoke(
+                self,
+            ):
+                if (
+                    self.visible
+                    and self.state == "normal"
+                ):
+                    self._command()
+
+        self._detect_button = _CanvasActionButton(
+            owner_canvas=canvas,
+            item_id=action_text_id,
+            label="Detect",
             command=self.detect_mt5,
         )
-        self._detect_button.pack(
-            side="left",
+
+        self._connect_button = _CanvasActionButton(
+            owner_canvas=canvas,
+            item_id=action_text_id,
+            label="Connect",
+            command=self.connect_selected,
         )
 
-        self._connect_button = ttk.Button(
-            button_row,
-            text="Connect",
-            command=self.connect_selected,
-            state="disabled",
-        )
-        self._verify_button = ttk.Button(
-            button_row,
-            text="Verify",
+        self._verify_button = _CanvasActionButton(
+            owner_canvas=canvas,
+            item_id=action_text_id,
+            label="Verify",
             command=self.verify_vps,
-            state="disabled",
         )
-        self._finish_button = ttk.Button(
-            button_row,
-            text="Finish",
+
+        self._finish_button = _CanvasActionButton(
+            owner_canvas=canvas,
+            item_id=action_text_id,
+            label="Finish",
             command=self.finish,
-            state="disabled",
         )
-        self._status_label = ttk.Label(
-            outer,
-            text=(
-                "Ready to detect MetaTrader 5."
-            ),
+
+        def _invoke_primary_action(
+            _event=None,
+        ):
+            buttons = (
+                self._detect_button,
+                self._connect_button,
+                self._verify_button,
+                self._finish_button,
+            )
+
+            for button in buttons:
+                if (
+                    button.visible
+                    and button.state == "normal"
+                ):
+                    button.invoke()
+                    return
+
+        canvas.tag_bind(
+            action_text_id,
+            "<Button-1>",
+            _invoke_primary_action,
         )
-        self._status_label.pack(
-            anchor="w",
-            pady=(12, 0),
+
+        # Make the full designed gradient surface clickable,
+        # not just its text.
+        action_hitbox = canvas.create_rectangle(
+            382,
+            341,
+            540,
+            376,
+            fill="",
+            outline="",
+        )
+
+        canvas.tag_bind(
+            action_hitbox,
+            "<Button-1>",
+            _invoke_primary_action,
+        )
+
+        self._show_primary_action(
+            "detect"
         )
 
         root.protocol(

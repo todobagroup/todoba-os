@@ -118,6 +118,9 @@ from backend.commercial.customer_setup_build_continuation_service import (
     CustomerSetupBuildContinuationService,
     CustomerSetupBuildContinuationStore,
 )
+from backend.commercial.customer_setup_provisioning_api import (
+    create_customer_setup_provisioning_router,
+)
 from backend.commercial.customer_deployment_package_build_request_store import (
     CustomerDeploymentPackageBuildRequest,
     CustomerDeploymentPackageBuildRequestStore,
@@ -2036,3 +2039,301 @@ def test_vnd_paid_handoff_converges_to_build_continuation_authority(
         authorized_continuation.deployment_id
         == deployment_id
     )
+
+def test_authoritative_handoff_crosses_real_provisioning_http_boundary(
+    tmp_path,
+):
+    """
+    P8F7 proves that a real authoritative Setup handoff credential
+    crosses the actual FastAPI provisioning boundary, derives
+    customer/setup identity from server-owned handoff authority,
+    registers the immutable build request, and returns real build
+    continuation authority without client-supplied identity.
+    """
+
+    from datetime import datetime, timezone
+    from unittest.mock import Mock
+
+    from backend.commercial.customer_deployment_bootstrap_service import (
+        CustomerDeploymentBootstrapPreparationResult,
+    )
+    from backend.commercial.customer_deployment_registry import (
+        CustomerDeployment,
+    )
+    from backend.commercial.customer_deployment_secret_store import (
+        CustomerDeploymentSecrets,
+    )
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    chain = _build_dynamic_vnd_commercial_chain(
+        tmp_path
+    )
+
+    deployment_registry = CustomerDeploymentRegistry(
+        tmp_path / "p8f7-deployments.json"
+    )
+    deployment_registry.initialize_empty()
+
+    activation_store = CustomerSetupActivationStore(
+        tmp_path / "p8f7-activations.json"
+    )
+    activation_store.initialize_empty()
+
+    activation_service = CustomerSetupActivationService(
+        activation_store=activation_store,
+        customer_identity_registry=(
+            chain["identity_registry"]
+        ),
+        deployment_registry=deployment_registry,
+    )
+
+    terms_store = CustomerCommercialOrderTermsBindingStore(
+        tmp_path / "p8f7-order-terms.json"
+    )
+    terms_store.initialize_empty()
+
+    terms_store.register(
+        CustomerCommercialOrderTermsBindingRecord(
+            order_id=chain["order"].order_id,
+            customer_id=chain["order"].customer_id,
+            licensed_account_cap_usd=1000,
+            standard_monthly_price_usd=50,
+        )
+    )
+
+    entitlement_registry = CustomerCommercialEntitlementRegistry(
+        tmp_path / "p8f7-entitlements.json"
+    )
+    entitlement_registry.initialize_empty()
+
+    entitlement_convergence_service = (
+        CustomerPaymentSettlementEntitlementConvergenceService(
+            settlement_store=chain["settlement_store"],
+            order_store=chain["order_store"],
+            order_terms_store=terms_store,
+            entitlement_registry=entitlement_registry,
+        )
+    )
+
+    activation_bridge = (
+        CustomerPaymentSettlementActivationBridge(
+            entitlement_convergence_service=(
+                entitlement_convergence_service
+            ),
+            setup_activation_service=activation_service,
+        )
+    )
+
+    settlement_orchestration = (
+        CustomerPaymentSettlementOrchestrationService(
+            settlement_service=chain["settlement_service"],
+            activation_bridge=activation_bridge,
+        )
+    )
+
+    completion_service = (
+        CustomerVndBankPaymentCompletionOrchestrationService(
+            verification_adapter=chain["verification_adapter"],
+            settlement_orchestration_service=(
+                settlement_orchestration
+            ),
+        )
+    )
+
+    now = datetime(
+        2026,
+        9,
+        27,
+        9,
+        30,
+        tzinfo=timezone.utc,
+    )
+
+    reconciliation = _confirm_authoritative_vnd_payment(
+        chain
+    )
+
+    activation = completion_service.complete(
+        reconciliation_id=reconciliation.reconciliation_id
+    )
+
+    handoff_store = CustomerSetupHandoffStore(
+        tmp_path / "p8f7-handoffs.json"
+    )
+    handoff_store.initialize_empty()
+
+    handoff_service = CustomerSetupHandoffService(
+        handoff_store=handoff_store,
+        setup_activation_store=activation_store,
+    )
+
+    issued_handoff = handoff_service.issue(
+        issuance_request_id="p8f7-handoff-request",
+        setup_activation_id=activation.setup_activation_id,
+        current_time=now,
+    )
+
+    handoff_authorizer = CustomerSetupHandoffAuthorizer(
+        handoff_service=handoff_service,
+        clock=lambda: now,
+    )
+
+    account_fingerprint = "P8F7-Test:100001"
+    deployment_id = "deployment-p8f7"
+
+    build_request_store = (
+        CustomerDeploymentPackageBuildRequestStore(
+            tmp_path / "p8f7-build-requests"
+        )
+    )
+    build_request_store.initialize_empty()
+
+    continuation_store = (
+        CustomerSetupBuildContinuationStore(
+            tmp_path / "p8f7-continuations.json"
+        )
+    )
+    continuation_store.initialize_empty()
+
+    continuation_service = (
+        CustomerSetupBuildContinuationService(
+            continuation_store=continuation_store,
+            setup_activation_store=activation_store,
+            build_request_store=build_request_store,
+        )
+    )
+
+    prepared = CustomerDeploymentBootstrapPreparationResult(
+        enrollment_request_id=(
+            activation.setup_activation_id
+        ),
+        deployment=CustomerDeployment(
+            customer_id=chain["order"].customer_id,
+            deployment_id=deployment_id,
+            agent_id="trusted-agent-p8f7",
+        ),
+        secrets=CustomerDeploymentSecrets(
+            deployment_id=deployment_id,
+            agent_secret="p8f7-agent-secret",
+            execution_mission_signing_secret=(
+                "p8f7-execution-secret"
+            ),
+            control_mission_signing_secret=(
+                "p8f7-control-secret"
+            ),
+        ),
+        account_fingerprint=account_fingerprint,
+    )
+
+    bootstrap_service = Mock()
+    bootstrap_service.prepare_bootstrap.return_value = (
+        prepared
+    )
+
+    package_publication = Mock()
+    package_publication.get_published_package.return_value = (
+        None
+    )
+
+    # Pending path must not activate deployment entitlement
+    # or bind the already-authoritative paid activation.
+    http_entitlement_registry = Mock()
+
+    router = create_customer_setup_provisioning_router(
+        authorize_setup_handoff=(
+            handoff_authorizer.authorize
+        ),
+        bootstrap_service=bootstrap_service,
+        build_request_store=build_request_store,
+        package_publication=package_publication,
+        entitlement_registry=http_entitlement_registry,
+        setup_activation_service=activation_service,
+        continuation_service=continuation_service,
+        clock=lambda: now,
+    )
+
+    app = FastAPI()
+    app.include_router(router)
+
+    client = TestClient(
+        app,
+        raise_server_exceptions=False,
+    )
+
+    response = client.post(
+        "/customer/setup/provision",
+        headers={
+            "Authorization": (
+                "Bearer "
+                + issued_handoff.handoff_credential
+            )
+        },
+        json={
+            "account_fingerprint": account_fingerprint
+        },
+    )
+
+    assert response.status_code == 202
+
+    payload = response.json()
+
+    assert payload["status"] == "build_pending"
+    assert "continuation_credential" in payload
+    assert "continuation_expires_at" in payload
+
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["pragma"] == "no-cache"
+
+    registered = build_request_store.get(
+        deployment_id=deployment_id
+    )
+
+    assert registered is not None
+    assert registered.deployment_id == deployment_id
+    assert (
+        registered.bootstrap_request_id
+        == activation.setup_activation_id
+    )
+
+    bootstrap_service.prepare_bootstrap.assert_called_once_with(
+        enrollment_request_id=(
+            activation.setup_activation_id
+        ),
+        customer_id=chain["order"].customer_id,
+        account_fingerprint=account_fingerprint,
+    )
+
+    authorized_continuation = (
+        continuation_service.authorize(
+            continuation_credential=(
+                payload["continuation_credential"]
+            ),
+            account_fingerprint=account_fingerprint,
+            current_time=now,
+        )
+    )
+
+    assert (
+        authorized_continuation.customer_id
+        == chain["order"].customer_id
+    )
+    assert (
+        authorized_continuation.setup_activation_id
+        == activation.setup_activation_id
+    )
+    assert (
+        authorized_continuation.deployment_id
+        == deployment_id
+    )
+
+    http_entitlement_registry.activate.assert_not_called()
+
+    activation_after_pending = activation_service.get(
+        setup_activation_id=activation.setup_activation_id
+    )
+
+    assert activation_after_pending is not None
+    assert activation_after_pending.status.value == "ACTIVE"
+    assert activation_after_pending.deployment_id is None

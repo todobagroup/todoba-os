@@ -85,6 +85,10 @@ from backend.commercial.customer_setup_activation_service import (
     CustomerSetupActivationStatus,
     CustomerSetupActivationStore,
 )
+from backend.commercial.customer_setup_access_code_service import (
+    CustomerSetupAccessCodeService,
+    CustomerSetupAccessCodeStore,
+)
 from backend.commercial.customer_payment_settlement_entitlement_convergence_service import (
     CustomerPaymentSettlementEntitlementConvergenceService,
 )
@@ -965,3 +969,160 @@ def test_vnd_commercial_real_activation_from_authoritative_settlement(
     assert second == first
     assert activation_store.size() == 1
     assert entitlement_registry.size() == 1
+
+def test_vnd_paid_activation_issues_authoritative_access_code(
+    tmp_path,
+):
+    """
+    P8F3 proves authoritative VND settlement can reach the real
+    customer Access Code authority only through the real Setup
+    activation identity created downstream of payment settlement.
+    """
+
+    chain = _build_dynamic_vnd_commercial_chain(
+        tmp_path
+    )
+
+    terms_store = CustomerCommercialOrderTermsBindingStore(
+        tmp_path / "p8f3-order-terms.json"
+    )
+    terms_store.initialize_empty()
+
+    terms_store.register(
+        CustomerCommercialOrderTermsBindingRecord(
+            order_id=chain["order"].order_id,
+            customer_id=chain["order"].customer_id,
+            licensed_account_cap_usd=1000,
+            standard_monthly_price_usd=50,
+        )
+    )
+
+    entitlement_registry = CustomerCommercialEntitlementRegistry(
+        tmp_path / "p8f3-entitlements.json"
+    )
+    entitlement_registry.initialize_empty()
+
+    entitlement_convergence_service = (
+        CustomerPaymentSettlementEntitlementConvergenceService(
+            settlement_store=chain["settlement_store"],
+            order_store=chain["order_store"],
+            order_terms_store=terms_store,
+            entitlement_registry=entitlement_registry,
+        )
+    )
+
+    deployment_registry = CustomerDeploymentRegistry(
+        tmp_path / "p8f3-deployments.json"
+    )
+    deployment_registry.initialize_empty()
+
+    activation_store = CustomerSetupActivationStore(
+        tmp_path / "p8f3-activations.json"
+    )
+    activation_store.initialize_empty()
+
+    activation_service = CustomerSetupActivationService(
+        activation_store=activation_store,
+        customer_identity_registry=(
+            chain["identity_registry"]
+        ),
+        deployment_registry=deployment_registry,
+    )
+
+    activation_bridge = (
+        CustomerPaymentSettlementActivationBridge(
+            entitlement_convergence_service=(
+                entitlement_convergence_service
+            ),
+            setup_activation_service=activation_service,
+        )
+    )
+
+    settlement_orchestration = (
+        CustomerPaymentSettlementOrchestrationService(
+            settlement_service=chain["settlement_service"],
+            activation_bridge=activation_bridge,
+        )
+    )
+
+    completion_service = (
+        CustomerVndBankPaymentCompletionOrchestrationService(
+            verification_adapter=chain["verification_adapter"],
+            settlement_orchestration_service=(
+                settlement_orchestration
+            ),
+        )
+    )
+
+    access_code_store = CustomerSetupAccessCodeStore(
+        tmp_path / "p8f3-access-codes.json",
+        setup_activation_store=activation_store,
+    )
+    access_code_store.initialize_empty()
+
+    access_code_service = CustomerSetupAccessCodeService(
+        access_code_store=access_code_store,
+        setup_activation_store=activation_store,
+    )
+
+    reconciliation = _confirm_authoritative_vnd_payment(
+        chain
+    )
+
+    activation = completion_service.complete(
+        reconciliation_id=reconciliation.reconciliation_id
+    )
+
+    assert (
+        activation.status
+        is CustomerSetupActivationStatus.ACTIVE
+    )
+
+    assert (
+        access_code_store.get_active_by_setup_activation_id(
+            setup_activation_id=activation.setup_activation_id
+        )
+        is None
+    )
+
+    issued = access_code_service.issue(
+        setup_activation_id=activation.setup_activation_id
+    )
+
+    authorized = access_code_service.authorize(
+        activation_code=issued.activation_code
+    )
+
+    assert (
+        authorized.setup_activation_id
+        == activation.setup_activation_id
+    )
+
+    assert (
+        authorized.customer_id
+        == chain["order"].customer_id
+    )
+
+    persisted_record = (
+        access_code_store.get_active_by_setup_activation_id(
+            setup_activation_id=activation.setup_activation_id
+        )
+    )
+
+    assert persisted_record is not None
+    assert (
+        persisted_record.access_code_id
+        == issued.access_code_id
+    )
+    assert (
+        persisted_record.setup_activation_id
+        == activation.setup_activation_id
+    )
+
+    persisted = (
+        access_code_store.storage_path.read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert issued.activation_code not in persisted

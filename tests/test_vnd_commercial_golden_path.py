@@ -111,6 +111,17 @@ from backend.commercial.customer_setup_handoff_service import (
     CustomerSetupHandoffService,
     CustomerSetupHandoffStore,
 )
+from backend.commercial.customer_setup_handoff_authorizer import (
+    CustomerSetupHandoffAuthorizer,
+)
+from backend.commercial.customer_setup_build_continuation_service import (
+    CustomerSetupBuildContinuationService,
+    CustomerSetupBuildContinuationStore,
+)
+from backend.commercial.customer_deployment_package_build_request_store import (
+    CustomerDeploymentPackageBuildRequest,
+    CustomerDeploymentPackageBuildRequestStore,
+)
 from backend.commercial.customer_setup_entry_grant_service import (
     CustomerSetupEntryGrantService,
 )
@@ -1689,3 +1700,339 @@ def test_vnd_paid_setup_launch_unlocks_authoritative_entry(
     )
 
     assert handoff_authorization is not None
+
+def test_vnd_paid_handoff_converges_to_build_continuation_authority(
+    tmp_path,
+):
+    """
+    P8F6 proves that the handoff credential originating from the
+    authoritative paid Setup Entry path is authorized by the real
+    handoff authority owner and converges into the real build
+    continuation owner without client-supplied customer or setup
+    activation identity.
+    """
+
+    import base64
+    import hashlib
+    from datetime import datetime, timezone
+
+    chain = _build_dynamic_vnd_commercial_chain(
+        tmp_path
+    )
+
+    terms_store = CustomerCommercialOrderTermsBindingStore(
+        tmp_path / "p8f6-order-terms.json"
+    )
+    terms_store.initialize_empty()
+
+    terms_store.register(
+        CustomerCommercialOrderTermsBindingRecord(
+            order_id=chain["order"].order_id,
+            customer_id=chain["order"].customer_id,
+            licensed_account_cap_usd=1000,
+            standard_monthly_price_usd=50,
+        )
+    )
+
+    entitlement_registry = CustomerCommercialEntitlementRegistry(
+        tmp_path / "p8f6-entitlements.json"
+    )
+    entitlement_registry.initialize_empty()
+
+    entitlement_convergence_service = (
+        CustomerPaymentSettlementEntitlementConvergenceService(
+            settlement_store=chain["settlement_store"],
+            order_store=chain["order_store"],
+            order_terms_store=terms_store,
+            entitlement_registry=entitlement_registry,
+        )
+    )
+
+    deployment_registry = CustomerDeploymentRegistry(
+        tmp_path / "p8f6-deployments.json"
+    )
+    deployment_registry.initialize_empty()
+
+    activation_store = CustomerSetupActivationStore(
+        tmp_path / "p8f6-activations.json"
+    )
+    activation_store.initialize_empty()
+
+    activation_service = CustomerSetupActivationService(
+        activation_store=activation_store,
+        customer_identity_registry=(
+            chain["identity_registry"]
+        ),
+        deployment_registry=deployment_registry,
+    )
+
+    activation_bridge = (
+        CustomerPaymentSettlementActivationBridge(
+            entitlement_convergence_service=(
+                entitlement_convergence_service
+            ),
+            setup_activation_service=activation_service,
+        )
+    )
+
+    settlement_orchestration = (
+        CustomerPaymentSettlementOrchestrationService(
+            settlement_service=chain["settlement_service"],
+            activation_bridge=activation_bridge,
+        )
+    )
+
+    completion_service = (
+        CustomerVndBankPaymentCompletionOrchestrationService(
+            verification_adapter=chain["verification_adapter"],
+            settlement_orchestration_service=(
+                settlement_orchestration
+            ),
+        )
+    )
+
+    access_code_store = CustomerSetupAccessCodeStore(
+        tmp_path / "p8f6-access-codes.json",
+        setup_activation_store=activation_store,
+    )
+    access_code_store.initialize_empty()
+
+    access_code_service = CustomerSetupAccessCodeService(
+        access_code_store=access_code_store,
+        setup_activation_store=activation_store,
+    )
+
+    bootstrap_authorization_store = (
+        CustomerSetupBootstrapAuthorizationStore(
+            tmp_path / "p8f6-bootstrap-authorizations.json",
+            customer_identity_registry=(
+                chain["identity_registry"]
+            ),
+        )
+    )
+    bootstrap_authorization_store.initialize_empty()
+
+    bootstrap_authorization_service = (
+        CustomerSetupBootstrapAuthorizationService(
+            authorization_store=(
+                bootstrap_authorization_store
+            ),
+            customer_identity_registry=(
+                chain["identity_registry"]
+            ),
+        )
+    )
+
+    launch_store = CustomerSetupLaunchCredentialStore(
+        tmp_path / "p8f6-launch-credentials.json",
+        customer_identity_registry=(
+            chain["identity_registry"]
+        ),
+    )
+    launch_store.initialize_empty()
+
+    launch_service = CustomerSetupLaunchCredentialService(
+        launch_store=launch_store,
+        customer_identity_registry=(
+            chain["identity_registry"]
+        ),
+    )
+
+    registration_store = CustomerRegistrationStore(
+        tmp_path / "p8f6-registrations.json"
+    )
+    registration_store.initialize_empty()
+
+    registration_store.register(
+        CustomerRegistrationRecord(
+            registration_request_id=(
+                "p8f6-authoritative-registration"
+            ),
+            customer_id=chain["order"].customer_id,
+        )
+    )
+
+    handoff_store = CustomerSetupHandoffStore(
+        tmp_path / "p8f6-handoffs.json"
+    )
+    handoff_store.initialize_empty()
+
+    handoff_service = CustomerSetupHandoffService(
+        handoff_store=handoff_store,
+        setup_activation_store=activation_store,
+    )
+
+    now = datetime(
+        2026,
+        9,
+        27,
+        9,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+    handoff_authorizer = CustomerSetupHandoffAuthorizer(
+        handoff_service=handoff_service,
+        clock=lambda: now,
+    )
+
+    exchange_service = CustomerSetupAccessCodeExchangeService(
+        authorize_access_code=(
+            access_code_service.authorize
+        ),
+        issue_bootstrap_authorization=(
+            bootstrap_authorization_service.issue
+        ),
+        clock=lambda: now,
+    )
+
+    launch_grant_service = (
+        CustomerSetupBootstrapLaunchGrantService(
+            bootstrap_authorization_service=(
+                bootstrap_authorization_service
+            ),
+            launch_credential_service=launch_service,
+        )
+    )
+
+    entry_grant_service = CustomerSetupEntryGrantService(
+        registration_store=registration_store,
+        setup_activation_service=activation_service,
+        handoff_service=handoff_service,
+        resolve_setup_activation_id=(
+            launch_grant_service.resolve_setup_activation_id
+        ),
+    )
+
+    reconciliation = _confirm_authoritative_vnd_payment(
+        chain
+    )
+
+    activation = completion_service.complete(
+        reconciliation_id=reconciliation.reconciliation_id
+    )
+
+    issued_access = access_code_service.issue(
+        setup_activation_id=activation.setup_activation_id
+    )
+
+    code_verifier = "A" * 43
+
+    code_challenge_s256 = (
+        base64.urlsafe_b64encode(
+            hashlib.sha256(
+                code_verifier.encode("ascii")
+            ).digest()
+        )
+        .rstrip(b"=")
+        .decode("ascii")
+    )
+
+    exchange = exchange_service.exchange(
+        activation_code=issued_access.activation_code,
+        code_challenge_s256=code_challenge_s256,
+    )
+
+    launch_grant = launch_grant_service.grant(
+        authorization_code=exchange.authorization_code,
+        code_verifier=code_verifier,
+        current_time=now,
+    )
+
+    launch_authorization = launch_service.authorize(
+        launch_credential=(
+            launch_grant.setup_launch_credential
+        ),
+        current_time=now,
+    )
+
+    entry_grant = entry_grant_service.grant(
+        grant_request_id=(
+            launch_authorization.launch_id
+        ),
+        customer_id=(
+            launch_authorization.customer_id
+        ),
+        current_time=now,
+    )
+
+    handoff_authorization = (
+        handoff_authorizer.authorize(
+            entry_grant.handoff_credential
+        )
+    )
+
+    assert (
+        handoff_authorization.customer_id
+        == chain["order"].customer_id
+    )
+    assert (
+        handoff_authorization.setup_activation_id
+        == activation.setup_activation_id
+    )
+
+    deployment_id = "deployment-p8f6"
+    account_fingerprint = "P8F6-Test:100001"
+
+    build_request_store = (
+        CustomerDeploymentPackageBuildRequestStore(
+            tmp_path / "p8f6-build-requests"
+        )
+    )
+    build_request_store.initialize_empty()
+
+    build_request_store.register(
+        CustomerDeploymentPackageBuildRequest(
+            deployment_id=deployment_id,
+            bootstrap_request_id=(
+                activation.setup_activation_id
+            ),
+        )
+    )
+
+    continuation_store = (
+        CustomerSetupBuildContinuationStore(
+            tmp_path / "p8f6-continuations.json"
+        )
+    )
+    continuation_store.initialize_empty()
+
+    continuation_service = (
+        CustomerSetupBuildContinuationService(
+            continuation_store=continuation_store,
+            setup_activation_store=activation_store,
+            build_request_store=build_request_store,
+        )
+    )
+
+    issued_continuation = continuation_service.issue(
+        setup_activation_id=(
+            handoff_authorization.setup_activation_id
+        ),
+        deployment_id=deployment_id,
+        account_fingerprint=account_fingerprint,
+        current_time=now,
+    )
+
+    authorized_continuation = (
+        continuation_service.authorize(
+            continuation_credential=(
+                issued_continuation.continuation_credential
+            ),
+            account_fingerprint=account_fingerprint,
+            current_time=now,
+        )
+    )
+
+    assert (
+        authorized_continuation.customer_id
+        == chain["order"].customer_id
+    )
+    assert (
+        authorized_continuation.setup_activation_id
+        == activation.setup_activation_id
+    )
+    assert (
+        authorized_continuation.deployment_id
+        == deployment_id
+    )

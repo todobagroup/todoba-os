@@ -70,6 +70,24 @@ from backend.commercial.customer_vnd_bank_reconciliation_verification_adapter im
 from backend.commercial.customer_vnd_bank_payment_completion_orchestration_service import (
     CustomerVndBankPaymentCompletionOrchestrationService,
 )
+from backend.commercial.customer_commercial_order_terms_binding import (
+    CustomerCommercialOrderTermsBindingRecord,
+    CustomerCommercialOrderTermsBindingStore,
+)
+from backend.commercial.customer_commercial_entitlement_registry import (
+    CustomerCommercialEntitlementRegistry,
+)
+from backend.commercial.customer_deployment_registry import (
+    CustomerDeploymentRegistry,
+)
+from backend.commercial.customer_setup_activation_service import (
+    CustomerSetupActivationService,
+    CustomerSetupActivationStatus,
+    CustomerSetupActivationStore,
+)
+from backend.commercial.customer_payment_settlement_entitlement_convergence_service import (
+    CustomerPaymentSettlementEntitlementConvergenceService,
+)
 
 
 
@@ -571,7 +589,10 @@ def _build_dynamic_vnd_commercial_chain(
     )
 
     return {
+        "identity_registry": identity_registry,
         "customer": customer,
+        "settlement_service": settlement_service,
+        "verification_adapter": verification_adapter,
         "order": order,
         "order_store": order_store,
         "intent": intent,
@@ -833,3 +854,114 @@ def test_vnd_commercial_bank_reference_replay_is_rejected(
         chain["activation_bridge"].calls
         == []
     )
+
+def test_vnd_commercial_real_activation_from_authoritative_settlement(
+    tmp_path,
+):
+    """
+    P8F2 proves the full authoritative VND payment chain reaches the
+    real Setup activation owner rather than a recording test double.
+    """
+
+    chain = _build_dynamic_vnd_commercial_chain(
+        tmp_path
+    )
+
+    terms_store = CustomerCommercialOrderTermsBindingStore(
+        tmp_path / "p8f2-order-terms.json"
+    )
+    terms_store.initialize_empty()
+
+    terms_store.register(
+        CustomerCommercialOrderTermsBindingRecord(
+            order_id=chain["order"].order_id,
+            customer_id=chain["order"].customer_id,
+            licensed_account_cap_usd=1000,
+            standard_monthly_price_usd=50,
+        )
+    )
+
+    entitlement_registry = CustomerCommercialEntitlementRegistry(
+        tmp_path / "p8f2-entitlements.json"
+    )
+    entitlement_registry.initialize_empty()
+
+    entitlement_convergence_service = (
+        CustomerPaymentSettlementEntitlementConvergenceService(
+            settlement_store=chain["settlement_store"],
+            order_store=chain["order_store"],
+            order_terms_store=terms_store,
+            entitlement_registry=entitlement_registry,
+        )
+    )
+
+    deployment_registry = CustomerDeploymentRegistry(
+        tmp_path / "p8f2-deployments.json"
+    )
+    deployment_registry.initialize_empty()
+
+    activation_store = CustomerSetupActivationStore(
+        tmp_path / "p8f2-activations.json"
+    )
+    activation_store.initialize_empty()
+
+    activation_service = CustomerSetupActivationService(
+        activation_store=activation_store,
+        customer_identity_registry=(
+            chain["identity_registry"]
+        ),
+        deployment_registry=deployment_registry,
+    )
+
+    real_activation_bridge = (
+        CustomerPaymentSettlementActivationBridge(
+            entitlement_convergence_service=(
+                entitlement_convergence_service
+            ),
+            setup_activation_service=activation_service,
+        )
+    )
+
+    real_settlement_orchestration = (
+        CustomerPaymentSettlementOrchestrationService(
+            settlement_service=chain["settlement_service"],
+            activation_bridge=real_activation_bridge,
+        )
+    )
+
+    real_completion_service = (
+        CustomerVndBankPaymentCompletionOrchestrationService(
+            verification_adapter=chain["verification_adapter"],
+            settlement_orchestration_service=(
+                real_settlement_orchestration
+            ),
+        )
+    )
+
+    reconciliation = _confirm_authoritative_vnd_payment(
+        chain
+    )
+
+    assert activation_store.size() == 0
+    assert entitlement_registry.size() == 0
+
+    first = real_completion_service.complete(
+        reconciliation_id=reconciliation.reconciliation_id
+    )
+
+    assert (
+        first.status
+        is CustomerSetupActivationStatus.ACTIVE
+    )
+
+    assert first.customer_id == chain["order"].customer_id
+    assert activation_store.size() == 1
+    assert entitlement_registry.size() == 1
+
+    second = real_completion_service.complete(
+        reconciliation_id=reconciliation.reconciliation_id
+    )
+
+    assert second == first
+    assert activation_store.size() == 1
+    assert entitlement_registry.size() == 1

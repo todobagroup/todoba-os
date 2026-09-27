@@ -2337,3 +2337,376 @@ def test_authoritative_handoff_crosses_real_provisioning_http_boundary(
     assert activation_after_pending is not None
     assert activation_after_pending.status.value == "ACTIVE"
     assert activation_after_pending.deployment_id is None
+
+def test_paid_continuation_reaches_ready_and_binds_activation(
+    tmp_path,
+):
+    """
+    P8F8 proves that real continuation authority derived from a
+    server-authoritative paid setup activation crosses the actual
+    /customer/setup/continue HTTP boundary, recovers the existing
+    build, consumes a real published package, activates deployment
+    entitlement, binds the paid activation, and returns ready.
+    """
+
+    from datetime import datetime, timezone
+    from unittest.mock import Mock
+
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from backend.commercial.customer_deployment_bootstrap_service import (
+        CustomerDeploymentBootstrapPreparationResult,
+        CustomerDeploymentBootstrapResult,
+    )
+    from backend.commercial.customer_deployment_entitlement_registry import (
+        CustomerDeploymentEntitlementRegistry,
+    )
+    from backend.commercial.customer_deployment_package_publication import (
+        CustomerDeploymentPackagePublication,
+    )
+    from backend.commercial.customer_deployment_registry import (
+        CustomerDeployment,
+    )
+    from backend.commercial.customer_deployment_secret_store import (
+        CustomerDeploymentSecrets,
+    )
+
+    chain = _build_dynamic_vnd_commercial_chain(
+        tmp_path
+    )
+
+    deployment_registry = CustomerDeploymentRegistry(
+        tmp_path / "p8f8-deployments.json"
+    )
+    deployment_registry.initialize_empty()
+
+    activation_store = CustomerSetupActivationStore(
+        tmp_path / "p8f8-activations.json"
+    )
+    activation_store.initialize_empty()
+
+    activation_service = CustomerSetupActivationService(
+        activation_store=activation_store,
+        customer_identity_registry=(
+            chain["identity_registry"]
+        ),
+        deployment_registry=deployment_registry,
+    )
+
+    terms_store = CustomerCommercialOrderTermsBindingStore(
+        tmp_path / "p8f8-order-terms.json"
+    )
+    terms_store.initialize_empty()
+
+    terms_store.register(
+        CustomerCommercialOrderTermsBindingRecord(
+            order_id=chain["order"].order_id,
+            customer_id=chain["order"].customer_id,
+            licensed_account_cap_usd=1000,
+            standard_monthly_price_usd=50,
+        )
+    )
+
+    commercial_entitlements = (
+        CustomerCommercialEntitlementRegistry(
+            tmp_path / "p8f8-commercial-entitlements.json"
+        )
+    )
+    commercial_entitlements.initialize_empty()
+
+    entitlement_convergence_service = (
+        CustomerPaymentSettlementEntitlementConvergenceService(
+            settlement_store=chain["settlement_store"],
+            order_store=chain["order_store"],
+            order_terms_store=terms_store,
+            entitlement_registry=commercial_entitlements,
+        )
+    )
+
+    activation_bridge = (
+        CustomerPaymentSettlementActivationBridge(
+            entitlement_convergence_service=(
+                entitlement_convergence_service
+            ),
+            setup_activation_service=activation_service,
+        )
+    )
+
+    settlement_orchestration = (
+        CustomerPaymentSettlementOrchestrationService(
+            settlement_service=chain["settlement_service"],
+            activation_bridge=activation_bridge,
+        )
+    )
+
+    completion_service = (
+        CustomerVndBankPaymentCompletionOrchestrationService(
+            verification_adapter=chain["verification_adapter"],
+            settlement_orchestration_service=(
+                settlement_orchestration
+            ),
+        )
+    )
+
+    reconciliation = _confirm_authoritative_vnd_payment(
+        chain
+    )
+
+    activation = completion_service.complete(
+        reconciliation_id=reconciliation.reconciliation_id
+    )
+
+    now = datetime(
+        2026,
+        9,
+        27,
+        10,
+        0,
+        tzinfo=timezone.utc,
+    )
+
+    deployment_id = "deployment-p8f8"
+    account_fingerprint = "P8F8-Test:100002"
+
+    deployment = CustomerDeployment(
+        customer_id=chain["order"].customer_id,
+        deployment_id=deployment_id,
+        agent_id="trusted-agent-p8f8",
+    )
+
+    secrets = CustomerDeploymentSecrets(
+        deployment_id=deployment_id,
+        agent_secret="p8f8-agent-secret",
+        execution_mission_signing_secret=(
+            "p8f8-execution-secret"
+        ),
+        control_mission_signing_secret=(
+            "p8f8-control-secret"
+        ),
+    )
+
+    prepared = CustomerDeploymentBootstrapPreparationResult(
+        enrollment_request_id=(
+            activation.setup_activation_id
+        ),
+        deployment=deployment,
+        secrets=secrets,
+        account_fingerprint=account_fingerprint,
+    )
+
+    activated = CustomerDeploymentBootstrapResult(
+        enrollment_request_id=(
+            activation.setup_activation_id
+        ),
+        deployment=deployment,
+        secrets=secrets,
+        account_fingerprint=account_fingerprint,
+        projected_deployment_count=1,
+    )
+
+    build_request_store = (
+        CustomerDeploymentPackageBuildRequestStore(
+            tmp_path / "p8f8-build-requests"
+        )
+    )
+    build_request_store.initialize_empty()
+
+    build_request_store.register(
+        CustomerDeploymentPackageBuildRequest(
+            deployment_id=deployment_id,
+            bootstrap_request_id=(
+                activation.setup_activation_id
+            ),
+        )
+    )
+
+    continuation_store = (
+        CustomerSetupBuildContinuationStore(
+            tmp_path / "p8f8-continuations.json"
+        )
+    )
+    continuation_store.initialize_empty()
+
+    continuation_service = (
+        CustomerSetupBuildContinuationService(
+            continuation_store=continuation_store,
+            setup_activation_store=activation_store,
+            build_request_store=build_request_store,
+        )
+    )
+
+    issued_continuation = continuation_service.issue(
+        setup_activation_id=(
+            activation.setup_activation_id
+        ),
+        deployment_id=deployment_id,
+        account_fingerprint=account_fingerprint,
+        current_time=now,
+    )
+
+    bootstrap_service = Mock()
+    bootstrap_service.recover_prepared_bootstrap.return_value = (
+        prepared
+    )
+
+    def activate_bootstrap(**kwargs):
+        assert kwargs == {
+            "enrollment_request_id": (
+                activation.setup_activation_id
+            ),
+            "customer_id": chain["order"].customer_id,
+            "account_fingerprint": account_fingerprint,
+        }
+
+        deployment_registry.register(
+            deployment
+        )
+
+        return activated
+
+    bootstrap_service.activate_bootstrap.side_effect = (
+        activate_bootstrap
+    )
+
+    package_root = tmp_path / "p8f8-packages"
+
+    package_publication = (
+        CustomerDeploymentPackagePublication(
+            package_root=package_root
+        )
+    )
+
+    package_directory = (
+        package_publication.package_directory(
+            deployment_id=deployment_id
+        )
+    )
+    package_directory.mkdir(
+        parents=True,
+        exist_ok=False,
+    )
+
+    artifact = package_publication.artifact_path(
+        deployment_id=deployment_id
+    )
+    artifact.write_bytes(
+        b"P8F8-READY-EX5"
+    )
+
+    published = (
+        package_publication.get_published_package(
+            deployment_id=deployment_id
+        )
+    )
+
+    assert published is not None
+    assert published.deployment_id == deployment_id
+
+    deployment_entitlements = (
+        CustomerDeploymentEntitlementRegistry(
+            tmp_path / "p8f8-deployment-entitlements.json",
+            deployment_registry=deployment_registry,
+        )
+    )
+    deployment_entitlements.initialize_empty()
+
+    router = create_customer_setup_provisioning_router(
+        authorize_setup_handoff=Mock(
+            side_effect=AssertionError(
+                "Handoff authority must not be used by continuation."
+            )
+        ),
+        bootstrap_service=bootstrap_service,
+        build_request_store=build_request_store,
+        package_publication=package_publication,
+        entitlement_registry=deployment_entitlements,
+        setup_activation_service=activation_service,
+        continuation_service=continuation_service,
+        clock=lambda: now,
+    )
+
+    app = FastAPI()
+    app.include_router(router)
+
+    client = TestClient(
+        app,
+        raise_server_exceptions=False,
+    )
+
+    response = client.post(
+        "/customer/setup/continue",
+        headers={
+            "Authorization": (
+                "Bearer "
+                + issued_continuation.continuation_credential
+            )
+        },
+    )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+
+    assert payload == {
+        "status": "ready",
+        "artifact_sha256": published.artifact_sha256,
+        "artifact_size_bytes": (
+            published.artifact_size_bytes
+        ),
+    }
+
+    assert deployment_entitlements.is_active(
+        deployment_id=deployment_id
+    )
+
+    bound = activation_service.get(
+        setup_activation_id=activation.setup_activation_id
+    )
+
+    assert bound is not None
+    assert bound.status.value == "BOUND"
+    assert bound.customer_id == chain["order"].customer_id
+    assert bound.deployment_id == deployment_id
+
+    bootstrap_service.recover_prepared_bootstrap.assert_called_once_with(
+        enrollment_request_id=(
+            activation.setup_activation_id
+        )
+    )
+
+    bootstrap_service.activate_bootstrap.assert_called_once()
+
+    assert (
+        build_request_store.get(
+            deployment_id=deployment_id
+        ).bootstrap_request_id
+        == activation.setup_activation_id
+    )
+
+    # Same continuation after successful bind must be read-only.
+    bootstrap_service.reset_mock()
+
+    retry = client.post(
+        "/customer/setup/continue",
+        headers={
+            "Authorization": (
+                "Bearer "
+                + issued_continuation.continuation_credential
+            )
+        },
+    )
+
+    assert retry.status_code == 200
+    assert retry.json() == payload
+
+    bootstrap_service.recover_prepared_bootstrap.assert_not_called()
+    bootstrap_service.activate_bootstrap.assert_not_called()
+
+    rebound = activation_service.get(
+        setup_activation_id=activation.setup_activation_id
+    )
+
+    assert rebound is not None
+    assert rebound.status.value == "BOUND"
+    assert rebound.deployment_id == deployment_id

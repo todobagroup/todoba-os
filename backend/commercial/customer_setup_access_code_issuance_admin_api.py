@@ -19,6 +19,7 @@ Replay does not rotate an already-active code.
 
 from fastapi import APIRouter
 from fastapi import Depends
+from fastapi import HTTPException
 from pydantic import BaseModel
 from pydantic import ConfigDict
 from pydantic import field_validator
@@ -101,11 +102,50 @@ def create_customer_setup_access_code_issuance_admin_router(
             commercial_operator_authentication_dependency
         ),
     ) -> CustomerSetupAccessCodeIssuanceAdminResponse:
-        result = issue_once(
-            setup_activation_id=(
-                request.setup_activation_id
+        try:
+            result = issue_once(
+                setup_activation_id=(
+                    request.setup_activation_id
+                )
             )
-        )
+        except ValueError as error:
+            if str(error) == (
+                "Unknown customer setup activation."
+            ):
+                raise HTTPException(
+                    status_code=404,
+                    detail=(
+                        "Customer setup activation "
+                        "was not found."
+                    ),
+                ) from error
+
+            if str(error) == (
+                "Customer setup activation is not active."
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Customer setup activation "
+                        "is not active."
+                    ),
+                ) from error
+
+            raise
+        except RuntimeError as error:
+            if str(error) == (
+                "An active Setup Activation Code already "
+                "exists; refusing replay rotation."
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "An active Setup Activation Code "
+                        "already exists."
+                    ),
+                ) from error
+
+            raise
 
         if not isinstance(
             result,

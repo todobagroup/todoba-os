@@ -1,3 +1,5 @@
+import pytest
+
 from fastapi import FastAPI
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
@@ -205,4 +207,157 @@ def test_router_requires_replay_safe_issuance_owner():
     else:
         raise AssertionError(
             "Owner without issue_once() was accepted."
+        )
+
+class DomainFailureAccessCodeService:
+    def __init__(self, error):
+        self.error = error
+        self.calls = []
+
+    def issue_once(
+        self,
+        *,
+        setup_activation_id,
+    ):
+        self.calls.append(setup_activation_id)
+        raise self.error
+
+
+def test_unknown_activation_maps_to_404():
+    service = DomainFailureAccessCodeService(
+        ValueError(
+            "Unknown customer setup activation."
+        )
+    )
+
+    client, _ = _build_client(
+        service=service,
+    )
+
+    response = client.post(
+        _PATH,
+        json={
+            "setup_activation_id": (
+                "setup-activation-unknown"
+            ),
+        },
+    )
+
+    assert response.status_code == 404
+    assert service.calls == [
+        "setup-activation-unknown",
+    ]
+
+    assert response.json() == {
+        "detail": (
+            "Customer setup activation was not found."
+        ),
+    }
+
+
+def test_non_active_activation_maps_to_409():
+    service = DomainFailureAccessCodeService(
+        ValueError(
+            "Customer setup activation is not active."
+        )
+    )
+
+    client, _ = _build_client(
+        service=service,
+    )
+
+    response = client.post(
+        _PATH,
+        json={
+            "setup_activation_id": (
+                "setup-activation-bound"
+            ),
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": (
+            "Customer setup activation is not active."
+        ),
+    }
+
+
+def test_replay_rotation_conflict_maps_to_409():
+    service = DomainFailureAccessCodeService(
+        RuntimeError(
+            "An active Setup Activation Code already "
+            "exists; refusing replay rotation."
+        )
+    )
+
+    client, _ = _build_client(
+        service=service,
+    )
+
+    response = client.post(
+        _PATH,
+        json={
+            "setup_activation_id": (
+                "setup-activation-paid-001"
+            ),
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "detail": (
+            "An active Setup Activation Code "
+            "already exists."
+        ),
+    }
+
+
+def test_unexpected_value_error_remains_internal_failure():
+    service = DomainFailureAccessCodeService(
+        ValueError(
+            "unexpected-value-error"
+        )
+    )
+
+    client, _ = _build_client(
+        service=service,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="unexpected-value-error",
+    ):
+        client.post(
+            _PATH,
+            json={
+                "setup_activation_id": (
+                    "setup-activation-paid-001"
+                ),
+            },
+        )
+
+
+def test_unexpected_runtime_error_remains_internal_failure():
+    service = DomainFailureAccessCodeService(
+        RuntimeError(
+            "unexpected-runtime-error"
+        )
+    )
+
+    client, _ = _build_client(
+        service=service,
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="unexpected-runtime-error",
+    ):
+        client.post(
+            _PATH,
+            json={
+                "setup_activation_id": (
+                    "setup-activation-paid-001"
+                ),
+            },
         )

@@ -593,6 +593,25 @@ class CustomerCommercialVndOrderPricingProjectionStore:
             )
 
 
+def open_or_initialize_customer_commercial_vnd_order_pricing_projection_store(
+    storage_path: Path,
+) -> CustomerCommercialVndOrderPricingProjectionStore:
+    """
+    Open existing durable VND projections, or provision a new empty store.
+
+    The store constructor already opens existing state. Only a genuinely
+    new store requires explicit initialization.
+    """
+    store = CustomerCommercialVndOrderPricingProjectionStore(
+        storage_path
+    )
+
+    if not store.is_ready():
+        store.initialize_empty()
+
+    return store
+
+
 class CustomerCommercialVndOrderPricingProjectionService:
     """
     Server-side authority that freezes a USD commercial price into

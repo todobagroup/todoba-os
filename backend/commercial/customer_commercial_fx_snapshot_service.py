@@ -862,3 +862,23 @@ class CustomerCommercialFXSnapshotStore:
         return value.astimezone(
             UTC
         )
+
+def open_or_initialize_customer_commercial_fx_snapshot_store(
+    path: Path,
+) -> CustomerCommercialFXSnapshotStore:
+    """
+    Open existing durable FX truth, or provision its new empty store.
+
+    Production composition delegates persistence bootstrap here so
+    application composition does not own durable-state initialization.
+    """
+    store = CustomerCommercialFXSnapshotStore(
+        path
+    )
+
+    if path.is_file():
+        store.load()
+    else:
+        store.initialize_empty()
+
+    return store

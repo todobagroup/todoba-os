@@ -81,6 +81,27 @@ from backend.commercial.customer_setup_activation_service import (
     CustomerSetupActivationService,
     CustomerSetupActivationStore,
 )
+from datetime import timedelta
+
+from backend.commercial.customer_commercial_fx_snapshot_service import (
+    open_or_initialize_customer_commercial_fx_snapshot_store,
+)
+from backend.commercial.customer_commercial_vietcombank_fx_adapter import (
+    VIETCOMBANK_FX_SOURCE_ID,
+    VietcombankFXAdapter,
+)
+from backend.commercial.customer_commercial_fx_daily_refresh_service import (
+    CustomerCommercialFXDailyRefreshScheduler,
+    CustomerCommercialFXDailyRefreshService,
+)
+from backend.commercial.customer_commercial_fx_freshness_gate import (
+    CustomerCommercialFXFreshnessGate,
+)
+from backend.commercial.customer_commercial_vnd_order_pricing_projection import (
+    CustomerCommercialVndOrderPricingProjectionService,
+    open_or_initialize_customer_commercial_vnd_order_pricing_projection_store,
+)
+
 from backend.commercial.customer_commercial_order_service import (
     CustomerCommercialOrderStore,
     CustomerCommercialOrderService,
@@ -642,6 +663,17 @@ CUSTOMER_SETUP_ACCESS_CODE_STORAGE_PATH = (
     / "customer_setup_access_codes.json"
 )
 
+CUSTOMER_COMMERCIAL_FX_SNAPSHOT_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_commercial_fx_snapshots.json"
+)
+CUSTOMER_COMMERCIAL_VND_ORDER_PRICING_PROJECTION_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_commercial_vnd_order_pricing_projections.json"
+)
+
 CUSTOMER_COMMERCIAL_ORDER_STORAGE_PATH = (
     TODOBA_CONTROL_PLANE_DATA_ROOT
     / "commercial"
@@ -1173,6 +1205,105 @@ def _compose_customer_commercial_capacity_runtime(
     )
 
     _customer_commercial_capacity_runtime_composed = True
+
+
+_customer_vnd_pricing_runtime_composed = False
+
+customer_commercial_fx_snapshot_store = None
+customer_commercial_fx_daily_refresh_service = None
+customer_commercial_fx_daily_refresh_scheduler = None
+customer_commercial_fx_freshness_gate = None
+customer_commercial_vnd_order_pricing_projection_store = None
+customer_commercial_vnd_order_pricing_projection_service = None
+
+
+def _compose_customer_vnd_pricing_runtime() -> None:
+    global _customer_vnd_pricing_runtime_composed
+    global customer_commercial_fx_snapshot_store
+    global customer_commercial_fx_daily_refresh_service
+    global customer_commercial_fx_daily_refresh_scheduler
+    global customer_commercial_fx_freshness_gate
+    global customer_commercial_vnd_order_pricing_projection_store
+    global customer_commercial_vnd_order_pricing_projection_service
+
+    if _customer_vnd_pricing_runtime_composed:
+        return
+
+    fx_snapshot_store = (
+        open_or_initialize_customer_commercial_fx_snapshot_store(
+            CUSTOMER_COMMERCIAL_FX_SNAPSHOT_STORAGE_PATH
+        )
+    )
+
+    vietcombank_fx_adapter = VietcombankFXAdapter(
+        timeout_seconds=5.0,
+        clock=lambda: datetime.now(
+            timezone.utc
+        ),
+    )
+
+    fx_daily_refresh_service = (
+        CustomerCommercialFXDailyRefreshService(
+            adapter=vietcombank_fx_adapter,
+            snapshot_store=fx_snapshot_store,
+        )
+    )
+
+    fx_daily_refresh_scheduler = (
+        CustomerCommercialFXDailyRefreshScheduler(
+            refresh_service=fx_daily_refresh_service,
+            clock=lambda: datetime.now(
+                timezone.utc
+            ),
+        )
+    )
+
+    fx_freshness_gate = CustomerCommercialFXFreshnessGate(
+        snapshot_store=fx_snapshot_store,
+        source_id=VIETCOMBANK_FX_SOURCE_ID,
+        max_age=timedelta(
+            hours=48
+        ),
+        clock=lambda: datetime.now(
+            timezone.utc
+        ),
+    )
+
+    vnd_order_pricing_projection_store = (
+        open_or_initialize_customer_commercial_vnd_order_pricing_projection_store(
+            CUSTOMER_COMMERCIAL_VND_ORDER_PRICING_PROJECTION_STORAGE_PATH
+        )
+    )
+
+    vnd_order_pricing_projection_service = (
+        CustomerCommercialVndOrderPricingProjectionService(
+            projection_store=(
+                vnd_order_pricing_projection_store
+            ),
+            fx_freshness_gate=fx_freshness_gate,
+        )
+    )
+
+    customer_commercial_fx_snapshot_store = (
+        fx_snapshot_store
+    )
+    customer_commercial_fx_daily_refresh_service = (
+        fx_daily_refresh_service
+    )
+    customer_commercial_fx_daily_refresh_scheduler = (
+        fx_daily_refresh_scheduler
+    )
+    customer_commercial_fx_freshness_gate = (
+        fx_freshness_gate
+    )
+    customer_commercial_vnd_order_pricing_projection_store = (
+        vnd_order_pricing_projection_store
+    )
+    customer_commercial_vnd_order_pricing_projection_service = (
+        vnd_order_pricing_projection_service
+    )
+
+    _customer_vnd_pricing_runtime_composed = True
 
 
 def _compose_customer_payment_runtime(
@@ -2278,6 +2409,9 @@ async def lifespan(
         app
     )
     try:
+        _compose_customer_vnd_pricing_runtime()
+        await customer_commercial_fx_daily_refresh_scheduler.start()
+
         _compose_customer_payment_runtime(
             app
         )
@@ -2335,6 +2469,9 @@ async def lifespan(
     await todoba_runtime.start()
 
     yield
+
+    if customer_commercial_fx_daily_refresh_scheduler is not None:
+        await customer_commercial_fx_daily_refresh_scheduler.stop()
 
     await todoba_runtime.stop()
 

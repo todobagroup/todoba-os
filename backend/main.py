@@ -184,6 +184,12 @@ from backend.commercial.customer_paypal_order_binding_service import (
 from backend.commercial.customer_vnd_bank_payment_instruction_service import (
     CustomerVndBankPaymentInstructionService,
 )
+from backend.commercial.customer_vnd_payment_initiation_service import (
+    CustomerVndPaymentInitiationService,
+)
+from backend.commercial.customer_vnd_payment_initiation_api import (
+    create_customer_vnd_payment_initiation_router,
+)
 from backend.commercial.customer_vnd_bank_reconciliation_service import (
     CustomerVndBankReconciliationStore,
 )
@@ -933,6 +939,10 @@ customer_paypal_order_binding_store = None
 customer_vnd_bank_reconciliation_store = None
 
 customer_vnd_bank_payment_instruction_service = None
+customer_commercial_order_service = None
+customer_payment_intent_service = None
+customer_commercial_current_billing_cycle_service = None
+customer_vnd_payment_initiation_service = None
 customer_payment_settlement_service = None
 customer_payment_settlement_entitlement_convergence_service = None
 customer_payment_settlement_activation_bridge = None
@@ -968,6 +978,7 @@ def _compose_customer_commercial_capacity_runtime(
     app: FastAPI,
 ) -> None:
     global _customer_commercial_capacity_runtime_composed
+    global customer_commercial_current_billing_cycle_service
 
     if _customer_commercial_capacity_runtime_composed:
         return
@@ -1067,7 +1078,7 @@ def _compose_customer_commercial_capacity_runtime(
     )
     commercial_pending_exposure_containment_issuance_store.load()
 
-    commercial_current_billing_cycle_service = (
+    customer_commercial_current_billing_cycle_service = (
         CustomerCommercialCurrentBillingCycleService(
             store=commercial_current_billing_cycle_store,
             billing_cycle_store=(
@@ -1089,7 +1100,7 @@ def _compose_customer_commercial_capacity_runtime(
                 commercial_deployment_binding_store
             ),
             current_billing_cycle_service=(
-                commercial_current_billing_cycle_service
+                customer_commercial_current_billing_cycle_service
             ),
             external_funding_store=(
                 commercial_external_funding_observation_store
@@ -1541,6 +1552,96 @@ def _compose_customer_payment_runtime(
     _customer_payment_runtime_composed = True
 
 
+_customer_vnd_payment_initiation_runtime_composed = False
+
+
+def _compose_customer_vnd_payment_initiation_runtime(
+    app: FastAPI,
+) -> None:
+    global _customer_vnd_payment_initiation_runtime_composed
+    global customer_vnd_payment_initiation_service
+
+    if _customer_vnd_payment_initiation_runtime_composed:
+        return
+
+    required = (
+        (
+            "current billing cycle service",
+            customer_commercial_current_billing_cycle_service,
+            CustomerCommercialCurrentBillingCycleService,
+        ),
+        (
+            "VND pricing projection service",
+            customer_commercial_vnd_order_pricing_projection_service,
+            CustomerCommercialVndOrderPricingProjectionService,
+        ),
+        (
+            "commercial order service",
+            customer_commercial_order_service,
+            CustomerCommercialOrderService,
+        ),
+        (
+            "payment intent service",
+            customer_payment_intent_service,
+            CustomerPaymentIntentService,
+        ),
+        (
+            "VND payment instruction service",
+            customer_vnd_bank_payment_instruction_service,
+            CustomerVndBankPaymentInstructionService,
+        ),
+    )
+
+    for owner_name, owner, owner_type in required:
+        if not isinstance(
+            owner,
+            owner_type,
+        ):
+            raise RuntimeError(
+                "VND payment initiation requires "
+                f"authoritative {owner_name}."
+            )
+
+    initiation_service = CustomerVndPaymentInitiationService(
+        current_billing_cycle_service=(
+            customer_commercial_current_billing_cycle_service
+        ),
+        vnd_pricing_projection_service=(
+            customer_commercial_vnd_order_pricing_projection_service
+        ),
+        order_service=(
+            customer_commercial_order_service
+        ),
+        payment_intent_service=(
+            customer_payment_intent_service
+        ),
+        payment_instruction_service=(
+            customer_vnd_bank_payment_instruction_service
+        ),
+    )
+
+    initiation_router = (
+        create_customer_vnd_payment_initiation_router(
+            initiate_vnd_payment=(
+                initiation_service.initiate
+            ),
+            customer_authentication_dependency=(
+                customer_authentication_dependency
+            ),
+        )
+    )
+
+    app.include_router(
+        initiation_router
+    )
+
+    customer_vnd_payment_initiation_service = (
+        initiation_service
+    )
+
+    _customer_vnd_payment_initiation_runtime_composed = True
+
+
 _authenticated_vnd_reconciliation_ingress_composed = False
 
 
@@ -1548,6 +1649,8 @@ def _compose_authenticated_vnd_reconciliation_ingress(
     app: FastAPI,
 ) -> None:
     global _authenticated_vnd_reconciliation_ingress_composed
+    global customer_commercial_order_service
+    global customer_payment_intent_service
 
     if _authenticated_vnd_reconciliation_ingress_composed:
         return
@@ -2419,6 +2522,9 @@ async def lifespan(
             app
         )
         _compose_customer_commercial_capacity_runtime(
+            app
+        )
+        _compose_customer_vnd_payment_initiation_runtime(
             app
         )
     except RuntimeError as payment_startup_error:

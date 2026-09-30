@@ -954,6 +954,44 @@ class CustomerSetupAccessCodeService:
             )
 
 
+    def issue_once(
+        self,
+        *,
+        setup_activation_id: str,
+    ) -> CustomerSetupAccessCodeIssuance:
+        """
+        Issue the first customer-visible code for one ACTIVE
+        Setup Activation.
+
+        Repeated operator requests fail closed rather than
+        rotating an already-active code.
+        """
+        with self._lock:
+            activation = self._require_active_activation(
+                setup_activation_id
+            )
+
+            existing = (
+                self._access_code_store
+                .get_active_by_setup_activation_id(
+                    setup_activation_id=(
+                        activation.setup_activation_id
+                    )
+                )
+            )
+
+            if existing is not None:
+                raise RuntimeError(
+                    "An active Setup Activation Code already "
+                    "exists; refusing replay rotation."
+                )
+
+            return self.issue(
+                setup_activation_id=(
+                    activation.setup_activation_id
+                )
+            )
+
     def reissue_bound(
         self,
         *,

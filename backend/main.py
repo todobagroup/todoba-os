@@ -504,6 +504,9 @@ from backend.commercial.customer_vnd_bank_reconciliation_admin_api import (
 from backend.commercial.customer_vnd_bank_payment_completion_admin_api import (
     create_customer_vnd_bank_payment_completion_admin_router,
 )
+from backend.commercial.customer_setup_access_code_issuance_admin_api import (
+    create_customer_setup_access_code_issuance_admin_router,
+)
 from backend.commercial.customer_bank_transaction_reference_resolver import (
     CustomerBankTransactionReferenceResolver,
 )
@@ -1568,12 +1571,27 @@ def _compose_authenticated_vnd_reconciliation_ingress(
         )
     )
 
+    authenticated_setup_access_code_issuance_router = (
+        create_customer_setup_access_code_issuance_admin_router(
+            commercial_operator_authentication_dependency=(
+                commercial_operator_authentication_dependency
+            ),
+            access_code_service=(
+                customer_setup_access_code_service
+            ),
+        )
+    )
+
     app.include_router(
         authenticated_vnd_reconciliation_router
     )
 
     app.include_router(
         authenticated_vnd_payment_completion_router
+    )
+
+    app.include_router(
+        authenticated_setup_access_code_issuance_router
     )
 
     _authenticated_vnd_reconciliation_ingress_composed = True

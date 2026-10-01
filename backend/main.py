@@ -77,6 +77,13 @@ from backend.commercial.customer_setup_launch_credential_service import (
     CustomerSetupLaunchCredentialService,
     CustomerSetupLaunchCredentialStore,
 )
+from backend.commercial.customer_manual_commercial_activation_service import (
+    CustomerManualCommercialActivationService,
+    CustomerManualCommercialActivationStore,
+)
+from backend.commercial.customer_manual_commercial_activation_admin_api import (
+    create_customer_manual_commercial_activation_admin_router,
+)
 from backend.commercial.customer_setup_activation_service import (
     CustomerSetupActivationService,
     CustomerSetupActivationStore,
@@ -632,6 +639,13 @@ CUSTOMER_REGISTRATION_STORAGE_PATH = (
     / "commercial"
     / "customer_registrations.json"
 )
+
+CUSTOMER_MANUAL_COMMERCIAL_ACTIVATION_STORAGE_PATH = (
+    TODOBA_CONTROL_PLANE_DATA_ROOT
+    / "commercial"
+    / "customer_manual_commercial_activations.json"
+)
+
 
 CUSTOMER_SETUP_LAUNCH_CREDENTIAL_STORAGE_PATH = (
     TODOBA_CONTROL_PLANE_DATA_ROOT
@@ -1805,6 +1819,38 @@ def _compose_authenticated_vnd_reconciliation_ingress(
         )
     )
 
+    manual_commercial_activation_store = (
+        CustomerManualCommercialActivationStore(
+            CUSTOMER_MANUAL_COMMERCIAL_ACTIVATION_STORAGE_PATH
+        )
+    )
+    manual_commercial_activation_store.open_or_initialize()
+
+    manual_commercial_activation_service = (
+        CustomerManualCommercialActivationService(
+            approval_store=(
+                manual_commercial_activation_store
+            ),
+            registration_service=(
+                customer_registration_service
+            ),
+            setup_activation_service=(
+                customer_setup_activation_service
+            ),
+        )
+    )
+
+    authenticated_manual_commercial_activation_router = (
+        create_customer_manual_commercial_activation_admin_router(
+            commercial_operator_authentication_dependency=(
+                commercial_operator_authentication_dependency
+            ),
+            manual_activation_service=(
+                manual_commercial_activation_service
+            ),
+        )
+    )
+
     authenticated_setup_access_code_issuance_router = (
         create_customer_setup_access_code_issuance_admin_router(
             commercial_operator_authentication_dependency=(
@@ -1822,6 +1868,10 @@ def _compose_authenticated_vnd_reconciliation_ingress(
 
     app.include_router(
         authenticated_vnd_payment_completion_router
+    )
+
+    app.include_router(
+        authenticated_manual_commercial_activation_router
     )
 
     app.include_router(

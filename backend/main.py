@@ -524,6 +524,7 @@ from backend.trading.execution.security_sequence_assignment_service import (
 
 from backend.config import (
     get_commercial_operator_credentials,
+    get_paypal_runtime_config,
     get_vnd_bank_payment_destination,
 )
 from backend.commercial.commercial_operator_authenticator import (
@@ -549,6 +550,23 @@ from backend.commercial.customer_vnd_bank_reconciliation_service import (
 )
 
 
+
+
+from backend.commercial.customer_paypal_capture_http_client import (
+    CustomerPayPalCaptureHttpClient,
+)
+from backend.commercial.customer_paypal_capture_verification_adapter import (
+    CustomerPayPalCaptureVerificationAdapter,
+)
+from backend.commercial.customer_paypal_verified_capture_ingress_api import (
+    create_customer_paypal_verified_capture_ingress_router,
+)
+from backend.commercial.customer_paypal_verified_capture_ingress_service import (
+    CustomerPayPalVerifiedCaptureIngressService,
+)
+from backend.commercial.customer_paypal_webhook_verification_client import (
+    CustomerPayPalWebhookVerificationClient,
+)
 
 MISSION_STORAGE_PATH = (
     Path("data")
@@ -961,6 +979,8 @@ customer_payment_settlement_service = None
 customer_payment_settlement_entitlement_convergence_service = None
 customer_payment_settlement_activation_bridge = None
 customer_payment_settlement_orchestration_service = None
+
+_customer_paypal_verified_capture_ingress_composed = False
 
 _customer_setup_runtime_composed = False
 
@@ -1658,6 +1678,167 @@ def _compose_customer_vnd_payment_initiation_runtime(
 
 _authenticated_vnd_reconciliation_ingress_composed = False
 
+
+
+def _compose_customer_paypal_verified_capture_ingress(
+    app: FastAPI,
+) -> None:
+    global _customer_paypal_verified_capture_ingress_composed
+
+    if _customer_paypal_verified_capture_ingress_composed:
+        return
+
+    required_owners = (
+        (
+            "commercial order store",
+            customer_commercial_order_store,
+        ),
+        (
+            "payment intent store",
+            customer_payment_intent_store,
+        ),
+        (
+            "payment evidence store",
+            customer_payment_evidence_store,
+        ),
+        (
+            "PayPal order binding store",
+            customer_paypal_order_binding_store,
+        ),
+    )
+
+    for owner_name, owner in required_owners:
+        if owner is None:
+            raise RuntimeError(
+                "PayPal verified capture ingress requires "
+                f"authoritative {owner_name}."
+            )
+
+        is_ready = getattr(
+            owner,
+            "is_ready",
+            None,
+        )
+
+        if (
+            not callable(is_ready)
+            or not is_ready()
+        ):
+            raise RuntimeError(
+                "PayPal verified capture ingress requires "
+                f"initialized {owner_name}."
+            )
+
+    if (
+        customer_payment_settlement_orchestration_service
+        is None
+    ):
+        raise RuntimeError(
+            "PayPal verified capture ingress requires "
+            "payment settlement orchestration."
+        )
+
+    (
+        paypal_client_id,
+        paypal_client_secret,
+        paypal_webhook_id,
+        paypal_environment,
+        paypal_timeout_seconds,
+    ) = get_paypal_runtime_config()
+
+    payment_intent_service = (
+        CustomerPaymentIntentService(
+            payment_intent_store=(
+                customer_payment_intent_store
+            ),
+            order_store=(
+                customer_commercial_order_store
+            ),
+        )
+    )
+
+    payment_evidence_service = (
+        CustomerPaymentEvidenceService(
+            payment_evidence_store=(
+                customer_payment_evidence_store
+            ),
+            payment_intent_store=(
+                customer_payment_intent_store
+            ),
+        )
+    )
+
+    webhook_verification_client = (
+        CustomerPayPalWebhookVerificationClient(
+            client_id=paypal_client_id,
+            client_secret=paypal_client_secret,
+            webhook_id=paypal_webhook_id,
+            environment=paypal_environment,
+            timeout_seconds=paypal_timeout_seconds,
+        )
+    )
+
+    capture_client = (
+        CustomerPayPalCaptureHttpClient(
+            client_id=paypal_client_id,
+            client_secret=paypal_client_secret,
+            environment=paypal_environment,
+            timeout_seconds=paypal_timeout_seconds,
+        )
+    )
+
+    capture_verification_adapter = (
+        CustomerPayPalCaptureVerificationAdapter(
+            paypal_binding_store=(
+                customer_paypal_order_binding_store
+            ),
+            payment_evidence_store=(
+                customer_payment_evidence_store
+            ),
+            payment_intent_store=(
+                customer_payment_intent_store
+            ),
+            order_store=(
+                customer_commercial_order_store
+            ),
+        )
+    )
+
+    ingress_service = (
+        CustomerPayPalVerifiedCaptureIngressService(
+            webhook_verification_client=(
+                webhook_verification_client
+            ),
+            capture_client=capture_client,
+            paypal_binding_store=(
+                customer_paypal_order_binding_store
+            ),
+            payment_intent_service=(
+                payment_intent_service
+            ),
+            payment_evidence_service=(
+                payment_evidence_service
+            ),
+            capture_verification_adapter=(
+                capture_verification_adapter
+            ),
+            settlement_orchestration_service=(
+                customer_payment_settlement_orchestration_service
+            ),
+        )
+    )
+
+    router = (
+        create_customer_paypal_verified_capture_ingress_router(
+            ingress_service=ingress_service
+        )
+    )
+
+    app.include_router(
+        router
+    )
+
+    _customer_paypal_verified_capture_ingress_composed = True
 
 def _compose_authenticated_vnd_reconciliation_ingress(
     app: FastAPI,
@@ -2566,6 +2747,9 @@ async def lifespan(
         await customer_commercial_fx_daily_refresh_scheduler.start()
 
         _compose_customer_payment_runtime(
+            app
+        )
+        _compose_customer_paypal_verified_capture_ingress(
             app
         )
         _compose_authenticated_vnd_reconciliation_ingress(

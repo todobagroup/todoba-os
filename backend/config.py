@@ -916,6 +916,99 @@ def get_commercial_operator_credentials() -> tuple[str, str]:
     )
 
 
+
+def get_paypal_runtime_config():
+    """
+    Return server-owned PayPal production transport configuration.
+
+    PayPal credentials are deployment-owned opaque secrets.
+    This getter does not expose them through validation errors
+    and does not own payment, settlement, or customer authority.
+    """
+    from backend.commercial.customer_paypal_order_http_client import (
+        PayPalEnvironment,
+    )
+
+    client_id = os.getenv(
+        "TODOBA_PAYPAL_CLIENT_ID",
+        "",
+    ).strip()
+
+    client_secret = os.getenv(
+        "TODOBA_PAYPAL_CLIENT_SECRET",
+        "",
+    )
+
+    webhook_id = os.getenv(
+        "TODOBA_PAYPAL_WEBHOOK_ID",
+        "",
+    ).strip()
+
+    environment_value = os.getenv(
+        "TODOBA_PAYPAL_ENVIRONMENT",
+        "",
+    ).strip().upper()
+
+    timeout_raw = os.getenv(
+        "TODOBA_PAYPAL_TIMEOUT_SECONDS",
+        "10.0",
+    ).strip()
+
+    if not client_id:
+        raise RuntimeError(
+            "TODOBA_PAYPAL_CLIENT_ID is required."
+        )
+
+    if (
+        not isinstance(
+            client_secret,
+            str,
+        )
+        or not client_secret.strip()
+    ):
+        raise RuntimeError(
+            "TODOBA_PAYPAL_CLIENT_SECRET is required."
+        )
+
+    if not webhook_id:
+        raise RuntimeError(
+            "TODOBA_PAYPAL_WEBHOOK_ID is required."
+        )
+
+    try:
+        environment = PayPalEnvironment(
+            environment_value
+        )
+    except ValueError as error:
+        raise RuntimeError(
+            "TODOBA_PAYPAL_ENVIRONMENT must be "
+            "SANDBOX or LIVE."
+        ) from error
+
+    try:
+        timeout_seconds = float(
+            timeout_raw
+        )
+    except ValueError as error:
+        raise RuntimeError(
+            "TODOBA_PAYPAL_TIMEOUT_SECONDS must be "
+            "a valid positive number."
+        ) from error
+
+    if timeout_seconds <= 0:
+        raise RuntimeError(
+            "TODOBA_PAYPAL_TIMEOUT_SECONDS must be "
+            "greater than zero."
+        )
+
+    return (
+        client_id,
+        client_secret,
+        webhook_id,
+        environment,
+        timeout_seconds,
+    )
+
 def get_vnd_bank_payment_destination():
     """
     Return the server-owned VND bank-transfer destination.

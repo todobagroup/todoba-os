@@ -38,6 +38,15 @@ def test_main_converges_evidence_before_mission_delivery(
             "customer_payment"
         )
 
+    def compose_paypal_verified_capture_ingress(
+        app,
+    ) -> None:
+        assert app is main.app
+
+        calls.append(
+            "paypal_ingress"
+        )
+
     def compose_authenticated_vnd_reconciliation_ingress(
         app,
     ) -> None:
@@ -134,6 +143,12 @@ def test_main_converges_evidence_before_mission_delivery(
 
     monkeypatch.setattr(
         main,
+        "_compose_customer_paypal_verified_capture_ingress",
+        compose_paypal_verified_capture_ingress,
+    )
+
+    monkeypatch.setattr(
+        main,
         "_compose_authenticated_vnd_reconciliation_ingress",
         compose_authenticated_vnd_reconciliation_ingress,
     )
@@ -188,6 +203,7 @@ def test_main_converges_evidence_before_mission_delivery(
                 "account_bindings",
                 "customer_setup",
                 "customer_payment",
+                "paypal_ingress",
                 "vnd_ingress",
                 "records",
                 "delivery_leases",
@@ -205,6 +221,7 @@ def test_main_converges_evidence_before_mission_delivery(
         "account_bindings",
         "customer_setup",
         "customer_payment",
+        "paypal_ingress",
         "vnd_ingress",
         "records",
         "delivery_leases",

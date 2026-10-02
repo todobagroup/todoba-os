@@ -450,6 +450,61 @@ class CustomerPayPalOrderHttpClient:
                 "PayPal order response is invalid."
             )
 
+        approval_url = None
+
+        links = body.get(
+            "links"
+        )
+
+        if links is not None:
+            if not isinstance(
+                links,
+                list,
+            ):
+                raise RuntimeError(
+                    "PayPal order response is invalid."
+                )
+
+            approval_links = []
+
+            for link in links:
+                if not isinstance(
+                    link,
+                    dict,
+                ):
+                    continue
+
+                if link.get(
+                    "rel"
+                ) != "approve":
+                    continue
+
+                href = link.get(
+                    "href"
+                )
+
+                if (
+                    isinstance(
+                        href,
+                        str,
+                    )
+                    and href.strip()
+                ):
+                    approval_links.append(
+                        href.strip()
+                    )
+
+            if len(
+                approval_links
+            ) != 1:
+                raise RuntimeError(
+                    "PayPal order response is invalid."
+                )
+
+            approval_url = approval_links[
+                0
+            ]
+
         return PayPalOrderCreationResult(
             paypal_order_id=(
                 paypal_order_id.strip()
@@ -462,6 +517,7 @@ class CustomerPayPalOrderHttpClient:
             ),
             amount_minor=amount_minor,
             currency=currency,
+            approval_url=approval_url,
         )
 
     @staticmethod

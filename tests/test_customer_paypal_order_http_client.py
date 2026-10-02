@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import json
 
@@ -100,7 +100,17 @@ def _install_success_transport(
                         },
                     }
                 ],
-                "links": [],
+                "links": [
+                    {
+                        "href": (
+                            "https://www.sandbox.paypal.com/"
+                            "checkoutnow?token="
+                            f"{paypal_order_id.strip()}"
+                        ),
+                        "rel": "approve",
+                        "method": "GET",
+                    },
+                ],
             },
             url=url,
         )
@@ -967,4 +977,47 @@ def test_client_does_not_expose_credentials_as_public_attributes():
     assert not hasattr(
         client,
         "access_token",
+    )
+
+def test_validate_order_response_extracts_provider_approval_url():
+    client = CustomerPayPalOrderHttpClient(
+        client_id="test-client",
+        client_secret="test-secret",
+        environment=PayPalEnvironment.SANDBOX,
+        timeout_seconds=1.0,
+    )
+
+    result = client._validate_order_response(
+        body={
+            "id": "paypal-order-001",
+            "status": "CREATED",
+            "purchase_units": [
+                {
+                    "custom_id": "payment-intent-001",
+                    "amount": {
+                        "currency_code": "USD",
+                        "value": "25.00",
+                    },
+                },
+            ],
+            "links": [
+                {
+                    "href": (
+                        "https://www.sandbox.paypal.com/"
+                        "checkoutnow?token=paypal-order-001"
+                    ),
+                    "rel": "approve",
+                    "method": "GET",
+                },
+            ],
+        },
+        payment_intent_id="payment-intent-001",
+        amount_minor=2500,
+        currency="USD",
+        amount_value="25.00",
+    )
+
+    assert result.approval_url == (
+        "https://www.sandbox.paypal.com/"
+        "checkoutnow?token=paypal-order-001"
     )

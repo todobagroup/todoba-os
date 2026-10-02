@@ -115,6 +115,7 @@ class PayPalOrderCreationResult:
     custom_id: str
     amount_minor: int
     currency: str
+    approval_url: str | None = None
 
     def __post_init__(
         self,
@@ -151,6 +152,16 @@ class PayPalOrderCreationResult:
                 self.currency
             ),
         )
+
+        if self.approval_url is not None:
+            object.__setattr__(
+                self,
+                "approval_url",
+                self._normalize_required_string(
+                    self.approval_url,
+                    name="approval_url",
+                ),
+            )
 
     @staticmethod
     def _normalize_required_string(

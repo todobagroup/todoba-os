@@ -186,7 +186,17 @@ from backend.commercial.customer_payment_settlement_orchestration_service import
 )
 
 from backend.commercial.customer_paypal_order_binding_service import (
+    CustomerPayPalOrderBindingService,
     CustomerPayPalOrderBindingStore,
+)
+from backend.commercial.customer_paypal_order_http_client import (
+    CustomerPayPalOrderHttpClient,
+)
+from backend.commercial.customer_paypal_payment_initiation_service import (
+    CustomerPayPalPaymentInitiationService,
+)
+from backend.commercial.customer_paypal_payment_initiation_api import (
+    create_customer_paypal_payment_initiation_router,
 )
 from backend.commercial.customer_vnd_bank_payment_instruction_service import (
     CustomerVndBankPaymentInstructionService,
@@ -975,11 +985,13 @@ customer_commercial_order_service = None
 customer_payment_intent_service = None
 customer_commercial_current_billing_cycle_service = None
 customer_vnd_payment_initiation_service = None
+customer_paypal_payment_initiation_service = None
 customer_payment_settlement_service = None
 customer_payment_settlement_entitlement_convergence_service = None
 customer_payment_settlement_activation_bridge = None
 customer_payment_settlement_orchestration_service = None
 
+_customer_paypal_payment_initiation_runtime_composed = False
 _customer_paypal_verified_capture_ingress_composed = False
 
 _customer_setup_runtime_composed = False
@@ -1678,6 +1690,134 @@ def _compose_customer_vnd_payment_initiation_runtime(
 
 _authenticated_vnd_reconciliation_ingress_composed = False
 
+
+
+
+def _compose_customer_paypal_payment_initiation_runtime(
+    app: FastAPI,
+) -> None:
+    global _customer_paypal_payment_initiation_runtime_composed
+    global customer_paypal_payment_initiation_service
+
+    if _customer_paypal_payment_initiation_runtime_composed:
+        return
+
+    required = (
+        (
+            "current billing cycle service",
+            customer_commercial_current_billing_cycle_service,
+            CustomerCommercialCurrentBillingCycleService,
+        ),
+        (
+            "commercial order service",
+            customer_commercial_order_service,
+            CustomerCommercialOrderService,
+        ),
+        (
+            "payment intent service",
+            customer_payment_intent_service,
+            CustomerPaymentIntentService,
+        ),
+    )
+
+    for owner_name, owner, owner_type in required:
+        if not isinstance(
+            owner,
+            owner_type,
+        ):
+            raise RuntimeError(
+                "PayPal payment initiation requires "
+                f"authoritative {owner_name}."
+            )
+
+    stores = (
+        (
+            "PayPal order binding store",
+            customer_paypal_order_binding_store,
+        ),
+        (
+            "payment intent store",
+            customer_payment_intent_store,
+        ),
+        (
+            "commercial order store",
+            customer_commercial_order_store,
+        ),
+    )
+
+    for owner_name, owner in stores:
+        if owner is None:
+            raise RuntimeError(
+                "PayPal payment initiation requires "
+                f"authoritative {owner_name}."
+            )
+
+        is_ready = getattr(
+            owner,
+            "is_ready",
+            None,
+        )
+
+        if (
+            not callable(is_ready)
+            or not is_ready()
+        ):
+            raise RuntimeError(
+                "PayPal payment initiation requires "
+                f"ready {owner_name}."
+            )
+
+    (
+        paypal_client_id,
+        paypal_client_secret,
+        _paypal_webhook_id,
+        paypal_environment,
+        paypal_timeout_seconds,
+    ) = get_paypal_runtime_config()
+
+    paypal_order_client = CustomerPayPalOrderHttpClient(
+        client_id=paypal_client_id,
+        client_secret=paypal_client_secret,
+        environment=paypal_environment,
+        timeout_seconds=paypal_timeout_seconds,
+    )
+
+    paypal_binding_service = CustomerPayPalOrderBindingService(
+        binding_store=customer_paypal_order_binding_store,
+        payment_intent_store=customer_payment_intent_store,
+        order_store=customer_commercial_order_store,
+    )
+
+    initiation_service = CustomerPayPalPaymentInitiationService(
+        current_billing_cycle_service=(
+            customer_commercial_current_billing_cycle_service
+        ),
+        order_service=customer_commercial_order_service,
+        payment_intent_service=customer_payment_intent_service,
+        paypal_order_client=paypal_order_client,
+        paypal_binding_service=paypal_binding_service,
+    )
+
+    initiation_router = (
+        create_customer_paypal_payment_initiation_router(
+            initiate_paypal_payment=(
+                initiation_service.initiate
+            ),
+            customer_authentication_dependency=(
+                customer_authentication_dependency
+            ),
+        )
+    )
+
+    app.include_router(
+        initiation_router
+    )
+
+    customer_paypal_payment_initiation_service = (
+        initiation_service
+    )
+
+    _customer_paypal_payment_initiation_runtime_composed = True
 
 
 def _compose_customer_paypal_verified_capture_ingress(
@@ -2756,6 +2896,9 @@ async def lifespan(
             app
         )
         _compose_customer_commercial_capacity_runtime(
+            app
+        )
+        _compose_customer_paypal_payment_initiation_runtime(
             app
         )
         _compose_customer_vnd_payment_initiation_runtime(

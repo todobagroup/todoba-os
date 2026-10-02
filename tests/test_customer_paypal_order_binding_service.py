@@ -1087,3 +1087,25 @@ def test_paypal_order_binding_store_open_existing_restores_without_mutation(
     after = storage_path.read_bytes()
 
     assert after == before
+
+def test_paypal_order_result_publishes_provider_approval_url():
+    from backend.commercial.customer_paypal_order_binding_service import (
+        PayPalOrderCreationResult,
+    )
+
+    result = PayPalOrderCreationResult(
+        paypal_order_id="paypal-order-001",
+        paypal_request_id="payment-intent-001",
+        custom_id="payment-intent-001",
+        amount_minor=2500,
+        currency="USD",
+        approval_url=(
+            "https://www.sandbox.paypal.com/"
+            "checkoutnow?token=paypal-order-001"
+        ),
+    )
+
+    assert result.approval_url == (
+        "https://www.sandbox.paypal.com/"
+        "checkoutnow?token=paypal-order-001"
+    )

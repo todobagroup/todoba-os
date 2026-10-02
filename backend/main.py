@@ -2889,26 +2889,54 @@ async def lifespan(
         _compose_customer_payment_runtime(
             app
         )
-        _compose_customer_paypal_verified_capture_ingress(
-            app
-        )
-        _compose_authenticated_vnd_reconciliation_ingress(
-            app
-        )
-        _compose_customer_commercial_capacity_runtime(
-            app
-        )
-        _compose_customer_paypal_payment_initiation_runtime(
-            app
-        )
-        _compose_customer_vnd_payment_initiation_runtime(
-            app
-        )
     except RuntimeError as payment_startup_error:
         print(
             "TODOBA_PAYMENT_STARTUP_ISOLATED: "
             f"{payment_startup_error}"
         )
+    else:
+        try:
+            _compose_customer_paypal_verified_capture_ingress(
+                app
+            )
+        except RuntimeError as paypal_capture_startup_error:
+            print(
+                "TODOBA_PAYPAL_CAPTURE_STARTUP_ISOLATED: "
+                f"{paypal_capture_startup_error}"
+            )
+
+        try:
+            _compose_authenticated_vnd_reconciliation_ingress(
+                app
+            )
+            _compose_customer_commercial_capacity_runtime(
+                app
+            )
+        except RuntimeError as vnd_commercial_startup_error:
+            print(
+                "TODOBA_VND_COMMERCIAL_STARTUP_ISOLATED: "
+                f"{vnd_commercial_startup_error}"
+            )
+        else:
+            try:
+                _compose_customer_paypal_payment_initiation_runtime(
+                    app
+                )
+            except RuntimeError as paypal_initiation_startup_error:
+                print(
+                    "TODOBA_PAYPAL_INITIATION_STARTUP_ISOLATED: "
+                    f"{paypal_initiation_startup_error}"
+                )
+
+            try:
+                _compose_customer_vnd_payment_initiation_runtime(
+                    app
+                )
+            except RuntimeError as vnd_initiation_startup_error:
+                print(
+                    "TODOBA_VND_INITIATION_STARTUP_ISOLATED: "
+                    f"{vnd_initiation_startup_error}"
+                )
 
 
     execution_mission_record_recovery.restore()

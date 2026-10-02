@@ -1,4 +1,4 @@
-﻿from pathlib import Path
+from pathlib import Path
 import ast
 
 
@@ -169,21 +169,145 @@ def test_lifespan_composes_paypal_after_payment_runtime():
     assert paypal_index > payment_index
 
 
+
 def test_paypal_composition_is_inside_payment_startup_isolation():
     lifespan = _function(
         "lifespan"
     )
 
-    source = _segment(
-        lifespan
-    )
-
-    paypal_index = source.index(
+    paypal_name = (
         "_compose_customer_paypal_verified_capture_ingress"
     )
 
-    except_index = source.index(
-        "except RuntimeError as payment_startup_error"
+    paypal_guards = []
+
+    for node in ast.walk(
+        lifespan
+    ):
+        if not isinstance(
+            node,
+            ast.Try,
+        ):
+            continue
+
+        guarded_calls = {
+            (
+                child.func.id
+                if isinstance(
+                    child.func,
+                    ast.Name,
+                )
+                else (
+                    child.func.attr
+                    if isinstance(
+                        child.func,
+                        ast.Attribute,
+                    )
+                    else None
+                )
+            )
+            for statement in node.body
+            for child in ast.walk(
+                statement
+            )
+            if isinstance(
+                child,
+                ast.Call,
+            )
+        }
+
+        if paypal_name not in guarded_calls:
+            continue
+
+        catches_runtime_error = any(
+            isinstance(
+                handler.type,
+                ast.Name,
+            )
+            and handler.type.id
+            == "RuntimeError"
+            for handler in node.handlers
+        )
+
+        if catches_runtime_error:
+            paypal_guards.append(
+                node
+            )
+
+    assert paypal_guards, (
+        "PayPal verified capture composition must "
+        "have a RuntimeError isolation boundary."
     )
 
-    assert paypal_index < except_index
+    guard = min(
+        paypal_guards,
+        key=lambda node: (
+            (node.end_lineno or node.lineno)
+            - node.lineno
+        ),
+    )
+
+    guard_source = ast.unparse(
+        guard
+    )
+
+    assert (
+        "TODOBA_PAYPAL_CAPTURE_STARTUP_ISOLATED"
+        in guard_source
+    )
+
+    assert (
+        "_compose_authenticated_vnd_reconciliation_ingress"
+        not in guard_source
+    )
+
+    payment_runtime_calls = [
+        node
+        for node in ast.walk(
+            lifespan
+        )
+        if (
+            isinstance(
+                node,
+                ast.Call,
+            )
+            and isinstance(
+                node.func,
+                ast.Name,
+            )
+            and node.func.id
+            == "_compose_customer_payment_runtime"
+        )
+    ]
+
+    paypal_capture_calls = [
+        node
+        for node in ast.walk(
+            lifespan
+        )
+        if (
+            isinstance(
+                node,
+                ast.Call,
+            )
+            and isinstance(
+                node.func,
+                ast.Name,
+            )
+            and node.func.id
+            == paypal_name
+        )
+    ]
+
+    assert len(
+        payment_runtime_calls
+    ) == 1
+
+    assert len(
+        paypal_capture_calls
+    ) == 1
+
+    assert (
+        paypal_capture_calls[0].lineno
+        > payment_runtime_calls[0].lineno
+    )

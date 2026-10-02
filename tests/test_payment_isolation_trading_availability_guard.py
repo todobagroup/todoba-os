@@ -66,93 +66,130 @@ def _call_name(
     return None
 
 
+
 def test_payment_startup_failure_is_isolated_before_trading_recovery(
 ) -> None:
     lifespan = _lifespan()
 
-    payment_call_names = {
-        "_compose_customer_payment_runtime",
-        "_compose_authenticated_vnd_reconciliation_ingress",
-    }
+    payment_runtime_name = (
+        "_compose_customer_payment_runtime"
+    )
 
     payment_calls = [
         node
-        for node in ast.walk(lifespan)
+        for node in ast.walk(
+            lifespan
+        )
         if (
-            isinstance(node, ast.Call)
+            isinstance(
+                node,
+                ast.Call,
+            )
             and _call_name(node)
-            in payment_call_names
+            == payment_runtime_name
         )
     ]
 
-    assert {
-        _call_name(node)
-        for node in payment_calls
-    } == payment_call_names
+    assert len(payment_calls) == 1
 
-    isolation_guards = [
-        node
-        for node in ast.walk(lifespan)
-        if isinstance(node, ast.Try)
-    ]
+    candidate_guards = []
 
-    owning_guard = None
+    for guard in ast.walk(
+        lifespan
+    ):
+        if not isinstance(
+            guard,
+            ast.Try,
+        ):
+            continue
 
-    for guard in isolation_guards:
         guarded_calls = {
             _call_name(node)
             for statement in guard.body
-            for node in ast.walk(statement)
-            if isinstance(node, ast.Call)
+            for node in ast.walk(
+                statement
+            )
+            if isinstance(
+                node,
+                ast.Call,
+            )
         }
 
-        if payment_call_names.issubset(
-            guarded_calls
+        if (
+            payment_runtime_name
+            in guarded_calls
         ):
-            owning_guard = guard
-            break
+            candidate_guards.append(
+                guard
+            )
 
-    assert owning_guard is not None, (
-        "Payment startup composition is not isolated from "
-        "the shared Trading lifespan."
+    assert candidate_guards, (
+        "Core Payment runtime is not isolated "
+        "from the shared Trading lifespan."
+    )
+
+    owning_guard = min(
+        candidate_guards,
+        key=lambda guard: (
+            (guard.end_lineno or guard.lineno)
+            - guard.lineno
+        ),
     )
 
     catches_runtime_error = False
 
     for handler in owning_guard.handlers:
         if (
-            isinstance(handler.type, ast.Name)
-            and handler.type.id == "RuntimeError"
+            isinstance(
+                handler.type,
+                ast.Name,
+            )
+            and handler.type.id
+            == "RuntimeError"
         ):
             catches_runtime_error = True
 
             assert not any(
-                isinstance(node, ast.Raise)
+                isinstance(
+                    node,
+                    ast.Raise,
+                )
                 for statement in handler.body
-                for node in ast.walk(statement)
+                for node in ast.walk(
+                    statement
+                )
             ), (
-                "Payment startup failure is re-raised and can "
-                "still abort Trading startup."
+                "Core Payment startup failure is "
+                "re-raised and can abort Trading."
             )
 
     assert catches_runtime_error, (
-        "Payment isolation guard must contain payment "
-        "startup RuntimeError inside the Payment boundary."
+        "Core Payment isolation guard must catch "
+        "RuntimeError."
     )
 
     trading_recovery_calls = [
         node
-        for node in ast.walk(lifespan)
+        for node in ast.walk(
+            lifespan
+        )
         if (
-            isinstance(node, ast.Call)
+            isinstance(
+                node,
+                ast.Call,
+            )
             and _call_name(node)
             == "execution_mission_record_recovery.restore"
         )
     ]
 
-    assert len(trading_recovery_calls) == 1
+    assert len(
+        trading_recovery_calls
+    ) == 1
 
-    trading_recovery = trading_recovery_calls[0]
+    trading_recovery = (
+        trading_recovery_calls[0]
+    )
 
     assert owning_guard.end_lineno is not None
 
@@ -160,9 +197,10 @@ def test_payment_startup_failure_is_isolated_before_trading_recovery(
         trading_recovery.lineno
         > owning_guard.end_lineno
     ), (
-        "Trading recovery must remain reachable after "
-        "the isolated Payment startup boundary."
+        "Trading recovery must remain reachable "
+        "after isolated core Payment startup."
     )
+
 
 
 def test_payment_runtime_failure_does_not_take_down_broker_state(

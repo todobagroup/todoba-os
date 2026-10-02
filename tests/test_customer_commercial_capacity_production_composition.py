@@ -249,39 +249,200 @@ def test_capacity_runtime_configures_existing_execution_mission_service():
         assert forbidden not in source
 
 
+
 def test_lifespan_composes_capacity_after_payment_and_before_mission_recovery():
-    source = _function_source(
-        path=MAIN_PATH,
-        function_name="lifespan",
+    source = MAIN_PATH.read_text(
+        encoding="utf-8-sig"
+    )
+    tree = ast.parse(source)
+
+    lifespan = next(
+        (
+            node
+            for node in tree.body
+            if (
+                isinstance(
+                    node,
+                    ast.AsyncFunctionDef,
+                )
+                and node.name == "lifespan"
+            )
+        ),
+        None,
     )
 
-    payment_index = source.index(
-        "_compose_customer_payment_runtime("
+    assert lifespan is not None
+
+    def call_name(
+        call: ast.Call,
+    ) -> str | None:
+        func = call.func
+
+        if isinstance(
+            func,
+            ast.Name,
+        ):
+            return func.id
+
+        if isinstance(
+            func,
+            ast.Attribute,
+        ):
+            parts = []
+            current = func
+
+            while isinstance(
+                current,
+                ast.Attribute,
+            ):
+                parts.append(
+                    current.attr
+                )
+                current = current.value
+
+            if isinstance(
+                current,
+                ast.Name,
+            ):
+                parts.append(
+                    current.id
+                )
+
+            return ".".join(
+                reversed(parts)
+            )
+
+        return None
+
+    required = {
+        "_compose_customer_payment_runtime",
+        "_compose_authenticated_vnd_reconciliation_ingress",
+        "_compose_customer_commercial_capacity_runtime",
+        "execution_mission_record_recovery.restore",
+    }
+
+    calls = {
+        name: []
+        for name in required
+    }
+
+    for child in ast.walk(
+        lifespan
+    ):
+        if not isinstance(
+            child,
+            ast.Call,
+        ):
+            continue
+
+        name = call_name(
+            child
+        )
+
+        if name in calls:
+            calls[name].append(
+                child
+            )
+
+    for name in required:
+        assert len(
+            calls[name]
+        ) == 1, (
+            f"Expected exactly one {name} call."
+        )
+
+    payment = calls[
+        "_compose_customer_payment_runtime"
+    ][0]
+
+    reconciliation = calls[
+        "_compose_authenticated_vnd_reconciliation_ingress"
+    ][0]
+
+    capacity = calls[
+        "_compose_customer_commercial_capacity_runtime"
+    ][0]
+
+    mission_recovery = calls[
+        "execution_mission_record_recovery.restore"
+    ][0]
+
+    assert (
+        payment.lineno
+        < reconciliation.lineno
+        < capacity.lineno
+        < mission_recovery.lineno
     )
 
-    vnd_ingress_index = source.index(
-        "_compose_authenticated_vnd_reconciliation_ingress("
+    vnd_guard = None
+
+    for guard in ast.walk(
+        lifespan
+    ):
+        if not isinstance(
+            guard,
+            ast.Try,
+        ):
+            continue
+
+        guarded_calls = {
+            call_name(
+                child
+            )
+            for statement in guard.body
+            for child in ast.walk(
+                statement
+            )
+            if isinstance(
+                child,
+                ast.Call,
+            )
+        }
+
+        if {
+            "_compose_authenticated_vnd_reconciliation_ingress",
+            "_compose_customer_commercial_capacity_runtime",
+        }.issubset(
+            guarded_calls
+        ):
+            catches_runtime_error = any(
+                isinstance(
+                    handler.type,
+                    ast.Name,
+                )
+                and handler.type.id
+                == "RuntimeError"
+                for handler in guard.handlers
+            )
+
+            if catches_runtime_error:
+                vnd_guard = guard
+                break
+
+    assert vnd_guard is not None, (
+        "VND reconciliation and commercial capacity "
+        "must share a VND commercial RuntimeError boundary."
     )
 
-    capacity_index = source.index(
-        "_compose_customer_commercial_capacity_runtime("
-    )
-
-    except_index = source.index(
-        "except RuntimeError as payment_startup_error:"
-    )
-
-    mission_recovery_index = source.index(
-        "execution_mission_record_recovery.restore()"
+    guard_source = ast.unparse(
+        vnd_guard
     )
 
     assert (
-        payment_index
-        < vnd_ingress_index
-        < capacity_index
-        < except_index
-        < mission_recovery_index
+        "TODOBA_VND_COMMERCIAL_STARTUP_ISOLATED"
+        in guard_source
     )
+
+    assert vnd_guard.end_lineno is not None
+
+    assert (
+        mission_recovery.lineno
+        > vnd_guard.end_lineno
+    ), (
+        "Trading mission recovery must remain reachable "
+        "after VND commercial startup isolation."
+    )
+
 
 
 

@@ -262,6 +262,114 @@ class CustomerPayPalOrderHttpClient:
             amount_value=amount_value,
         )
 
+    def capture_order(
+        self,
+        *,
+        paypal_order_id: str,
+        paypal_request_id: str,
+    ) -> str:
+        """
+        Capture one already-approved PayPal order.
+
+        Returns the authoritative PayPal order status only.
+        Settlement/payment truth remains owned by verified webhook
+        processing and is deliberately not inferred here.
+        """
+        normalized_order_id = (
+            self._normalize_required_string(
+                paypal_order_id,
+                name="paypal_order_id",
+            )
+        )
+
+        normalized_request_id = (
+            self._normalize_required_string(
+                paypal_request_id,
+                name="paypal_request_id",
+            )
+        )
+
+        access_token = self._obtain_access_token()
+
+        url = (
+            f"{self._base_url}"
+            "/v2/checkout/orders/"
+            f"{normalized_order_id}"
+            "/capture"
+        )
+
+        headers = {
+            "Authorization": (
+                f"Bearer {access_token}"
+            ),
+            "Content-Type": "application/json",
+            "PayPal-Request-Id": (
+                normalized_request_id
+            ),
+            "Prefer": "return=representation",
+        }
+
+        try:
+            response = httpx.post(
+                url,
+                headers=headers,
+                json={},
+                timeout=self._timeout_seconds,
+            )
+        except httpx.HTTPError as exc:
+            raise RuntimeError(
+                "PayPal capture order transport failed."
+            ) from exc
+
+        if response.status_code not in {
+            200,
+            201,
+        }:
+            raise RuntimeError(
+                "PayPal capture order request failed."
+            )
+
+        try:
+            body = response.json()
+        except ValueError as exc:
+            raise RuntimeError(
+                "PayPal capture order response is invalid."
+            ) from exc
+
+        if not isinstance(
+            body,
+            dict,
+        ):
+            raise RuntimeError(
+                "PayPal capture order response is invalid."
+            )
+
+        response_order_id = body.get(
+            "id"
+        )
+
+        if (
+            not isinstance(
+                response_order_id,
+                str,
+            )
+            or response_order_id.strip()
+            != normalized_order_id
+        ):
+            raise RuntimeError(
+                "PayPal capture order response is invalid."
+            )
+
+        status = body.get(
+            "status"
+        )
+
+        if status != "COMPLETED":
+            raise RuntimeError(
+                "PayPal captured order is not COMPLETED."
+            )
+
+        return status
     @property
     def _base_url(
         self,

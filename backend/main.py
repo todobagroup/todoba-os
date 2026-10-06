@@ -198,6 +198,12 @@ from backend.commercial.customer_paypal_payment_initiation_service import (
 from backend.commercial.customer_paypal_payment_initiation_api import (
     create_customer_paypal_payment_initiation_router,
 )
+from backend.commercial.customer_paypal_capture_execution_service import (
+    CustomerPayPalCaptureExecutionService,
+)
+from backend.commercial.customer_paypal_capture_execution_api import (
+    create_customer_paypal_capture_execution_router,
+)
 from backend.commercial.customer_vnd_bank_payment_instruction_service import (
     CustomerVndBankPaymentInstructionService,
 )
@@ -986,12 +992,14 @@ customer_payment_intent_service = None
 customer_commercial_current_billing_cycle_service = None
 customer_vnd_payment_initiation_service = None
 customer_paypal_payment_initiation_service = None
+customer_paypal_capture_execution_service = None
 customer_payment_settlement_service = None
 customer_payment_settlement_entitlement_convergence_service = None
 customer_payment_settlement_activation_bridge = None
 customer_payment_settlement_orchestration_service = None
 
 _customer_paypal_payment_initiation_runtime_composed = False
+_customer_paypal_capture_execution_runtime_composed = False
 _customer_paypal_verified_capture_ingress_composed = False
 
 _customer_setup_runtime_composed = False
@@ -1818,6 +1826,95 @@ def _compose_customer_paypal_payment_initiation_runtime(
     )
 
     _customer_paypal_payment_initiation_runtime_composed = True
+
+
+def _compose_customer_paypal_capture_execution_runtime(
+    app: FastAPI,
+) -> None:
+    global _customer_paypal_capture_execution_runtime_composed
+    global customer_paypal_capture_execution_service
+
+    if _customer_paypal_capture_execution_runtime_composed:
+        return
+
+    required_owners = (
+        (
+            "commercial order service",
+            customer_commercial_order_service,
+        ),
+        (
+            "payment intent service",
+            customer_payment_intent_service,
+        ),
+        (
+            "PayPal order binding store",
+            customer_paypal_order_binding_store,
+        ),
+    )
+
+    for owner_name, owner in required_owners:
+        if owner is None:
+            raise RuntimeError(
+                "PayPal capture execution requires "
+                f"authoritative {owner_name}."
+            )
+
+    if not customer_paypal_order_binding_store.is_ready():
+        raise RuntimeError(
+            "PayPal capture execution requires ready "
+            "PayPal order binding store."
+        )
+
+    (
+        paypal_client_id,
+        paypal_client_secret,
+        _paypal_webhook_id,
+        paypal_environment,
+        paypal_timeout_seconds,
+    ) = get_paypal_runtime_config()
+
+    paypal_order_client = CustomerPayPalOrderHttpClient(
+        client_id=paypal_client_id,
+        client_secret=paypal_client_secret,
+        environment=paypal_environment,
+        timeout_seconds=paypal_timeout_seconds,
+    )
+
+    capture_execution_service = (
+        CustomerPayPalCaptureExecutionService(
+            payment_intent_service=(
+                customer_payment_intent_service
+            ),
+            order_service=(
+                customer_commercial_order_service
+            ),
+            paypal_binding_store=(
+                customer_paypal_order_binding_store
+            ),
+            paypal_order_client=paypal_order_client,
+        )
+    )
+
+    router = (
+        create_customer_paypal_capture_execution_router(
+            capture_paypal_payment=(
+                capture_execution_service.capture
+            ),
+            customer_authentication_dependency=(
+                customer_authentication_dependency
+            ),
+        )
+    )
+
+    app.include_router(
+        router
+    )
+
+    customer_paypal_capture_execution_service = (
+        capture_execution_service
+    )
+
+    _customer_paypal_capture_execution_runtime_composed = True
 
 
 def _compose_customer_paypal_verified_capture_ingress(
@@ -2926,6 +3023,16 @@ async def lifespan(
                 print(
                     "TODOBA_PAYPAL_INITIATION_STARTUP_ISOLATED: "
                     f"{paypal_initiation_startup_error}"
+                )
+
+            try:
+                _compose_customer_paypal_capture_execution_runtime(
+                    app
+                )
+            except RuntimeError as paypal_capture_execution_startup_error:
+                print(
+                    "TODOBA_PAYPAL_CAPTURE_EXECUTION_STARTUP_ISOLATED: "
+                    f"{paypal_capture_execution_startup_error}"
                 )
 
             try:

@@ -288,7 +288,17 @@ class CustomerPayPalOrderHttpClient:
                 "PayPal create order transport failed."
             ) from exc
 
-        if response.status_code != 201:
+        if self._checkout_return_url is not None:
+            valid_status_codes = {
+                200,
+                201,
+            }
+        else:
+            valid_status_codes = {
+                201,
+            }
+
+        if response.status_code not in valid_status_codes:
             raise RuntimeError(
                 "PayPal create order request failed."
             )
@@ -532,9 +542,19 @@ class CustomerPayPalOrderHttpClient:
                 "PayPal order response is invalid."
             )
 
-        if body.get(
+        order_status = body.get(
             "status"
-        ) != "CREATED":
+        )
+
+        if self._checkout_return_url is not None:
+            if order_status not in {
+                "CREATED",
+                "PAYER_ACTION_REQUIRED",
+            }:
+                raise RuntimeError(
+                    "PayPal order response is invalid."
+                )
+        elif order_status != "CREATED":
             raise RuntimeError(
                 "PayPal order response is invalid."
             )
@@ -628,9 +648,19 @@ class CustomerPayPalOrderHttpClient:
                 ):
                     continue
 
+                if self._checkout_return_url is not None:
+                    expected_approval_rel = (
+                        "payer-action"
+                        if order_status
+                        == "PAYER_ACTION_REQUIRED"
+                        else "approve"
+                    )
+                else:
+                    expected_approval_rel = "approve"
+
                 if link.get(
                     "rel"
-                ) != "approve":
+                ) != expected_approval_rel:
                     continue
 
                 href = link.get(

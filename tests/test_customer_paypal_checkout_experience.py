@@ -1,4 +1,4 @@
-﻿import ast
+import ast
 from pathlib import Path
 
 import httpx
@@ -348,3 +348,124 @@ def test_checkout_api_has_no_payment_truth_calls():
 
     for token in forbidden:
         assert token not in source
+
+
+def test_direct_checkout_accepts_provider_payer_action_contract(
+    monkeypatch,
+):
+    calls = []
+
+    def fake_post(
+        url,
+        **kwargs,
+    ):
+        calls.append(
+            (
+                url,
+                kwargs,
+            )
+        )
+
+        if url.endswith(
+            "/v1/oauth2/token"
+        ):
+            return _response(
+                200,
+                {
+                    "access_token": "token",
+                    "token_type": "Bearer",
+                },
+                url=url,
+            )
+
+        assert url.endswith(
+            "/v2/checkout/orders"
+        )
+
+        return _response(
+            200,
+            {
+                "id": "PAYPAL-ORDER-PAYER-ACTION",
+                "intent": "CAPTURE",
+                "status": "PAYER_ACTION_REQUIRED",
+                "payment_source": {
+                    "paypal": {},
+                },
+                "purchase_units": [
+                    {
+                        "reference_id": "default",
+                        "custom_id": (
+                            "payment-intent-payer-action"
+                        ),
+                        "amount": {
+                            "currency_code": "USD",
+                            "value": "140.00",
+                        },
+                    }
+                ],
+                "links": [
+                    {
+                        "href": (
+                            "https://www.sandbox.paypal.com/"
+                            "checkoutnow?token="
+                            "PAYPAL-ORDER-PAYER-ACTION"
+                        ),
+                        "rel": "payer-action",
+                        "method": "GET",
+                    }
+                ],
+            },
+            url=url,
+        )
+
+    monkeypatch.setattr(
+        order_module.httpx,
+        "post",
+        fake_post,
+    )
+
+    client = CustomerPayPalOrderHttpClient(
+        client_id="client-id",
+        client_secret="client-secret",
+        environment=PayPalEnvironment.SANDBOX,
+        timeout_seconds=10.0,
+        checkout_return_url=(
+            "https://api.todobagroup.com/"
+            "commercial/paypal/return"
+        ),
+        checkout_cancel_url=(
+            "https://api.todobagroup.com/"
+            "commercial/paypal/cancel"
+        ),
+    )
+
+    result = client.create_order(
+        payment_intent_id=(
+            "payment-intent-payer-action"
+        ),
+        amount_minor=14000,
+        currency="USD",
+    )
+
+    assert result.paypal_order_id == (
+        "PAYPAL-ORDER-PAYER-ACTION"
+    )
+
+    assert result.paypal_request_id == (
+        "payment-intent-payer-action"
+    )
+
+    assert result.custom_id == (
+        "payment-intent-payer-action"
+    )
+
+    assert result.amount_minor == 14000
+    assert result.currency == "USD"
+
+    assert result.approval_url == (
+        "https://www.sandbox.paypal.com/"
+        "checkoutnow?token="
+        "PAYPAL-ORDER-PAYER-ACTION"
+    )
+
+    assert len(calls) == 2

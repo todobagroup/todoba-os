@@ -12,6 +12,7 @@ from backend.brain_engine import brain_engine
 
 
 from backend.config import (
+    TODOBA_CLOUD_BASE_URL,
     TODOBA_CONTROL_PLANE_DATA_ROOT,
     TODOBA_CUSTOMER_DEPLOYMENT_MASTER_KEY,
     TODOBA_EXECUTOR_ID,
@@ -197,6 +198,9 @@ from backend.commercial.customer_paypal_payment_initiation_service import (
 )
 from backend.commercial.customer_paypal_payment_initiation_api import (
     create_customer_paypal_payment_initiation_router,
+)
+from backend.commercial.customer_paypal_checkout_experience_api import (
+    create_customer_paypal_checkout_experience_router,
 )
 from backend.commercial.customer_paypal_capture_execution_service import (
     CustomerPayPalCaptureExecutionService,
@@ -1788,6 +1792,14 @@ def _compose_customer_paypal_payment_initiation_runtime(
         client_secret=paypal_client_secret,
         environment=paypal_environment,
         timeout_seconds=paypal_timeout_seconds,
+        checkout_return_url=(
+            f"{TODOBA_CLOUD_BASE_URL}"
+            "/commercial/paypal/return"
+        ),
+        checkout_cancel_url=(
+            f"{TODOBA_CLOUD_BASE_URL}"
+            "/commercial/paypal/cancel"
+        ),
     )
 
     paypal_binding_service = CustomerPayPalOrderBindingService(
@@ -1815,6 +1827,14 @@ def _compose_customer_paypal_payment_initiation_runtime(
                 customer_authentication_dependency
             ),
         )
+    )
+
+    checkout_experience_router = (
+        create_customer_paypal_checkout_experience_router()
+    )
+
+    app.include_router(
+        checkout_experience_router
     )
 
     app.include_router(

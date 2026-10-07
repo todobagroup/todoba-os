@@ -94,6 +94,8 @@ class CustomerPayPalOrderHttpClient:
         client_secret: str,
         environment: PayPalEnvironment,
         timeout_seconds: float,
+        checkout_return_url: str | None = None,
+        checkout_cancel_url: str | None = None,
     ) -> None:
         self._client_id = self._normalize_required_string(
             client_id,
@@ -138,6 +140,32 @@ class CustomerPayPalOrderHttpClient:
         self._timeout_seconds = float(
             timeout_seconds
         )
+
+        normalized_return_url = (
+            self._normalize_optional_checkout_url(
+                checkout_return_url,
+                name="checkout_return_url",
+            )
+        )
+        normalized_cancel_url = (
+            self._normalize_optional_checkout_url(
+                checkout_cancel_url,
+                name="checkout_cancel_url",
+            )
+        )
+
+        if (
+            normalized_return_url is None
+        ) != (
+            normalized_cancel_url is None
+        ):
+            raise ValueError(
+                "checkout_return_url and "
+                "checkout_cancel_url must be provided together."
+            )
+
+        self._checkout_return_url = normalized_return_url
+        self._checkout_cancel_url = normalized_cancel_url
 
     def __repr__(
         self,
@@ -213,6 +241,24 @@ class CustomerPayPalOrderHttpClient:
                 }
             ],
         }
+
+        if self._checkout_return_url is not None:
+            payload["payment_source"] = {
+                "paypal": {
+                    "experience_context": {
+                        "user_action": "PAY_NOW",
+                        "shipping_preference": (
+                            "NO_SHIPPING"
+                        ),
+                        "return_url": (
+                            self._checkout_return_url
+                        ),
+                        "cancel_url": (
+                            self._checkout_cancel_url
+                        ),
+                    }
+                }
+            }
 
         headers = {
             "Authorization": (
@@ -648,6 +694,45 @@ class CustomerPayPalOrderHttpClient:
         return (
             f"{major}.{minor:02d}"
         )
+
+    @staticmethod
+    def _normalize_optional_checkout_url(
+        value: str | None,
+        *,
+        name: str,
+    ) -> str | None:
+        if value is None:
+            return None
+
+        normalized = (
+            CustomerPayPalOrderHttpClient
+            ._normalize_required_string(
+                value,
+                name=name,
+            )
+        )
+
+        try:
+            parsed = httpx.URL(
+                normalized
+            )
+        except Exception as exc:
+            raise ValueError(
+                f"{name} must be a valid HTTP or HTTPS URL."
+            ) from exc
+
+        if (
+            parsed.scheme not in {
+                "http",
+                "https",
+            }
+            or not parsed.host
+        ):
+            raise ValueError(
+                f"{name} must be a valid HTTP or HTTPS URL."
+            )
+
+        return normalized
 
     @staticmethod
     def _normalize_required_string(

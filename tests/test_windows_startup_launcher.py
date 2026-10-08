@@ -269,3 +269,146 @@ def test_launcher_rejects_missing_external_runtime_config(
         "TODOBA startup prerequisites are missing: Environment"
         in combined
     )
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="Windows PowerShell validation requires Windows.",
+)
+def test_launcher_uses_absolute_external_runtime_log_root(
+    tmp_path: Path,
+) -> None:
+    external_log_root = (
+        tmp_path
+        / "shared-runtime-logs"
+    ).resolve()
+
+    assert not external_log_root.exists()
+
+    environment = __import__("os").environ.copy()
+
+    environment["TODOBA_RUNTIME_LOG_ROOT"] = str(
+        external_log_root
+    )
+
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(LAUNCHER_PATH),
+            "-ValidateOnly",
+        ],
+        cwd=ROOT_DIR,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert result.returncode == 0, (
+        result.stdout
+        + result.stderr
+    )
+
+    assert (
+        "LOG_DIRECTORY="
+        + str(external_log_root)
+        in result.stdout
+    )
+
+    assert not external_log_root.exists()
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="Windows PowerShell validation requires Windows.",
+)
+def test_launcher_rejects_relative_external_runtime_log_root() -> None:
+    environment = __import__("os").environ.copy()
+
+    environment["TODOBA_RUNTIME_LOG_ROOT"] = (
+        "relative"
+        + __import__("os").sep
+        + "runtime-logs"
+    )
+
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(LAUNCHER_PATH),
+            "-ValidateOnly",
+        ],
+        cwd=ROOT_DIR,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert result.returncode != 0
+
+    combined = (
+        result.stdout
+        + result.stderr
+    )
+
+    assert (
+        "TODOBA_RUNTIME_LOG_ROOT must be an absolute path."
+        in combined
+    )
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="Windows PowerShell validation requires Windows.",
+)
+def test_launcher_preserves_default_runtime_log_root() -> None:
+    environment = __import__("os").environ.copy()
+
+    environment.pop(
+        "TODOBA_RUNTIME_LOG_ROOT",
+        None,
+    )
+
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(LAUNCHER_PATH),
+            "-ValidateOnly",
+        ],
+        cwd=ROOT_DIR,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert result.returncode == 0, (
+        result.stdout
+        + result.stderr
+    )
+
+    expected_log_root = (
+        ROOT_DIR
+        / "data"
+        / "runtime_logs"
+    ).resolve()
+
+    assert (
+        "LOG_DIRECTORY="
+        + str(expected_log_root)
+        in result.stdout
+    )

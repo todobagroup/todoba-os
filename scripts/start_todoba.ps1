@@ -106,9 +106,45 @@ $packageBuilderEntryPath = Join-Path `
 $repoRoot `
 "backend\start_package_builder.py"
 
-$logDirectory = Join-Path `
-$repoRoot `
-"data\runtime_logs"
+$logRootOverride = (
+    [Environment]::GetEnvironmentVariable(
+        "TODOBA_RUNTIME_LOG_ROOT"
+    )
+)
+
+if (
+    [string]::IsNullOrWhiteSpace(
+        $logRootOverride
+    )
+) {
+    $logDirectory = Join-Path `
+        $repoRoot `
+        "data\runtime_logs"
+}
+else {
+    $logRootOverride = (
+        $logRootOverride.Trim()
+    )
+
+    if (
+        -not (
+            Test-TodobaAbsoluteWindowsPath `
+                -Path $logRootOverride
+        )
+    ) {
+        throw (
+            "TODOBA_RUNTIME_LOG_ROOT must be an absolute path."
+        )
+    }
+
+    $logDirectory = (
+        [System.IO.Path]::GetFullPath(
+            $logRootOverride
+        )
+    )
+
+    $env:TODOBA_RUNTIME_LOG_ROOT = $logDirectory
+}
 
 $env:TODOBA_RUNTIME_MODE = "CLOUD"
 $env:TELEGRAM_EXECUTION_MODE = "REMOTE_VPS"
@@ -159,6 +195,7 @@ if ($ValidateOnly) {
     Write-Output "REPO_ROOT=$repoRoot"
     Write-Output "PYTHON_PATH=$pythonPath"
     Write-Output "ENVIRONMENT_PATH=$environmentPath"
+    Write-Output "LOG_DIRECTORY=$logDirectory"
     Write-Output "API_MODULE=backend.start_api"
     Write-Output "EXECUTOR_MODULE=backend.start_executor"
     Write-Output "PACKAGE_BUILDER_MODULE=backend.start_package_builder"

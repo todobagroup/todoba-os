@@ -122,3 +122,150 @@ def test_launcher_validates_in_windows_powershell() -> None:
         "TODOBA_STARTUP_VALIDATION=PASS"
         in result.stdout
     )
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="Windows PowerShell validation requires Windows.",
+)
+def test_launcher_uses_absolute_external_runtime_config(
+    tmp_path: Path,
+) -> None:
+    external_env = (
+        tmp_path
+        / "production.env"
+    )
+
+    external_env.write_text(
+        "TODOBA_API_HOST=127.0.0.1\n",
+        encoding="utf-8",
+    )
+
+    environment = __import__("os").environ.copy()
+
+    environment["TODOBA_ENV_FILE"] = str(
+        external_env.resolve()
+    )
+
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(LAUNCHER_PATH),
+            "-ValidateOnly",
+        ],
+        cwd=ROOT_DIR,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert result.returncode == 0, (
+        result.stdout
+        + result.stderr
+    )
+
+    assert (
+        "ENVIRONMENT_PATH="
+        + str(
+            external_env.resolve()
+        )
+        in result.stdout
+    )
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="Windows PowerShell validation requires Windows.",
+)
+def test_launcher_rejects_relative_external_runtime_config() -> None:
+    environment = __import__("os").environ.copy()
+
+    environment["TODOBA_ENV_FILE"] = (
+        "relative"
+        + __import__("os").sep
+        + "production.env"
+    )
+
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(LAUNCHER_PATH),
+            "-ValidateOnly",
+        ],
+        cwd=ROOT_DIR,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert result.returncode != 0
+
+    combined = (
+        result.stdout
+        + result.stderr
+    )
+
+    assert (
+        "TODOBA_ENV_FILE must be an absolute path."
+        in combined
+    )
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="Windows PowerShell validation requires Windows.",
+)
+def test_launcher_rejects_missing_external_runtime_config(
+    tmp_path: Path,
+) -> None:
+    missing_env = (
+        tmp_path
+        / "missing-production.env"
+    ).resolve()
+
+    environment = __import__("os").environ.copy()
+
+    environment["TODOBA_ENV_FILE"] = str(
+        missing_env
+    )
+
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(LAUNCHER_PATH),
+            "-ValidateOnly",
+        ],
+        cwd=ROOT_DIR,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert result.returncode != 0
+
+    combined = (
+        result.stdout
+        + result.stderr
+    )
+
+    assert (
+        "TODOBA startup prerequisites are missing: Environment"
+        in combined
+    )

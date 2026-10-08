@@ -21,6 +21,27 @@ Set-StrictMode -Version Latest
 
 $ErrorActionPreference = "Stop"
 
+function Test-TodobaAbsoluteWindowsPath {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    if (
+        $Path -match '^[A-Za-z]:[\\/]'
+    ) {
+        return $true
+    }
+
+    if (
+        $Path -match '^\\\\[^\\/]+[\\/][^\\/]+'
+    ) {
+        return $true
+    }
+
+    return $false
+}
+
 $repoRoot = Split-Path `
 -Parent `
 $PSScriptRoot
@@ -29,9 +50,45 @@ $pythonPath = Join-Path `
 $repoRoot `
 ".venv\Scripts\python.exe"
 
-$environmentPath = Join-Path `
-$repoRoot `
-".env"
+$environmentOverride = (
+    [Environment]::GetEnvironmentVariable(
+        "TODOBA_ENV_FILE"
+    )
+)
+
+if (
+    [string]::IsNullOrWhiteSpace(
+        $environmentOverride
+    )
+) {
+    $environmentPath = Join-Path `
+        $repoRoot `
+        ".env"
+}
+else {
+    $environmentOverride = (
+        $environmentOverride.Trim()
+    )
+
+    if (
+        -not (
+            Test-TodobaAbsoluteWindowsPath `
+                -Path $environmentOverride
+        )
+    ) {
+        throw (
+            "TODOBA_ENV_FILE must be an absolute path."
+        )
+    }
+
+    $environmentPath = (
+        [System.IO.Path]::GetFullPath(
+            $environmentOverride
+        )
+    )
+
+    $env:TODOBA_ENV_FILE = $environmentPath
+}
 
 $telegramSessionPath = Join-Path `
 $repoRoot `
@@ -101,6 +158,7 @@ if ($ValidateOnly) {
     Write-Output "TODOBA_STARTUP_VALIDATION=PASS"
     Write-Output "REPO_ROOT=$repoRoot"
     Write-Output "PYTHON_PATH=$pythonPath"
+    Write-Output "ENVIRONMENT_PATH=$environmentPath"
     Write-Output "API_MODULE=backend.start_api"
     Write-Output "EXECUTOR_MODULE=backend.start_executor"
     Write-Output "PACKAGE_BUILDER_MODULE=backend.start_package_builder"

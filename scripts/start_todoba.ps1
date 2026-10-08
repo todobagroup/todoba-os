@@ -90,9 +90,63 @@ else {
     $env:TODOBA_ENV_FILE = $environmentPath
 }
 
-$telegramSessionPath = Join-Path `
-$repoRoot `
-"todoba.session"
+$telegramSessionOverride = (
+    [Environment]::GetEnvironmentVariable(
+        "TELEGRAM_SESSION"
+    )
+)
+
+if (
+    [string]::IsNullOrWhiteSpace(
+        $telegramSessionOverride
+    )
+) {
+    $telegramSessionIdentifier = Join-Path `
+        $repoRoot `
+        "todoba"
+
+    $telegramSessionPath = $telegramSessionIdentifier + ".session"
+}
+else {
+    $telegramSessionOverride = (
+        $telegramSessionOverride.Trim()
+    )
+
+    if (
+        -not (
+            Test-TodobaAbsoluteWindowsPath `
+                -Path $telegramSessionOverride
+        )
+    ) {
+        throw (
+            "TELEGRAM_SESSION must be an absolute path."
+        )
+    }
+
+    $telegramSessionIdentifier = (
+        [System.IO.Path]::GetFullPath(
+            $telegramSessionOverride
+        )
+    )
+
+    if (
+        $telegramSessionIdentifier.EndsWith(
+            ".session",
+            [System.StringComparison]::OrdinalIgnoreCase
+        )
+    ) {
+        $telegramSessionPath = (
+            $telegramSessionIdentifier
+        )
+    }
+    else {
+                $telegramSessionPath = $telegramSessionIdentifier + ".session"
+    }
+
+    $env:TELEGRAM_SESSION = (
+        $telegramSessionIdentifier
+    )
+}
 
 $apiEntryPath = Join-Path `
 $repoRoot `
@@ -196,6 +250,7 @@ if ($ValidateOnly) {
     Write-Output "PYTHON_PATH=$pythonPath"
     Write-Output "ENVIRONMENT_PATH=$environmentPath"
     Write-Output "LOG_DIRECTORY=$logDirectory"
+    Write-Output "TELEGRAM_SESSION_FILE=$telegramSessionPath"
     Write-Output "API_MODULE=backend.start_api"
     Write-Output "EXECUTOR_MODULE=backend.start_executor"
     Write-Output "PACKAGE_BUILDER_MODULE=backend.start_package_builder"

@@ -412,3 +412,213 @@ def test_launcher_preserves_default_runtime_log_root() -> None:
         + str(expected_log_root)
         in result.stdout
     )
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="Windows PowerShell validation requires Windows.",
+)
+def test_launcher_uses_absolute_external_telegram_session_base_path(
+    tmp_path: Path,
+) -> None:
+    session_base = (
+        tmp_path
+        / "telegram"
+        / "todoba"
+    ).resolve()
+
+    session_base.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    session_file = Path(
+        str(session_base)
+        + ".session"
+    )
+
+    session_file.write_bytes(b"test-session")
+
+    environment = __import__("os").environ.copy()
+
+    environment["TELEGRAM_SESSION"] = str(
+        session_base
+    )
+
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(LAUNCHER_PATH),
+            "-ValidateOnly",
+        ],
+        cwd=ROOT_DIR,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert result.returncode == 0, (
+        result.stdout
+        + result.stderr
+    )
+
+    assert (
+        "TELEGRAM_SESSION_FILE="
+        + str(session_file)
+        in result.stdout
+    )
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="Windows PowerShell validation requires Windows.",
+)
+def test_launcher_uses_absolute_external_telegram_session_file_path(
+    tmp_path: Path,
+) -> None:
+    session_file = (
+        tmp_path
+        / "telegram"
+        / "todoba.session"
+    ).resolve()
+
+    session_file.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    session_file.write_bytes(b"test-session")
+
+    environment = __import__("os").environ.copy()
+
+    environment["TELEGRAM_SESSION"] = str(
+        session_file
+    )
+
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(LAUNCHER_PATH),
+            "-ValidateOnly",
+        ],
+        cwd=ROOT_DIR,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert result.returncode == 0, (
+        result.stdout
+        + result.stderr
+    )
+
+    assert (
+        "TELEGRAM_SESSION_FILE="
+        + str(session_file)
+        in result.stdout
+    )
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="Windows PowerShell validation requires Windows.",
+)
+def test_launcher_rejects_relative_external_telegram_session() -> None:
+    environment = __import__("os").environ.copy()
+
+    environment["TELEGRAM_SESSION"] = (
+        "relative"
+        + __import__("os").sep
+        + "todoba"
+    )
+
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(LAUNCHER_PATH),
+            "-ValidateOnly",
+        ],
+        cwd=ROOT_DIR,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert result.returncode != 0
+
+    combined = (
+        result.stdout
+        + result.stderr
+    )
+
+    assert (
+        "TELEGRAM_SESSION must be an absolute path."
+        in combined
+    )
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="Windows PowerShell validation requires Windows.",
+)
+def test_launcher_rejects_missing_external_telegram_session(
+    tmp_path: Path,
+) -> None:
+    session_base = (
+        tmp_path
+        / "telegram"
+        / "missing-todoba"
+    ).resolve()
+
+    environment = __import__("os").environ.copy()
+
+    environment["TELEGRAM_SESSION"] = str(
+        session_base
+    )
+
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(LAUNCHER_PATH),
+            "-ValidateOnly",
+        ],
+        cwd=ROOT_DIR,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert result.returncode != 0
+
+    combined = (
+        result.stdout
+        + result.stderr
+    )
+
+    assert (
+        "TODOBA startup prerequisites are missing: TelegramSession"
+        in combined
+    )

@@ -181,3 +181,21 @@ def test_controller_parses_in_windows_powershell() -> None:
         "TODOBA_CONTROLLER_PARSE=PASS"
         in result.stdout
     )
+
+def test_controller_resolves_launcher_beside_itself() -> None:
+    controller = CONTROLLER_PATH.read_text(
+        encoding="utf-8"
+    )
+
+    assert "$PSScriptRoot" in controller
+    assert '"start_todoba.ps1"' in controller
+
+    assert (
+        "Join-Path"
+        in controller
+    )
+
+    assert (
+        "[regex]::Escape"
+        in controller
+    )

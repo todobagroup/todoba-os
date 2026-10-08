@@ -994,3 +994,196 @@ def test_launcher_rejects_missing_external_python_executable(
         "TODOBA startup prerequisites are missing: Python"
         in combined
     )
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="Windows PowerShell validation requires Windows.",
+)
+def test_launcher_validate_only_survives_relocation_with_external_runtime_authorities(
+    tmp_path: Path,
+) -> None:
+    import os
+    import shutil
+
+    runtime_root = (
+        tmp_path
+        / "stable-runtime"
+    ).resolve()
+
+    runtime_root.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    relocated_launcher = (
+        runtime_root
+        / "start_todoba.ps1"
+    )
+
+    shutil.copy2(
+        LAUNCHER_PATH,
+        relocated_launcher,
+    )
+
+    release_root = (
+        tmp_path
+        / "releases"
+        / "release-001"
+    ).resolve()
+
+    backend_root = (
+        release_root
+        / "backend"
+    )
+
+    backend_root.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    for name in (
+        "start_api.py",
+        "start_executor.py",
+        "start_package_builder.py",
+    ):
+        (
+            backend_root
+            / name
+        ).write_text(
+            "",
+            encoding="utf-8",
+        )
+
+    python_executable = (
+        tmp_path
+        / "python-runtime"
+        / "python.exe"
+    ).resolve()
+
+    python_executable.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    python_executable.write_bytes(
+        b"placeholder"
+    )
+
+    environment_file = (
+        tmp_path
+        / "shared"
+        / "config"
+        / ".env"
+    ).resolve()
+
+    environment_file.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    environment_file.write_text(
+        "",
+        encoding="utf-8",
+    )
+
+    telegram_identifier = (
+        tmp_path
+        / "shared"
+        / "telegram"
+        / "todoba"
+    ).resolve()
+
+    telegram_identifier.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    telegram_file = Path(
+        str(telegram_identifier)
+        + ".session"
+    )
+
+    telegram_file.write_bytes(
+        b"placeholder"
+    )
+
+    log_root = (
+        tmp_path
+        / "shared"
+        / "logs"
+    ).resolve()
+
+    environment = os.environ.copy()
+
+    environment["TODOBA_RELEASE_ROOT"] = str(
+        release_root
+    )
+
+    environment["TODOBA_PYTHON_EXECUTABLE"] = str(
+        python_executable
+    )
+
+    environment["TODOBA_ENV_FILE"] = str(
+        environment_file
+    )
+
+    environment["TELEGRAM_SESSION"] = str(
+        telegram_identifier
+    )
+
+    environment["TODOBA_RUNTIME_LOG_ROOT"] = str(
+        log_root
+    )
+
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(relocated_launcher),
+            "-ValidateOnly",
+        ],
+        cwd=runtime_root,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert result.returncode == 0, (
+        result.stdout
+        + result.stderr
+    )
+
+    assert (
+        "RELEASE_ROOT="
+        + str(release_root)
+        in result.stdout
+    )
+
+    assert (
+        "PYTHON_PATH="
+        + str(python_executable)
+        in result.stdout
+    )
+
+    assert (
+        "ENVIRONMENT_PATH="
+        + str(environment_file)
+        in result.stdout
+    )
+
+    assert (
+        "TELEGRAM_SESSION_FILE="
+        + str(telegram_file)
+        in result.stdout
+    )
+
+    assert (
+        "LOG_DIRECTORY="
+        + str(log_root)
+        in result.stdout
+    )

@@ -36,6 +36,10 @@ from backend.commercial.customer_commercial_order_service import (
     CustomerCommercialOrderResult,
     CustomerCommercialOrderService,
 )
+from backend.commercial.customer_commercial_order_terms_binding import (
+    CustomerCommercialOrderTermsBindingRecord,
+    CustomerCommercialOrderTermsBindingStore,
+)
 from backend.commercial.customer_identity_registry import (
     CustomerIdentity,
 )
@@ -80,6 +84,7 @@ class CustomerPayPalPaymentInitiationService:
             CustomerCommercialCurrentBillingCycleService
         ),
         order_service: CustomerCommercialOrderService,
+        order_terms_store: CustomerCommercialOrderTermsBindingStore,
         payment_intent_service: CustomerPaymentIntentService,
         paypal_order_client: CustomerPayPalOrderHttpClient,
         paypal_binding_service: CustomerPayPalOrderBindingService,
@@ -99,6 +104,20 @@ class CustomerPayPalPaymentInitiationService:
         ):
             raise TypeError(
                 "order_service must be CustomerCommercialOrderService."
+            )
+
+        if not isinstance(
+            order_terms_store,
+            CustomerCommercialOrderTermsBindingStore,
+        ):
+            raise TypeError(
+                "order_terms_store must be "
+                "CustomerCommercialOrderTermsBindingStore."
+            )
+
+        if not order_terms_store.is_ready():
+            raise RuntimeError(
+                "order_terms_store must be initialized."
             )
 
         if not isinstance(
@@ -132,6 +151,7 @@ class CustomerPayPalPaymentInitiationService:
             current_billing_cycle_service
         )
         self._order_service = order_service
+        self._order_terms_store = order_terms_store
         self._payment_intent_service = payment_intent_service
         self._paypal_order_client = paypal_order_client
         self._paypal_binding_service = paypal_binding_service
@@ -192,6 +212,19 @@ class CustomerPayPalPaymentInitiationService:
             authorized_customer=authenticated_customer,
             amount_minor=amount_minor,
             currency=_PAYPAL_CURRENCY,
+        )
+
+        self._order_terms_store.register(
+            CustomerCommercialOrderTermsBindingRecord(
+                order_id=order.order_id,
+                customer_id=order.customer_id,
+                licensed_account_cap_usd=(
+                    quote.licensed_account_cap_usd
+                ),
+                standard_monthly_price_usd=(
+                    quote.standard_monthly_price_usd
+                ),
+            )
         )
 
         payment_intent = self._payment_intent_service.create(

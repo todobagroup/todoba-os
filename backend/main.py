@@ -1755,6 +1755,10 @@ def _compose_customer_paypal_payment_initiation_runtime(
             "commercial order store",
             customer_commercial_order_store,
         ),
+        (
+            "commercial order terms binding store",
+            customer_commercial_order_terms_binding_store,
+        ),
     )
 
     for owner_name, owner in stores:
@@ -1813,6 +1817,9 @@ def _compose_customer_paypal_payment_initiation_runtime(
             customer_commercial_current_billing_cycle_service
         ),
         order_service=customer_commercial_order_service,
+        order_terms_store=(
+            customer_commercial_order_terms_binding_store
+        ),
         payment_intent_service=customer_payment_intent_service,
         paypal_order_client=paypal_order_client,
         paypal_binding_service=paypal_binding_service,

@@ -1,4 +1,4 @@
-﻿from decimal import Decimal
+from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -10,6 +10,9 @@ from backend.commercial.customer_commercial_current_billing_cycle_service import
 )
 from backend.commercial.customer_commercial_order_service import (
     CustomerCommercialOrderService,
+)
+from backend.commercial.customer_commercial_order_terms_binding import (
+    CustomerCommercialOrderTermsBindingStore,
 )
 from backend.commercial.customer_identity_registry import (
     CustomerIdentity,
@@ -70,6 +73,10 @@ def test_paypal_payment_initiation_derives_all_payment_truth_server_side():
     binding_service = _typed_mock(
         CustomerPayPalOrderBindingService
     )
+    terms_store = _typed_mock(
+        CustomerCommercialOrderTermsBindingStore
+    )
+    terms_store.is_ready.return_value = True
 
     customer = _typed_mock(
         CustomerIdentity
@@ -95,6 +102,7 @@ def test_paypal_payment_initiation_derives_all_payment_truth_server_side():
 
     order = SimpleNamespace(
         order_id="order-001",
+        customer_id="customer-001",
         amount_minor=amount_minor,
         currency="USD",
     )
@@ -133,6 +141,7 @@ def test_paypal_payment_initiation_derives_all_payment_truth_server_side():
     service = CustomerPayPalPaymentInitiationService(
         current_billing_cycle_service=current_cycle,
         order_service=order_service,
+        order_terms_store=terms_store,
         payment_intent_service=intent_service,
         paypal_order_client=paypal_client,
         paypal_binding_service=binding_service,
@@ -158,6 +167,21 @@ def test_paypal_payment_initiation_derives_all_payment_truth_server_side():
         payment_intent_request_id="request-001:intent",
         authorized_order=order,
         payment_rail=PaymentRail.PAYPAL,
+    )
+
+    terms_store.register.assert_called_once()
+
+    terms_record = terms_store.register.call_args.args[0]
+
+    assert terms_record.order_id == order.order_id
+    assert terms_record.customer_id == order.customer_id
+    assert (
+        terms_record.licensed_account_cap_usd
+        == quote.licensed_account_cap_usd
+    )
+    assert (
+        terms_record.standard_monthly_price_usd
+        == quote.standard_monthly_price_usd
     )
 
     paypal_client.create_order.assert_called_once_with(
@@ -199,6 +223,10 @@ def test_paypal_payment_initiation_rejects_missing_provider_approval_url():
     binding_service = _typed_mock(
         CustomerPayPalOrderBindingService
     )
+    terms_store = _typed_mock(
+        CustomerCommercialOrderTermsBindingStore
+    )
+    terms_store.is_ready.return_value = True
     customer = _typed_mock(
         CustomerIdentity
     )
@@ -225,6 +253,7 @@ def test_paypal_payment_initiation_rejects_missing_provider_approval_url():
     order_service.create.return_value = (
         SimpleNamespace(
             order_id="order-001",
+            customer_id="customer-001",
             amount_minor=amount_minor,
             currency="USD",
         )
@@ -249,6 +278,7 @@ def test_paypal_payment_initiation_rejects_missing_provider_approval_url():
     service = CustomerPayPalPaymentInitiationService(
         current_billing_cycle_service=current_cycle,
         order_service=order_service,
+        order_terms_store=terms_store,
         payment_intent_service=intent_service,
         paypal_order_client=paypal_client,
         paypal_binding_service=binding_service,
@@ -267,3 +297,12 @@ def test_paypal_payment_initiation_rejects_missing_provider_approval_url():
         )
 
     binding_service.bind.assert_not_called()
+
+def test_paypal_initiation_requires_authoritative_order_terms_store():
+    import inspect
+
+    parameters = inspect.signature(
+        CustomerPayPalPaymentInitiationService.__init__
+    ).parameters
+
+    assert "order_terms_store" in parameters

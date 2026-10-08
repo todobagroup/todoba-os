@@ -42,9 +42,53 @@ function Test-TodobaAbsoluteWindowsPath {
     return $false
 }
 
-$repoRoot = Split-Path `
--Parent `
-$PSScriptRoot
+$defaultReleaseRoot = Split-Path `
+    -Parent `
+    $PSScriptRoot
+
+$releaseRootOverride = (
+    [Environment]::GetEnvironmentVariable(
+        "TODOBA_RELEASE_ROOT"
+    )
+)
+
+if (
+    [string]::IsNullOrWhiteSpace(
+        $releaseRootOverride
+    )
+) {
+    $releaseRoot = (
+        [System.IO.Path]::GetFullPath(
+            $defaultReleaseRoot
+        )
+    )
+}
+else {
+    $releaseRootOverride = (
+        $releaseRootOverride.Trim()
+    )
+
+    if (
+        -not (
+            Test-TodobaAbsoluteWindowsPath `
+                -Path $releaseRootOverride
+        )
+    ) {
+        throw (
+            "TODOBA_RELEASE_ROOT must be an absolute path."
+        )
+    }
+
+    $releaseRoot = (
+        [System.IO.Path]::GetFullPath(
+            $releaseRootOverride
+        )
+    )
+
+    $env:TODOBA_RELEASE_ROOT = $releaseRoot
+}
+
+$repoRoot = $releaseRoot
 
 $pythonPath = Join-Path `
 $repoRoot `
@@ -247,6 +291,7 @@ if ($missingPaths.Count -gt 0) {
 if ($ValidateOnly) {
     Write-Output "TODOBA_STARTUP_VALIDATION=PASS"
     Write-Output "REPO_ROOT=$repoRoot"
+    Write-Output "RELEASE_ROOT=$releaseRoot"
     Write-Output "PYTHON_PATH=$pythonPath"
     Write-Output "ENVIRONMENT_PATH=$environmentPath"
     Write-Output "LOG_DIRECTORY=$logDirectory"

@@ -622,3 +622,217 @@ def test_launcher_rejects_missing_external_telegram_session(
         "TODOBA startup prerequisites are missing: TelegramSession"
         in combined
     )
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="Windows PowerShell validation requires Windows.",
+)
+def test_launcher_uses_absolute_external_release_root(
+    tmp_path: Path,
+) -> None:
+    release_root = (
+        tmp_path
+        / "release-001"
+    ).resolve()
+
+    (
+        release_root
+        / ".venv"
+        / "Scripts"
+    ).mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    (
+        release_root
+        / "backend"
+    ).mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    (
+        release_root
+        / ".venv"
+        / "Scripts"
+        / "python.exe"
+    ).write_bytes(b"placeholder")
+
+    for name in (
+        "start_api.py",
+        "start_executor.py",
+        "start_package_builder.py",
+    ):
+        (
+            release_root
+            / "backend"
+            / name
+        ).write_text(
+            "",
+            encoding="utf-8",
+        )
+
+    (
+        release_root
+        / ".env"
+    ).write_text(
+        "",
+        encoding="utf-8",
+    )
+
+    (
+        release_root
+        / "todoba.session"
+    ).write_bytes(
+        b"placeholder"
+    )
+
+    environment = __import__("os").environ.copy()
+
+    environment["TODOBA_RELEASE_ROOT"] = str(
+        release_root
+    )
+
+    environment.pop(
+        "TODOBA_ENV_FILE",
+        None,
+    )
+
+    environment.pop(
+        "TELEGRAM_SESSION",
+        None,
+    )
+
+    environment.pop(
+        "TODOBA_RUNTIME_LOG_ROOT",
+        None,
+    )
+
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(LAUNCHER_PATH),
+            "-ValidateOnly",
+        ],
+        cwd=ROOT_DIR,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert result.returncode == 0, (
+        result.stdout
+        + result.stderr
+    )
+
+    assert (
+        "RELEASE_ROOT="
+        + str(release_root)
+        in result.stdout
+    )
+
+    assert (
+        "PYTHON_PATH="
+        + str(
+            (
+                release_root
+                / ".venv"
+                / "Scripts"
+                / "python.exe"
+            ).resolve()
+        )
+        in result.stdout
+    )
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="Windows PowerShell validation requires Windows.",
+)
+def test_launcher_rejects_relative_external_release_root() -> None:
+    environment = __import__("os").environ.copy()
+
+    environment["TODOBA_RELEASE_ROOT"] = (
+        "relative"
+        + __import__("os").sep
+        + "release"
+    )
+
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(LAUNCHER_PATH),
+            "-ValidateOnly",
+        ],
+        cwd=ROOT_DIR,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert result.returncode != 0
+
+    combined = (
+        result.stdout
+        + result.stderr
+    )
+
+    assert (
+        "TODOBA_RELEASE_ROOT must be an absolute path."
+        in combined
+    )
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="Windows PowerShell validation requires Windows.",
+)
+def test_launcher_preserves_default_release_root() -> None:
+    environment = __import__("os").environ.copy()
+
+    environment.pop(
+        "TODOBA_RELEASE_ROOT",
+        None,
+    )
+
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(LAUNCHER_PATH),
+            "-ValidateOnly",
+        ],
+        cwd=ROOT_DIR,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert result.returncode == 0, (
+        result.stdout
+        + result.stderr
+    )
+
+    assert (
+        "RELEASE_ROOT="
+        + str(ROOT_DIR.resolve())
+        in result.stdout
+    )

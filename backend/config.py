@@ -14,7 +14,28 @@ from dotenv import load_dotenv
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-ENV_FILE = BASE_DIR / ".env"
+
+_ENV_FILE_OVERRIDE = os.getenv(
+    "TODOBA_ENV_FILE",
+    "",
+).strip()
+
+if _ENV_FILE_OVERRIDE:
+    _env_file_override_path = Path(
+        _ENV_FILE_OVERRIDE
+    ).expanduser()
+
+    if not _env_file_override_path.is_absolute():
+        raise RuntimeError(
+            "TODOBA_ENV_FILE must be an absolute path."
+        )
+
+    ENV_FILE = _env_file_override_path.resolve()
+else:
+    ENV_FILE = (
+        BASE_DIR
+        / ".env"
+    ).resolve()
 
 load_dotenv(ENV_FILE)
 

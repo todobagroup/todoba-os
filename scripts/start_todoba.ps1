@@ -90,9 +90,45 @@ else {
 
 $repoRoot = $releaseRoot
 
-$pythonPath = Join-Path `
-$repoRoot `
-".venv\Scripts\python.exe"
+$pythonExecutableOverride = (
+    [Environment]::GetEnvironmentVariable(
+        "TODOBA_PYTHON_EXECUTABLE"
+    )
+)
+
+if (
+    [string]::IsNullOrWhiteSpace(
+        $pythonExecutableOverride
+    )
+) {
+    $pythonPath = Join-Path `
+        $repoRoot `
+        ".venv\Scripts\python.exe"
+}
+else {
+    $pythonExecutableOverride = (
+        $pythonExecutableOverride.Trim()
+    )
+
+    if (
+        -not (
+            Test-TodobaAbsoluteWindowsPath `
+                -Path $pythonExecutableOverride
+        )
+    ) {
+        throw (
+            "TODOBA_PYTHON_EXECUTABLE must be an absolute path."
+        )
+    }
+
+    $pythonPath = (
+        [System.IO.Path]::GetFullPath(
+            $pythonExecutableOverride
+        )
+    )
+
+    $env:TODOBA_PYTHON_EXECUTABLE = $pythonPath
+}
 
 $environmentOverride = (
     [Environment]::GetEnvironmentVariable(

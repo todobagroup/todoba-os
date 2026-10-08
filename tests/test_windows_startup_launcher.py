@@ -836,3 +836,161 @@ def test_launcher_preserves_default_release_root() -> None:
         + str(ROOT_DIR.resolve())
         in result.stdout
     )
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="Windows PowerShell validation requires Windows.",
+)
+def test_launcher_uses_absolute_external_python_executable(
+    tmp_path: Path,
+) -> None:
+    python_executable = (
+        tmp_path
+        / "runtime"
+        / "python"
+        / "python.exe"
+    ).resolve()
+
+    python_executable.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    python_executable.write_bytes(
+        b"placeholder"
+    )
+
+    environment = __import__("os").environ.copy()
+
+    environment["TODOBA_PYTHON_EXECUTABLE"] = str(
+        python_executable
+    )
+
+    environment.pop(
+        "TODOBA_RELEASE_ROOT",
+        None,
+    )
+
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(LAUNCHER_PATH),
+            "-ValidateOnly",
+        ],
+        cwd=ROOT_DIR,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert result.returncode == 0, (
+        result.stdout
+        + result.stderr
+    )
+
+    assert (
+        "PYTHON_PATH="
+        + str(python_executable)
+        in result.stdout
+    )
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="Windows PowerShell validation requires Windows.",
+)
+def test_launcher_rejects_relative_external_python_executable() -> None:
+    environment = __import__("os").environ.copy()
+
+    environment["TODOBA_PYTHON_EXECUTABLE"] = (
+        "relative"
+        + __import__("os").sep
+        + "python.exe"
+    )
+
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(LAUNCHER_PATH),
+            "-ValidateOnly",
+        ],
+        cwd=ROOT_DIR,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert result.returncode != 0
+
+    combined = (
+        result.stdout
+        + result.stderr
+    )
+
+    assert (
+        "TODOBA_PYTHON_EXECUTABLE must be an absolute path."
+        in combined
+    )
+
+
+@pytest.mark.skipif(
+    sys.platform != "win32",
+    reason="Windows PowerShell validation requires Windows.",
+)
+def test_launcher_rejects_missing_external_python_executable(
+    tmp_path: Path,
+) -> None:
+    missing_python = (
+        tmp_path
+        / "runtime"
+        / "python"
+        / "missing-python.exe"
+    ).resolve()
+
+    environment = __import__("os").environ.copy()
+
+    environment["TODOBA_PYTHON_EXECUTABLE"] = str(
+        missing_python
+    )
+
+    result = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(LAUNCHER_PATH),
+            "-ValidateOnly",
+        ],
+        cwd=ROOT_DIR,
+        env=environment,
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+
+    assert result.returncode != 0
+
+    combined = (
+        result.stdout
+        + result.stderr
+    )
+
+    assert (
+        "TODOBA startup prerequisites are missing: Python"
+        in combined
+    )

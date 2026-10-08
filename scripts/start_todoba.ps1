@@ -524,22 +524,22 @@ try {
         )
 
         if ($null -ne $existingProcess) {
-            $component.Process = $existingProcess
-            $component.Owned = $false
-
             Write-TodobaRuntimeLog (
-                "Adopted existing $($component.Name) process pid=$($existingProcess.Id)"
-            )
-        }
-        else {
-            $component.Process = (
-                Start-TodobaComponent `
-                -Name $component.Name `
-                -Module $component.Module
+                "TODOBA startup refused because existing $($component.Name) process pid=$($existingProcess.Id)"
             )
 
-            $component.Owned = $true
+            throw (
+                "TODOBA startup refused because existing $($component.Name) process. Run Stop before Start."
+            )
         }
+
+        $component.Process = (
+            Start-TodobaComponent `
+            -Name $component.Name `
+            -Module $component.Module
+        )
+
+        $component.Owned = $true
     }
 
     while ($true) {

@@ -1187,3 +1187,60 @@ def test_launcher_validate_only_survives_relocation_with_external_runtime_author
         + str(log_root)
         in result.stdout
     )
+
+
+def test_launcher_fails_closed_on_preexisting_runtime_processes() -> None:
+    launcher_path = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "start_todoba.ps1"
+    )
+
+    launcher = launcher_path.read_text(
+        encoding="utf-8-sig"
+    )
+
+    startup_loop_start = launcher.index(
+        "    foreach ($component in $components) {"
+    )
+
+    supervision_loop_start = launcher.index(
+        "    while ($true) {",
+        startup_loop_start,
+    )
+
+    startup_region = launcher[
+        startup_loop_start:supervision_loop_start
+    ]
+
+    assert "Get-TodobaComponentProcess" in startup_region
+
+    assert (
+        "TODOBA startup refused because existing"
+        in startup_region
+    )
+
+    assert (
+        "Run Stop before Start."
+        in startup_region
+    )
+
+    assert (
+        "$component.Process = $existingProcess"
+        not in startup_region
+    )
+
+    assert (
+        "$component.Owned = $false"
+        not in startup_region
+    )
+
+    assert (
+        "Adopted existing"
+        not in startup_region
+    )
+
+    assert (
+        "Start-TodobaComponent"
+        in startup_region
+    )

@@ -421,6 +421,36 @@ if (-not (
     throw "Source installed release does not exist."
 }
 
+# Reject junction/symlink redirection in installed release authority.
+$authorityItemPath = $sourceReleasePath
+
+while ($true) {
+    $authorityItem = Get-Item `
+        -LiteralPath $authorityItemPath `
+        -Force `
+        -ErrorAction Stop
+
+    if (
+        $authorityItem.Attributes -band
+        [System.IO.FileAttributes]::ReparsePoint
+    ) {
+        throw "Installed release authority contains a reparse point."
+    }
+
+    $authorityParent = [System.IO.Path]::GetDirectoryName(
+        $authorityItemPath.TrimEnd('\', '/')
+    )
+
+    if (
+        [string]::IsNullOrEmpty($authorityParent) -or
+        $authorityParent -eq $authorityItemPath
+    ) {
+        break
+    }
+
+    $authorityItemPath = $authorityParent
+}
+
 $verifiedSourceReleaseId = Test-TodobaReleaseIntegrity `
     -Root $sourceReleasePath
 

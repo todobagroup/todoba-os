@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 from pathlib import Path
 
@@ -644,3 +645,65 @@ def test_r1_installer_has_no_release_installation_or_switch_authority() -> None:
 
     for fragment in forbidden:
         assert fragment not in source
+
+def test_r1_rejects_source_release_junction_outside_install_root(
+    tmp_path: Path,
+) -> None:
+    _require_installer()
+
+    external_release = _make_source_release(
+        tmp_path / "external"
+    )
+
+    install_root = tmp_path / "authority"
+    releases_root = install_root / "releases"
+    releases_root.mkdir(parents=True)
+
+    junction = releases_root / RELEASE_ID
+
+    completed = subprocess.run(
+        [
+            "powershell.exe",
+            "-NoProfile",
+            "-Command",
+            (
+                "New-Item -ItemType Junction "
+                "-Path $env:TODOBA_TEST_JUNCTION "
+                "-Target $env:TODOBA_TEST_TARGET "
+                "-ErrorAction Stop | Out-Null"
+            ),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+        env={
+            **os.environ,
+            "TODOBA_TEST_JUNCTION": str(junction),
+            "TODOBA_TEST_TARGET": str(external_release),
+        },
+    )
+
+    assert completed.returncode == 0, (
+        completed.stdout + completed.stderr
+    )
+
+    runtime_root = tmp_path / "stable-runtime"
+
+    result = _powershell(
+        "-InstallRoot",
+        str(install_root),
+        "-SourceReleaseId",
+        RELEASE_ID,
+        "-RuntimeRoot",
+        str(runtime_root),
+        "-ValidateOnly",
+    )
+
+    assert result.returncode != 0, (
+        "External junction was accepted as installed "
+        "release authority:\n"
+        + result.stdout
+        + result.stderr
+    )
+
+    assert not runtime_root.exists()

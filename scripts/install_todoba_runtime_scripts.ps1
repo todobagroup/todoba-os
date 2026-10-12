@@ -1,6 +1,9 @@
 ﻿param(
     [Parameter(Mandatory = $true)]
-    [string]$SourceReleaseRoot,
+    [string]$InstallRoot,
+
+    [Parameter(Mandatory = $true)]
+    [string]$SourceReleaseId,
 
     [Parameter(Mandatory = $true)]
     [string]$RuntimeRoot,
@@ -12,7 +15,7 @@
 #
 # Owns:
 # - initial installation of stable launcher/controller pair
-# - byte/hash equivalence with explicit source release
+# - byte/hash equivalence with one verified installed release
 #
 # Does NOT own:
 # - Scheduled Task registration/rebinding
@@ -43,14 +46,324 @@ function Test-TodobaAbsoluteWindowsPath {
 }
 
 
-$SourceReleaseRoot = $SourceReleaseRoot.Trim()
+
+function Get-TodobaSha256 {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    return (
+        Get-FileHash `
+            -LiteralPath $Path `
+            -Algorithm SHA256 `
+            -ErrorAction Stop
+    ).Hash.ToLowerInvariant()
+}
+
+function Get-TodobaRelativeFiles {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Root
+    )
+
+    $normalizedRoot = (
+        [System.IO.Path]::GetFullPath(
+            $Root
+        )
+    ).TrimEnd(
+        '\',
+        '/'
+    )
+
+    return @(
+        Get-ChildItem `
+            -LiteralPath $normalizedRoot `
+            -Recurse `
+            -File `
+            -Force `
+            -ErrorAction Stop |
+        ForEach-Object {
+            $_.FullName.Substring(
+                $normalizedRoot.Length
+            ).TrimStart(
+                '\',
+                '/'
+            ).Replace(
+                '\',
+                '/'
+            )
+        } |
+        Sort-Object
+    )
+}
+
+function Test-TodobaReleaseIntegrity {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Root
+    )
+
+    $versionPath = Join-Path `
+        $Root `
+        "VERSION"
+
+    $manifestPath = Join-Path `
+        $Root `
+        "release-manifest.json"
+
+    $sha256Path = Join-Path `
+        $Root `
+        "SHA256SUMS"
+
+    foreach ($required in @(
+        $versionPath,
+        $manifestPath,
+        $sha256Path
+    )) {
+        if (-not (
+            Test-Path `
+                -LiteralPath $required `
+                -PathType Leaf
+        )) {
+            throw (
+                "Release metadata is missing: " +
+                [System.IO.Path]::GetFileName(
+                    $required
+                )
+            )
+        }
+    }
+
+    $releaseId = (
+        Get-Content `
+            -LiteralPath $versionPath `
+            -Raw `
+            -ErrorAction Stop
+    ).Trim()
+
+    if (
+        $releaseId -notmatch '^[0-9a-f]{40}$'
+    ) {
+        throw "VERSION must contain one full lowercase Git SHA."
+    }
+
+    try {
+        $manifest = (
+            Get-Content `
+                -LiteralPath $manifestPath `
+                -Raw `
+                -ErrorAction Stop
+        ) | ConvertFrom-Json `
+            -ErrorAction Stop
+    }
+    catch {
+        throw "release-manifest.json is invalid."
+    }
+
+    if ($manifest.schema_version -ne 1) {
+        throw "Unsupported release manifest schema."
+    }
+
+    if ($manifest.release_id -ne $releaseId) {
+        throw "Release manifest identity does not match VERSION."
+    }
+
+    $entries = @(
+        $manifest.files
+    )
+
+    if ($entries.Count -eq 0) {
+        throw "Release manifest has no files."
+    }
+
+    $manifestPaths = @()
+
+    foreach ($entry in $entries) {
+
+        $relativePath = [string]$entry.path
+
+        if (
+            [string]::IsNullOrWhiteSpace(
+                $relativePath
+            )
+        ) {
+            throw "Release manifest contains an empty path."
+        }
+
+        $relativePath = $relativePath.Replace(
+            '\',
+            '/'
+        )
+
+        if (
+            [System.IO.Path]::IsPathRooted(
+                $relativePath
+            ) -or
+            $relativePath.StartsWith(
+                "../"
+            ) -or
+            $relativePath.Contains(
+                "/../"
+            )
+        ) {
+            throw "Release manifest contains an unsafe path."
+        }
+
+        $manifestPaths += $relativePath
+
+        $payloadPath = Join-Path `
+            $Root `
+            ($relativePath.Replace(
+                '/',
+                '\'
+            ))
+
+        if (-not (
+            Test-Path `
+                -LiteralPath $payloadPath `
+                -PathType Leaf
+        )) {
+            throw (
+                "Release payload is missing: " +
+                $relativePath
+            )
+        }
+
+        $item = Get-Item `
+            -LiteralPath $payloadPath `
+            -ErrorAction Stop
+
+        if (
+            [int64]$item.Length -ne
+            [int64]$entry.size
+        ) {
+            throw (
+                "Release payload size mismatch: " +
+                $relativePath
+            )
+        }
+
+        $actualHash = Get-TodobaSha256 `
+            -Path $payloadPath
+
+        $expectedHash = (
+            [string]$entry.sha256
+        ).ToLowerInvariant()
+
+        if ($actualHash -ne $expectedHash) {
+            throw (
+                "Release payload SHA256 mismatch: " +
+                $relativePath
+            )
+        }
+    }
+
+    $sortedManifestPaths = @(
+        $manifestPaths
+    )
+
+    [System.Array]::Sort(
+        $sortedManifestPaths,
+        [System.StringComparer]::Ordinal
+    )
+
+    if (
+        (
+            $manifestPaths -join "`n"
+        ) -cne (
+            $sortedManifestPaths -join "`n"
+        )
+    ) {
+        throw "Release manifest paths are not sorted."
+    }
+
+    $uniqueManifestPaths = @(
+        $manifestPaths |
+        Sort-Object -Unique
+    )
+
+    if (
+        $uniqueManifestPaths.Count -ne
+        $manifestPaths.Count
+    ) {
+        throw "Release manifest contains duplicate paths."
+    }
+
+    $expectedShaLines = @(
+        foreach ($entry in $entries) {
+            (
+                ([string]$entry.sha256).ToLowerInvariant() +
+                "  " +
+                ([string]$entry.path).Replace(
+                    '\',
+                    '/'
+                )
+            )
+        }
+    )
+
+    $actualShaLines = @(
+        Get-Content `
+            -LiteralPath $sha256Path `
+            -ErrorAction Stop
+    )
+
+    if (
+        (
+            $actualShaLines -join "`n"
+        ) -ne (
+            $expectedShaLines -join "`n"
+        )
+    ) {
+        throw "SHA256SUMS does not match release manifest."
+    }
+
+    $actualFiles = @(
+        Get-TodobaRelativeFiles `
+            -Root $Root
+    )
+
+    $expectedFiles = @(
+        (
+            $manifestPaths +
+            @(
+                "release-manifest.json",
+                "SHA256SUMS"
+            )
+        ) |
+        Sort-Object -Unique
+    )
+
+    if (
+        (
+            $actualFiles -join "`n"
+        ) -ne (
+            $expectedFiles -join "`n"
+        )
+    ) {
+        throw "Release contains files outside its manifest authority."
+    }
+
+    return $releaseId
+}
+
+
+$InstallRoot = $InstallRoot.Trim()
+$SourceReleaseId = $SourceReleaseId.Trim()
 $RuntimeRoot = $RuntimeRoot.Trim()
 
 if (-not (
     Test-TodobaAbsoluteWindowsPath `
-        -Path $SourceReleaseRoot
+        -Path $InstallRoot
 )) {
-    throw "SourceReleaseRoot must be an absolute path."
+    throw "InstallRoot must be an absolute path."
+}
+
+if (
+    $SourceReleaseId -notmatch '^[0-9a-f]{40}$'
+) {
+    throw "SourceReleaseId must be one full lowercase Git SHA."
 }
 
 if (-not (
@@ -60,9 +373,9 @@ if (-not (
     throw "RuntimeRoot must be an absolute path."
 }
 
-$resolvedSourceReleaseRoot = (
+$resolvedInstallRoot = (
     [System.IO.Path]::GetFullPath(
-        $SourceReleaseRoot
+        $InstallRoot
     )
 )
 
@@ -72,20 +385,55 @@ $resolvedRuntimeRoot = (
     )
 )
 
+$releasesRoot = Join-Path `
+    $resolvedInstallRoot `
+    "releases"
+
+$sourceReleaseCandidate = Join-Path `
+    $releasesRoot `
+    $SourceReleaseId
+
+$sourceReleasePath = (
+    [System.IO.Path]::GetFullPath(
+        $sourceReleaseCandidate
+    )
+)
+
+$releasesPrefix = (
+    $releasesRoot.TrimEnd('\', '/') +
+    [System.IO.Path]::DirectorySeparatorChar
+)
+
+if (-not (
+    $sourceReleasePath.StartsWith(
+        $releasesPrefix,
+        [System.StringComparison]::OrdinalIgnoreCase
+    )
+)) {
+    throw "Source release is outside installed release authority."
+}
+
 if (-not (
     Test-Path `
-        -LiteralPath $resolvedSourceReleaseRoot `
+        -LiteralPath $sourceReleasePath `
         -PathType Container
 )) {
-    throw "SourceReleaseRoot does not exist."
+    throw "Source installed release does not exist."
+}
+
+$verifiedSourceReleaseId = Test-TodobaReleaseIntegrity `
+    -Root $sourceReleasePath
+
+if ($verifiedSourceReleaseId -ne $SourceReleaseId) {
+    throw "Source installed release identity verification failed."
 }
 
 $sourceLauncher = Join-Path `
-    $resolvedSourceReleaseRoot `
+    $sourceReleasePath `
     "scripts\start_todoba.ps1"
 
 $sourceController = Join-Path `
-    $resolvedSourceReleaseRoot `
+    $sourceReleasePath `
     "scripts\control_todoba.ps1"
 
 if (-not (
@@ -93,7 +441,7 @@ if (-not (
         -LiteralPath $sourceLauncher `
         -PathType Leaf
 )) {
-    throw "Source runtime launcher does not exist."
+    throw "Verified release does not contain runtime launcher."
 }
 
 if (-not (
@@ -101,7 +449,7 @@ if (-not (
         -LiteralPath $sourceController `
         -PathType Leaf
 )) {
-    throw "Source runtime controller does not exist."
+    throw "Verified release does not contain runtime controller."
 }
 
 if (
@@ -129,7 +477,7 @@ if ($ValidateOnly) {
         "TODOBA_RUNTIME_SCRIPT_INSTALLATION_VALIDATION=PASS"
     )
 
-    Write-Output "SOURCE_RELEASE_ROOT=$resolvedSourceReleaseRoot"
+    Write-Output "SOURCE_RELEASE_ROOT=$sourceReleasePath"
     Write-Output "RUNTIME_ROOT=$resolvedRuntimeRoot"
     Write-Output "SCRIPT_COUNT=2"
     Write-Output "LAUNCHER_SHA256=$sourceLauncherHash"

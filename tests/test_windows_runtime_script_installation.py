@@ -1,6 +1,7 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import hashlib
+import json
 import subprocess
 from pathlib import Path
 
@@ -58,12 +59,21 @@ def _sha256(path: Path) -> str:
     ).hexdigest().upper()
 
 
+RELEASE_ID = "1111111111111111111111111111111111111111"
+
+
 def _make_source_release(
     tmp_path: Path,
 ) -> Path:
-    release = (
+    install_root = (
         tmp_path
-        / "release"
+        / "todoba"
+    )
+
+    release = (
+        install_root
+        / "releases"
+        / RELEASE_ID
     )
 
     scripts = (
@@ -89,8 +99,75 @@ def _make_source_release(
         SOURCE_CONTROLLER.read_bytes()
     )
 
-    return release
+    (
+        release
+        / "VERSION"
+    ).write_text(
+        RELEASE_ID + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
 
+    manifest_paths = (
+        "VERSION",
+        "scripts/control_todoba.ps1",
+        "scripts/start_todoba.ps1",
+    )
+
+    entries = []
+
+    for relative_path in manifest_paths:
+        payload = (
+            release
+            / Path(relative_path)
+        )
+
+        entries.append(
+            {
+                "path": relative_path,
+                "sha256": hashlib.sha256(
+                    payload.read_bytes()
+                ).hexdigest(),
+                "size": payload.stat().st_size,
+            }
+        )
+
+    manifest = {
+        "schema_version": 1,
+        "release_id": RELEASE_ID,
+        "files": entries,
+    }
+
+    (
+        release
+        / "release-manifest.json"
+    ).write_text(
+        json.dumps(
+            manifest,
+            separators=(",", ":"),
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    (
+        release
+        / "SHA256SUMS"
+    ).write_text(
+        "".join(
+            (
+                entry["sha256"]
+                + "  "
+                + entry["path"]
+                + "\n"
+            )
+            for entry in entries
+        ),
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    return release
 
 def test_runtime_script_installer_exists() -> None:
     _require_installer()
@@ -113,8 +190,10 @@ def test_validate_only_accepts_explicit_release_and_runtime_roots(
     )
 
     result = _powershell(
-        "-SourceReleaseRoot",
-        str(source_release),
+        "-InstallRoot",
+        str(source_release.parents[1]),
+        "-SourceReleaseId",
+        RELEASE_ID,
         "-RuntimeRoot",
         str(runtime_root),
         "-ValidateOnly",
@@ -146,14 +225,16 @@ def test_validate_only_accepts_explicit_release_and_runtime_roots(
     assert not runtime_root.exists()
 
 
-def test_rejects_relative_source_release_root(
+def test_rejects_relative_install_root(
     tmp_path: Path,
 ) -> None:
     _require_installer()
 
     result = _powershell(
-        "-SourceReleaseRoot",
-        "relative-release",
+        "-InstallRoot",
+        "relative-install",
+        "-SourceReleaseId",
+        RELEASE_ID,
         "-RuntimeRoot",
         str(tmp_path / "runtime"),
         "-ValidateOnly",
@@ -162,7 +243,7 @@ def test_rejects_relative_source_release_root(
     assert result.returncode != 0
 
     assert (
-        "SourceReleaseRoot must be an absolute path."
+        "InstallRoot must be an absolute path."
         in (
             result.stdout
             + result.stderr
@@ -182,8 +263,10 @@ def test_rejects_relative_runtime_root(
     )
 
     result = _powershell(
-        "-SourceReleaseRoot",
-        str(source_release),
+        "-InstallRoot",
+        str(source_release.parents[1]),
+        "-SourceReleaseId",
+        RELEASE_ID,
         "-RuntimeRoot",
         "relative-runtime",
         "-ValidateOnly",
@@ -205,12 +288,16 @@ def test_rejects_missing_source_release(
 ) -> None:
     _require_installer()
 
+    install_root = (
+        tmp_path
+        / "todoba"
+    )
+
     result = _powershell(
-        "-SourceReleaseRoot",
-        str(
-            tmp_path
-            / "missing-release"
-        ),
+        "-InstallRoot",
+        str(install_root),
+        "-SourceReleaseId",
+        RELEASE_ID,
         "-RuntimeRoot",
         str(tmp_path / "runtime"),
         "-ValidateOnly",
@@ -219,13 +306,12 @@ def test_rejects_missing_source_release(
     assert result.returncode != 0
 
     assert (
-        "SourceReleaseRoot does not exist."
+        "Source installed release does not exist."
         in (
             result.stdout
             + result.stderr
         )
     )
-
 
 def test_rejects_source_missing_launcher(
     tmp_path: Path,
@@ -245,8 +331,10 @@ def test_rejects_source_missing_launcher(
     ).unlink()
 
     result = _powershell(
-        "-SourceReleaseRoot",
-        str(source_release),
+        "-InstallRoot",
+        str(source_release.parents[1]),
+        "-SourceReleaseId",
+        RELEASE_ID,
         "-RuntimeRoot",
         str(tmp_path / "runtime"),
         "-ValidateOnly",
@@ -255,7 +343,7 @@ def test_rejects_source_missing_launcher(
     assert result.returncode != 0
 
     assert (
-        "Source runtime launcher does not exist."
+        "Release payload is missing: scripts/start_todoba.ps1"
         in (
             result.stdout
             + result.stderr
@@ -281,8 +369,10 @@ def test_rejects_source_missing_controller(
     ).unlink()
 
     result = _powershell(
-        "-SourceReleaseRoot",
-        str(source_release),
+        "-InstallRoot",
+        str(source_release.parents[1]),
+        "-SourceReleaseId",
+        RELEASE_ID,
         "-RuntimeRoot",
         str(tmp_path / "runtime"),
         "-ValidateOnly",
@@ -291,7 +381,7 @@ def test_rejects_source_missing_controller(
     assert result.returncode != 0
 
     assert (
-        "Source runtime controller does not exist."
+        "Release payload is missing: scripts/control_todoba.ps1"
         in (
             result.stdout
             + result.stderr
@@ -316,8 +406,10 @@ def test_install_creates_exact_stable_runtime_pair(
     )
 
     result = _powershell(
-        "-SourceReleaseRoot",
-        str(source_release),
+        "-InstallRoot",
+        str(source_release.parents[1]),
+        "-SourceReleaseId",
+        RELEASE_ID,
         "-RuntimeRoot",
         str(runtime_root),
     )
@@ -402,8 +494,10 @@ def test_existing_runtime_root_fails_closed(
     )
 
     result = _powershell(
-        "-SourceReleaseRoot",
-        str(source_release),
+        "-InstallRoot",
+        str(source_release.parents[1]),
+        "-SourceReleaseId",
+        RELEASE_ID,
         "-RuntimeRoot",
         str(runtime_root),
     )
@@ -462,3 +556,91 @@ def test_installer_does_not_own_other_runtime_authorities() -> None:
 
     for fragment in forbidden:
         assert fragment not in text
+
+
+def test_r1_installer_contract_rejects_arbitrary_source_path_authority() -> None:
+    _require_installer()
+
+    source = INSTALLER.read_text(
+        encoding="utf-8",
+    )
+
+    assert "SourceReleaseRoot" not in source
+
+    assert (
+        "[string]$InstallRoot"
+        in source
+    )
+
+    assert (
+        "[string]$SourceReleaseId"
+        in source
+    )
+
+    assert (
+        "'^[0-9a-f]{40}$'"
+        in source
+    )
+
+
+def test_r1_installer_derives_source_from_installed_release_authority() -> None:
+    _require_installer()
+
+    source = INSTALLER.read_text(
+        encoding="utf-8",
+    )
+
+    assert (
+        '"releases"'
+        in source
+    )
+
+    assert (
+        "$SourceReleaseId"
+        in source
+    )
+
+    assert (
+        "Test-TodobaReleaseIntegrity"
+        in source
+    )
+
+    assert (
+        "release-manifest.json"
+        in source
+    )
+
+    assert (
+        "SHA256SUMS"
+        in source
+    )
+
+    assert (
+        "VERSION"
+        in source
+    )
+
+
+def test_r1_installer_has_no_release_installation_or_switch_authority() -> None:
+    _require_installer()
+
+    source = INSTALLER.read_text(
+        encoding="utf-8",
+    )
+
+    forbidden = (
+        "ItemType Junction",
+        "CURRENT_PATH=",
+        "TODOBA_RUNTIME_RELEASE_INSTALLED",
+        "TODOBA_RUNTIME_RELEASE_SWITCHED",
+        "Start-ScheduledTask",
+        "Stop-ScheduledTask",
+        "Register-ScheduledTask",
+        "Set-ScheduledTask",
+        "Start-Process",
+        "Stop-Process",
+        "SetEnvironmentVariable",
+    )
+
+    for fragment in forbidden:
+        assert fragment not in source

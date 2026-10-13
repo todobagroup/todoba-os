@@ -151,7 +151,9 @@ $trigger = New-ScheduledTaskTrigger `
 
 $settings = New-ScheduledTaskSettingsSet `
     -StartWhenAvailable `
-    -MultipleInstances IgnoreNew
+    -MultipleInstances IgnoreNew `
+    -RestartCount 3 `
+    -RestartInterval (New-TimeSpan -Minutes 1)
 
 
 Register-ScheduledTask `

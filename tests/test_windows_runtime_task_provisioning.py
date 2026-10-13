@@ -207,3 +207,32 @@ def test_controller_remains_non_provisioning_owner() -> None:
 
     for fragment in forbidden:
         assert fragment not in controller
+
+
+def test_task_settings_restart_failed_supervisor() -> None:
+    """Windows must retry the supervisor when its task fails."""
+    import re
+
+    source = PROVISIONER_PATH.read_text(encoding="utf-8")
+
+    match = re.search(
+        r"\$settings\s*=\s*New-ScheduledTaskSettingsSet"
+        r"(?P<settings>.*?)"
+        r"Register-ScheduledTask",
+        source,
+        flags=re.DOTALL,
+    )
+
+    assert match is not None, "Scheduled Task settings owner missing"
+
+    settings = match.group("settings")
+
+    assert re.search(
+        r"-RestartCount\s+[1-9][0-9]*\b",
+        settings,
+    ), "Windows supervisor restart count is missing"
+
+    assert re.search(
+        r"-RestartInterval\s+",
+        settings,
+    ), "Windows supervisor restart interval is missing"

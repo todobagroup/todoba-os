@@ -117,7 +117,7 @@ def test_controller_stops_supervisor_before_waiting_for_clean_state() -> None:
     )
 
     assert (
-        '$task.State.ToString() -eq "Ready"'
+        '$task.State.ToString() -eq "Disabled"'
         in stop_body
     )
 
@@ -199,3 +199,41 @@ def test_controller_resolves_launcher_beside_itself() -> None:
         "[regex]::Escape"
         in controller
     )
+
+def test_founder_stop_disables_startup_and_start_reenables_it() -> None:
+    """An intentional Stop must survive Windows reboot."""
+    controller = read_controller()
+
+    stop_body = controller.split(
+        "function Stop-TodobaRuntime {", 1
+    )[1].split(
+        "function Start-TodobaRuntime {", 1
+    )[0]
+
+    start_body = controller.split(
+        "function Start-TodobaRuntime {", 1
+    )[1].split(
+        "switch ($Action)", 1
+    )[0]
+
+    assert "Disable-ScheduledTask" in stop_body, (
+        "Founder Stop does not disable automatic startup"
+    )
+
+    assert (
+        stop_body.index("Disable-ScheduledTask")
+        < stop_body.index("Stop-ScheduledTask")
+    ), "Startup must be disabled before runtime shutdown"
+
+    assert (
+        '"Disabled"' in stop_body
+    ), "Stop verification must recognize Disabled task state"
+
+    assert "Enable-ScheduledTask" in start_body, (
+        "Founder Start cannot reenable automatic startup"
+    )
+
+    assert (
+        start_body.index("Enable-ScheduledTask")
+        < start_body.index("Start-ScheduledTask")
+    ), "Task must be enabled before Start"

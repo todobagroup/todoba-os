@@ -218,7 +218,11 @@ function Stop-TodobaRuntime {
     -TaskName $taskName `
     -ErrorAction Stop
 
-    if ($task.State.ToString() -eq "Running") {
+    $wasRunning = ($task.State.ToString() -eq "Running")
+
+    Disable-ScheduledTask -TaskName $taskName | Out-Null
+
+    if ($wasRunning) {
         Stop-ScheduledTask `
         -TaskName $taskName
     }
@@ -272,7 +276,7 @@ function Stop-TodobaRuntime {
         -ErrorAction SilentlyContinue
 
         $runtimeStopped = (
-            $task.State.ToString() -eq "Ready" -and
+            $task.State.ToString() -eq "Disabled" -and
             $remainingSupervisors.Count -eq 0 -and
             $remainingProcesses.Count -eq 0 -and
             $null -eq $listener
@@ -320,6 +324,13 @@ function Start-TodobaRuntime {
             $existingSupervisors.Count -gt 0
         ) {
             throw "Run Stop before Start because old TODOBA processes still exist."
+        }
+
+        if ($task.State.ToString() -eq "Disabled") {
+            Enable-ScheduledTask -TaskName $taskName | Out-Null
+        }
+        elseif ($task.State.ToString() -ne "Ready") {
+            throw "TODOBA task is not ready for Start."
         }
 
         Start-ScheduledTask `

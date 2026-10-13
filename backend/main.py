@@ -589,67 +589,67 @@ from backend.commercial.customer_paypal_webhook_verification_client import (
 )
 
 MISSION_STORAGE_PATH = (
-    Path("data")
+    TODOBA_CONTROL_PLANE_DATA_ROOT
     / "trading"
     / "execution_missions.json"
 )
 
 MISSION_RECORD_STORAGE_PATH = (
-    Path("data")
+    TODOBA_CONTROL_PLANE_DATA_ROOT
     / "trading"
     / "execution_mission_records.json"
 )
 
 MISSION_EVIDENCE_STORAGE_PATH = (
-    Path("data")
+    TODOBA_CONTROL_PLANE_DATA_ROOT
     / "trading"
     / "execution_mission_evidence.json"
 )
 
 MISSION_DELIVERY_LEASE_STORAGE_PATH = (
-    Path("data")
+    TODOBA_CONTROL_PLANE_DATA_ROOT
     / "trading"
     / "execution_mission_delivery_leases.json"
 )
 
 CONTROL_MISSION_STORAGE_PATH = (
-    Path("data")
+    TODOBA_CONTROL_PLANE_DATA_ROOT
     / "trading"
     / "control_missions.json"
 )
 
 CONTROL_MISSION_RECORD_STORAGE_PATH = (
-    Path("data")
+    TODOBA_CONTROL_PLANE_DATA_ROOT
     / "trading"
     / "control_mission_records.json"
 )
 
 CONTROL_MISSION_DELIVERY_LEASE_STORAGE_PATH = (
-    Path("data")
+    TODOBA_CONTROL_PLANE_DATA_ROOT
     / "trading"
     / "control_mission_delivery_leases.json"
 )
 
 EXECUTION_SECURITY_SEQUENCE_STORAGE_PATH = (
-    Path("data")
+    TODOBA_CONTROL_PLANE_DATA_ROOT
     / "trading"
     / "execution_security_sequence.json"
 )
 
 EXECUTION_SECURITY_SEQUENCE_BINDING_STORAGE_PATH = (
-    Path("data")
+    TODOBA_CONTROL_PLANE_DATA_ROOT
     / "trading"
     / "execution_security_sequence_bindings.json"
 )
 
 CONTROL_SECURITY_SEQUENCE_STORAGE_PATH = (
-    Path("data")
+    TODOBA_CONTROL_PLANE_DATA_ROOT
     / "trading"
     / "control_security_sequence.json"
 )
 
 CONTROL_SECURITY_SEQUENCE_BINDING_STORAGE_PATH = (
-    Path("data")
+    TODOBA_CONTROL_PLANE_DATA_ROOT
     / "trading"
     / "control_security_sequence_bindings.json"
 )

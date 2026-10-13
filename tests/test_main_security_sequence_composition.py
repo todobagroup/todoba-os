@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from backend.main import (
+    TODOBA_CONTROL_PLANE_DATA_ROOT,
     CONTROL_SECURITY_SEQUENCE_BINDING_STORAGE_PATH,
     CONTROL_SECURITY_SEQUENCE_STORAGE_PATH,
     EXECUTION_SECURITY_SEQUENCE_BINDING_STORAGE_PATH,
@@ -104,25 +105,25 @@ def test_main_composes_independent_security_sequence_domains() -> None:
 
 def test_main_uses_separate_persistent_security_storage_paths() -> None:
     assert EXECUTION_SECURITY_SEQUENCE_STORAGE_PATH == (
-        Path("data")
+        TODOBA_CONTROL_PLANE_DATA_ROOT
         / "trading"
         / "execution_security_sequence.json"
     )
 
     assert EXECUTION_SECURITY_SEQUENCE_BINDING_STORAGE_PATH == (
-        Path("data")
+        TODOBA_CONTROL_PLANE_DATA_ROOT
         / "trading"
         / "execution_security_sequence_bindings.json"
     )
 
     assert CONTROL_SECURITY_SEQUENCE_STORAGE_PATH == (
-        Path("data")
+        TODOBA_CONTROL_PLANE_DATA_ROOT
         / "trading"
         / "control_security_sequence.json"
     )
 
     assert CONTROL_SECURITY_SEQUENCE_BINDING_STORAGE_PATH == (
-        Path("data")
+        TODOBA_CONTROL_PLANE_DATA_ROOT
         / "trading"
         / "control_security_sequence_bindings.json"
     )

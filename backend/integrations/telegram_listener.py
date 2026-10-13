@@ -153,7 +153,7 @@ TRUSTED_AGENT_ACCOUNT_BINDING_STORAGE_PATH = (
 )
 
 TELEGRAM_DISPATCH_PROGRESS_STORAGE_PATH = (
-    Path("data")
+    TODOBA_CONTROL_PLANE_DATA_ROOT
     / "trading"
     / "telegram_dispatch_progress.json"
 )

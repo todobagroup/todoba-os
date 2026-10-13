@@ -281,12 +281,7 @@ def test_expired_pending_mission_is_not_sent_and_becomes_durably_expired(
 
     restored_store = (
         TelegramDispatchProgressStore(
-            storage_path=(
-                tmp_path
-                / "data"
-                / "trading"
-                / "telegram_dispatch_progress.json"
-            )
+            storage_path=listener.TELEGRAM_DISPATCH_PROGRESS_STORAGE_PATH
         )
     )
 

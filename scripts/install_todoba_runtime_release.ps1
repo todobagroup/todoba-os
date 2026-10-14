@@ -5,7 +5,9 @@
     [Parameter(Mandatory = $true)]
     [string]$InstallRoot,
 
-    [switch]$ValidateOnly
+    [switch]$ValidateOnly,
+
+    [switch]$AdditionalRelease
 )
 
 # TODOBA Production Runtime Release Installer
@@ -410,10 +412,72 @@ if (
     throw "Versioned release already exists."
 }
 
-if (
-    Test-Path `
-        -LiteralPath $currentPath
-) {
+if ($AdditionalRelease) {
+    if (-not (Test-Path -LiteralPath $currentPath)) {
+        throw "Additional release requires an existing current junction."
+    }
+
+    $currentItem = Get-Item -LiteralPath $currentPath -Force -ErrorAction Stop
+
+    if (-not (
+        $currentItem.Attributes -band
+        [System.IO.FileAttributes]::ReparsePoint
+    )) {
+        throw "Current release path is not a reparse-point junction."
+    }
+
+    $currentTargets = @($currentItem.Target)
+
+    if ($currentTargets.Count -ne 1 -or
+        [string]::IsNullOrWhiteSpace([string]$currentTargets[0])) {
+        throw "Current junction target is ambiguous."
+    }
+
+    $currentBaselineTarget = (
+        [System.IO.Path]::GetFullPath([string]$currentTargets[0])
+    ).TrimEnd('\', '/')
+
+    $releasesPrefix = (
+        [System.IO.Path]::GetFullPath($releasesRoot)
+    ).TrimEnd('\', '/') + '\'
+
+    if (-not $currentBaselineTarget.StartsWith(
+        $releasesPrefix,
+        [System.StringComparison]::OrdinalIgnoreCase
+    )) {
+        throw "Current junction is outside installed releases."
+    }
+
+    $currentBaselineId = [System.IO.Path]::GetFileName(
+        $currentBaselineTarget
+    )
+
+    if ($currentBaselineId -notmatch '^[0-9a-f]{40}$') {
+        throw "Current junction target has invalid release identity."
+    }
+
+    $expectedCurrentTarget = (
+        [System.IO.Path]::GetFullPath(
+            (Join-Path $releasesRoot $currentBaselineId)
+        )
+    ).TrimEnd('\', '/')
+
+    if (-not [string]::Equals(
+        $currentBaselineTarget,
+        $expectedCurrentTarget,
+        [System.StringComparison]::OrdinalIgnoreCase
+    )) {
+        throw "Current junction target is not a direct installed release."
+    }
+
+    $verifiedCurrentId = Test-TodobaReleaseIntegrity `
+        -Root $currentBaselineTarget
+
+    if ($verifiedCurrentId -cne $currentBaselineId) {
+        throw "Current installed release integrity mismatch."
+    }
+}
+elseif (Test-Path -LiteralPath $currentPath) {
     throw (
         "Current release path already exists. " +
         "Release switching is owned by a separate capability."
@@ -518,6 +582,59 @@ try {
         throw "Published release identity verification failed."
     }
 
+    if ($AdditionalRelease) {
+        $currentAfter = Get-Item `
+            -LiteralPath $currentPath `
+            -Force `
+            -ErrorAction Stop
+
+        if (-not (
+            $currentAfter.Attributes -band
+            [System.IO.FileAttributes]::ReparsePoint
+        )) {
+            throw "Current junction was replaced during installation."
+        }
+
+        $afterTargets = @($currentAfter.Target)
+
+        if ($afterTargets.Count -ne 1) {
+            throw "Current junction target changed during installation."
+        }
+
+        $afterTarget = (
+            [System.IO.Path]::GetFullPath([string]$afterTargets[0])
+        ).TrimEnd('\', '/')
+
+        if (-not [string]::Equals(
+            $afterTarget,
+            $currentBaselineTarget,
+            [System.StringComparison]::OrdinalIgnoreCase
+        )) {
+            throw "Current junction changed during installation."
+        }
+
+        $currentVersionAfter = (
+            Get-Content `
+                -LiteralPath (Join-Path $currentPath "VERSION") `
+                -Raw `
+                -ErrorAction Stop
+        ).Trim()
+
+        if ($currentVersionAfter -cne $currentBaselineId) {
+            throw "Current release identity changed during installation."
+        }
+
+        Write-Output "TODOBA_RUNTIME_RELEASE_INSTALLED=TRUE"
+        Write-Output "RELEASE_ID=$releaseId"
+        Write-Output "VERSIONED_RELEASE=$installedReleasePath"
+        Write-Output "CURRENT_PATH=$currentPath"
+        Write-Output "CURRENT_UNCHANGED=TRUE"
+        Write-Output "TASK_MUTATION=NONE"
+        Write-Output "PROCESS_MUTATION=NONE"
+        Write-Output "ENVIRONMENT_MUTATION=NONE"
+        return
+    }
+
     if (
         Test-Path `
             -LiteralPath $currentPath
@@ -593,6 +710,12 @@ catch {
             -LiteralPath $currentPath `
             -Force `
             -ErrorAction SilentlyContinue
+    }
+
+    if ($AdditionalRelease -and $published) {
+        Write-Output "TODOBA_ADDITIONAL_RELEASE_POST_PUBLISH_FAILURE=TRUE"
+        Write-Output "VERSIONED_RELEASE=$installedReleasePath"
+        Write-Output "RECOVERY_REQUIRES_INSPECTION=TRUE"
     }
 
     throw

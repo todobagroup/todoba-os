@@ -399,7 +399,36 @@ function Get-TodobaComponentProcess {
                 )
             }
 
-            $isPython -and $hasModule
+            $hasExpectedExecutable = $false
+
+            if (
+                $isPython -and
+                $hasModule -and
+                -not [string]::IsNullOrWhiteSpace(
+                    $_.ExecutablePath
+                )
+            ) {
+                try {
+                    $candidatePath = (
+                        [System.IO.Path]::GetFullPath(
+                            $_.ExecutablePath
+                        )
+                    )
+
+                    $hasExpectedExecutable = (
+                        [string]::Equals(
+                            $candidatePath,
+                            $pythonPath,
+                            [System.StringComparison]::OrdinalIgnoreCase
+                        )
+                    )
+                }
+                catch {
+                    $hasExpectedExecutable = $false
+                }
+            }
+
+            $isPython -and $hasModule -and $hasExpectedExecutable
         }
     )
 

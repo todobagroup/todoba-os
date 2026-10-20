@@ -653,3 +653,260 @@ def test_remote_vps_rejects_untrusted_broker_state(
     assert len(
         fake_http_client.sent_missions
     ) == 0
+
+
+def test_remote_vps_rejects_same_trade_intent_with_new_message_id(
+    monkeypatch: pytest.MonkeyPatch,
+    commercial_executor_fleet,
+    tmp_path: Path,
+) -> None:
+    """Same recent trade intent must not dispatch twice for one target."""
+
+    listener = load_remote_listener(
+        monkeypatch,
+        commercial_executor_fleet,
+        tmp_path,
+    )
+
+    fake_http_client = FakeRemoteHttpClient()
+    monkeypatch.setattr(
+        listener,
+        "remote_http_client",
+        fake_http_client,
+        raising=False,
+    )
+    listener.processed_message_keys.clear()
+
+    first_time = datetime.now(UTC)
+
+    def make_signal(message_id: int, received_at: datetime):
+        return IncomingSignal(
+            source="telegram",
+            message=(
+                "BUY GOLD NOW\n"
+                "SL: 4320\n"
+                "TP: 4410"
+            ),
+            sender="synthetic-dedup-proof",
+            sender_id=1,
+            chat_id=-1001,
+            message_id=message_id,
+            received_at=received_at,
+        )
+
+    first = listener.process_remote_vps_signal(
+        make_signal(168901, first_time)
+    )
+
+    second = listener.process_remote_vps_signal(
+        make_signal(
+            168902,
+            first_time + timedelta(seconds=10),
+        )
+    )
+
+    assert first["status"] == "submitted"
+    assert len(fake_http_client.sent_missions) == 1, (
+        "DUPLICATE_TRADE_INTENT_CREATED_SECOND_MISSION"
+    )
+    assert second["status"] != "submitted"
+
+
+def test_timeout_restart_new_telegram_id_preserves_pending_mission(
+    monkeypatch: pytest.MonkeyPatch,
+    commercial_executor_fleet,
+    tmp_path: Path,
+) -> None:
+    """HTTP timeout plus restart must not issue a new mission ID."""
+
+    from backend.integrations.telegram_dispatch_progress_store import (
+        TelegramDispatchProgressStore,
+        TelegramDispatchStatus,
+    )
+
+    listener = load_remote_listener(
+        monkeypatch,
+        commercial_executor_fleet,
+        tmp_path,
+    )
+
+    fake_http_client = FakeRemoteHttpClient()
+    send_attempts = []
+
+    def timeout_send(mission):
+        send_attempts.append(mission.mission_id)
+        raise TimeoutError("synthetic HTTP response timeout")
+
+    monkeypatch.setattr(
+        fake_http_client,
+        "send",
+        timeout_send,
+    )
+    monkeypatch.setattr(
+        listener,
+        "remote_http_client",
+        fake_http_client,
+        raising=False,
+    )
+
+    listener.processed_message_keys.clear()
+
+    received_at = datetime.now(UTC)
+
+    def incoming(message_id: int) -> IncomingSignal:
+        return IncomingSignal(
+            source="telegram",
+            message=(
+                "BUY GOLD NOW\n"
+                "SL: 4320\n"
+                "TP: 4410"
+            ),
+            sender="synthetic-timeout-proof",
+            sender_id=1,
+            chat_id=-1001,
+            message_id=message_id,
+            received_at=received_at,
+        )
+
+    first = listener.process_remote_vps_signal(
+        incoming(169101)
+    )
+
+    assert first["status"] != "submitted"
+    assert first["target_results"][0]["status"] == (
+        "transport_failed"
+    )
+    assert len(send_attempts) == 1
+
+    original_store = listener.remote_dispatch_progress_store
+    original = original_store.get(
+        chat_id=-1001,
+        message_id=169101,
+        agent_id="trusted-agent-001",
+    )
+
+    assert original is not None
+    assert original.status == TelegramDispatchStatus.PENDING
+
+    original_mission_id = original.mission.mission_id
+
+    # Simulate a restart of durable dispatch state.
+    restored_store = TelegramDispatchProgressStore(
+        storage_path=original_store.storage_path,
+    )
+
+    monkeypatch.setattr(
+        listener,
+        "remote_dispatch_progress_store",
+        restored_store,
+    )
+    listener.processed_message_keys.clear()
+
+    second = listener.process_remote_vps_signal(
+        incoming(169102)
+    )
+
+    assert second["status"] == "duplicate"
+    assert len(send_attempts) == 1, (
+        "DUPLICATE_TRIGGERED_NEW_HTTP_DISPATCH"
+    )
+    assert restored_store.size() == 1, (
+        "DUPLICATE_CREATED_SECOND_PENDING_MISSION"
+    )
+
+    persisted = restored_store.get(
+        chat_id=-1001,
+        message_id=169101,
+        agent_id="trusted-agent-001",
+    )
+
+    assert persisted is not None
+    assert persisted.status == TelegramDispatchStatus.PENDING
+    assert persisted.mission.mission_id == original_mission_id
+
+def test_listener_blocks_http_when_persistence_commit_is_replaced(
+    monkeypatch: pytest.MonkeyPatch,
+    commercial_executor_fleet,
+    tmp_path: Path,
+) -> None:
+    """A failed durable prepare must never authorize HTTP dispatch."""
+    import os
+    from unittest.mock import patch
+
+    from backend.integrations.telegram_dispatch_progress_store import (
+        TelegramDispatchProgressStore,
+    )
+
+    listener = load_remote_listener(
+        monkeypatch,
+        commercial_executor_fleet,
+        tmp_path,
+    )
+
+    fake_http_client = FakeRemoteHttpClient()
+    monkeypatch.setattr(
+        listener,
+        "remote_http_client",
+        fake_http_client,
+        raising=False,
+    )
+
+    listener.processed_message_keys.clear()
+
+    store = listener.remote_dispatch_progress_store
+    storage = store.storage_path
+    temporary = storage.with_name(storage.name + ".tmp")
+
+    replacement = tmp_path / "r196_synthetic_replacement.json"
+    replacement.write_text("[]", encoding="utf-8")
+
+    original_replace = Path.replace
+    injected = False
+
+    def replace_with_race(self, target):
+        nonlocal injected
+
+        if self == temporary and Path(target) == storage:
+            assert self.exists(), "DISPATCH_TEMP_NOT_CREATED"
+            assert replacement.exists(), "REPLACEMENT_MISSING"
+            os.replace(replacement, temporary)
+            injected = True
+
+        return original_replace(self, target)
+
+    incoming = IncomingSignal(
+        source="telegram",
+        message=(
+            "BUY GOLD NOW\n"
+            "SL: 4320\n"
+            "TP: 4410"
+        ),
+        sender="synthetic-persistence-failure",
+        sender_id=1,
+        chat_id=-1001,
+        message_id=196001,
+        received_at=datetime.now(UTC),
+    )
+
+    with patch.object(Path, "replace", replace_with_race):
+        with pytest.raises(
+            RuntimeError,
+            match="DISPATCH_PERSISTENCE_VERIFY_FAILED",
+        ):
+            listener.process_remote_vps_signal(incoming)
+
+    assert injected, "RACE_INJECTION_DID_NOT_EXECUTE"
+    assert fake_http_client.sent_missions == [], (
+        "HTTP_DISPATCH_OCCURRED_WITHOUT_DURABLE_MISSION"
+    )
+
+    restored_store = TelegramDispatchProgressStore(
+        storage_path=storage,
+    )
+
+    assert restored_store.size() == 0, (
+        "UNEXPECTED_DURABLE_MISSION_AFTER_FAILED_COMMIT"
+    )
+    assert store.size() == 0, (
+        "UNVERIFIED_MISSION_REMAINED_IN_MEMORY"
+    )

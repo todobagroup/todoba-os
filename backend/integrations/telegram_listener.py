@@ -872,13 +872,25 @@ def process_remote_vps_signal(
                 )
             )
 
-            prepared_progress = (
-                remote_dispatch_progress_store.prepare(
-                    chat_id=chat_id,
-                    message_id=message_id,
-                    mission=mission,
+            try:
+                prepared_progress = (
+                    remote_dispatch_progress_store.prepare(
+                        chat_id=chat_id,
+                        message_id=message_id,
+                        mission=mission,
+                    )
                 )
-            )
+            except ValueError as error:
+                if str(error) != "DUPLICATE_TRADE_INTENT":
+                    raise
+
+                target_results.append(
+                    {
+                        "agent_id": target.agent_id,
+                        "status": "duplicate",
+                    }
+                )
+                continue
 
             try:
                 cloud_response = (
@@ -933,6 +945,14 @@ def process_remote_vps_signal(
             overall_status = (
                 "partially_submitted"
             )
+        elif (
+            target_results
+            and all(
+                result["status"] == "duplicate"
+                for result in target_results
+            )
+        ):
+            overall_status = "duplicate"
         else:
             overall_status = "rejected"
 

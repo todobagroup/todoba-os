@@ -20,6 +20,12 @@ This component does not:
 """
 
 from dataclasses import dataclass
+from contextlib import contextmanager
+from functools import wraps
+import errno
+import msvcrt
+import os
+import time
 from enum import Enum
 import json
 from pathlib import Path
@@ -51,6 +57,25 @@ class TelegramDispatchProgress:
     agent_id: str
     mission: ExecutionMission
     status: TelegramDispatchStatus
+
+
+def _serialized_mutation(operation):
+    @wraps(operation)
+    def guarded(self, *args, **kwargs):
+        with self._exclusive_storage_lock():
+            # Reload within the OS lock, never use a stale
+            # in-memory snapshot to authorize dispatch.
+            self._progress.clear()
+            self._restore()
+
+            try:
+                return operation(self, *args, **kwargs)
+            except Exception:
+                self._progress.clear()
+                self._restore()
+                raise
+
+    return guarded
 
 
 class TelegramDispatchProgressStore:
@@ -231,22 +256,56 @@ class TelegramDispatchProgressStore:
             )
         )
 
+        temporary_created = False
+
         try:
-            temporary_path.write_text(
-                json.dumps(
-                    payload,
-                    indent=2,
-                    ensure_ascii=False,
-                ),
+            # Exclusive creation prevents overwriting a
+            # preexisting hard link, symlink or regular file.
+            with temporary_path.open(
+                "x",
                 encoding="utf-8",
-            )
+                newline="\n",
+            ) as handle:
+                temporary_created = True
+                handle.write(
+                    json.dumps(
+                        payload,
+                        indent=2,
+                        ensure_ascii=False,
+                    )
+                )
+                handle.flush()
+                os.fsync(handle.fileno())
 
             temporary_path.replace(
                 self.storage_path
             )
+            temporary_created = False
+
+            # Verify the committed bytes before acknowledging
+            # that the mission has been durably prepared.
+            expected_bytes = json.dumps(
+                payload,
+                indent=2,
+                ensure_ascii=False,
+            ).encode("utf-8")
+
+            try:
+                committed_bytes = self.storage_path.read_bytes()
+            except OSError as error:
+                raise RuntimeError(
+                    "DISPATCH_PERSISTENCE_VERIFY_FAILED"
+                ) from error
+
+            if committed_bytes != expected_bytes:
+                raise RuntimeError(
+                    "DISPATCH_PERSISTENCE_VERIFY_FAILED"
+                )
 
         except Exception:
-            if temporary_path.exists():
+            # Never delete an existing path that this
+            # operation did not successfully create.
+            if temporary_created and temporary_path.exists():
                 temporary_path.unlink()
 
             raise
@@ -334,6 +393,136 @@ class TelegramDispatchProgressStore:
             restored
         )
 
+    @staticmethod
+    def _intent_identity(mission: ExecutionMission) -> tuple:
+        return (
+            mission.account_fingerprint,
+            mission.symbol,
+            mission.order_type,
+            mission.entry,
+            mission.sl,
+            mission.tp,
+        )
+
+    def _reject_recent_duplicate_intent(
+        self,
+        mission: ExecutionMission,
+    ) -> None:
+        from datetime import datetime, timedelta, timezone
+
+        def parse_time(value: str) -> datetime:
+            parsed = datetime.fromisoformat(
+                value.replace("Z", "+00:00")
+            )
+            if parsed.tzinfo is None:
+                raise ValueError("TRADE_INTENT_TIME_MISSING_TIMEZONE")
+            return parsed.astimezone(timezone.utc)
+
+        candidate_time = parse_time(mission.created_at)
+        candidate_identity = self._intent_identity(mission)
+
+        for previous in self._progress.values():
+            if previous.status not in {
+                TelegramDispatchStatus.PENDING,
+                TelegramDispatchStatus.SUBMITTED,
+            }:
+                continue
+
+            if self._intent_identity(previous.mission) != candidate_identity:
+                continue
+
+            age = candidate_time - parse_time(
+                previous.mission.created_at
+            )
+
+            if age <= timedelta(minutes=10):
+                raise ValueError("DUPLICATE_TRADE_INTENT")
+
+    @contextmanager
+    def _exclusive_storage_lock(self):
+        lock_path = self.storage_path.with_name(
+            self.storage_path.name + ".lock"
+        )
+        parent = lock_path.parent
+
+        # Refuse redirects at every ancestor, not merely
+        # the direct parent of the dispatch lock file.
+        for ancestor in (parent, *parent.parents):
+            if (
+                ancestor.is_symlink()
+                or os.path.isjunction(ancestor)
+            ):
+                raise RuntimeError(
+                    "DISPATCH_LOCK_ANCESTOR_REPARSE_POINT"
+                )
+
+        parent.mkdir(parents=True, exist_ok=True)
+
+        if (
+            parent.is_symlink()
+            or os.path.isjunction(parent)
+            or not parent.is_dir()
+        ):
+            raise RuntimeError("DISPATCH_LOCK_PARENT_UNSAFE")
+
+        if lock_path.is_symlink() or os.path.isjunction(lock_path):
+            raise RuntimeError("DISPATCH_LOCK_FILE_REPARSE_POINT")
+
+        if lock_path.exists() and (
+            not lock_path.is_file()
+            or lock_path.stat().st_size != 0
+        ):
+            raise RuntimeError("DISPATCH_LOCK_FILE_UNSAFE")
+
+        handle = lock_path.open("a+b", buffering=0)
+        locked = False
+
+        try:
+            if (
+                lock_path.is_symlink()
+                or os.path.isjunction(lock_path)
+                or not lock_path.is_file()
+                or lock_path.stat().st_size != 0
+            ):
+                raise RuntimeError("DISPATCH_LOCK_FILE_UNSAFE")
+
+            for attempt in range(40):
+                try:
+                    handle.seek(0)
+                    msvcrt.locking(
+                        handle.fileno(),
+                        msvcrt.LK_NBLCK,
+                        1,
+                    )
+                    locked = True
+                    break
+                except OSError as error:
+                    if error.errno not in {
+                        errno.EACCES,
+                        errno.EAGAIN,
+                        errno.EDEADLK,
+                    }:
+                        raise
+                    if attempt < 39:
+                        time.sleep(0.05)
+
+            if not locked:
+                raise RuntimeError("DISPATCH_STORAGE_LOCK_UNAVAILABLE")
+
+            yield
+        finally:
+            try:
+                if locked:
+                    handle.seek(0)
+                    msvcrt.locking(
+                        handle.fileno(),
+                        msvcrt.LK_UNLCK,
+                        1,
+                    )
+            finally:
+                handle.close()
+
+    @_serialized_mutation
     def prepare(
         self,
         *,
@@ -366,6 +555,8 @@ class TelegramDispatchProgressStore:
                 )
 
             return existing
+
+        self._reject_recent_duplicate_intent(mission)
 
         progress = TelegramDispatchProgress(
             chat_id=key[0],
@@ -407,6 +598,7 @@ class TelegramDispatchProgressStore:
             key
         )
 
+    @_serialized_mutation
     def mark_submitted(
         self,
         *,
@@ -468,6 +660,7 @@ class TelegramDispatchProgressStore:
 
         return submitted
 
+    @_serialized_mutation
     def mark_expired(
         self,
         *,
@@ -535,6 +728,7 @@ class TelegramDispatchProgressStore:
 
         return expired
 
+    @_serialized_mutation
     def mark_invalid_target(
         self,
         *,
